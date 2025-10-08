@@ -1,4 +1,4 @@
-# CoHabit
+# Padly
 
 A trusted platform for students, interns, and early-career professionals to find housing and compatible roommates.
 
@@ -6,7 +6,7 @@ A trusted platform for students, interns, and early-career professionals to find
 
 ## **Project Vision**
 
-The mission of CoHabit is to eliminate the stress and fragmentation of finding housing during pivotal career and life transitions. We are building a centralized, secure, and user-centric platform that connects a community of peers, landlords, and subletters, enabling them to transact with confidence and ease.
+The mission of Padly is to eliminate the stress and fragmentation of finding housing during pivotal career and life transitions. We are building a centralized, secure, and user-centric platform that connects a community of peers, landlords, and subletters, enabling them to transact with confidence and ease.
 
 ## **The Problem**
 
@@ -19,7 +19,7 @@ Relocating for an internship, a new job, or simply moving to a new city is a def
 
 ## **Our Solution: A Centralized & Trusted Ecosystem**
 
-CoHabit will be a dedicated platform that streamlines the entire housing search process. It serves as a single point of contact for discovering listings, finding like-minded roommates, and communicating securely.
+Padly will be a dedicated platform that streamlines the entire housing search process. It serves as a single point of contact for discovering listings, finding like-minded roommates, and communicating securely.
 
 Our core value proposition is **trust**. By focusing on verification and building a community around professional and academic affiliations, we provide a safer and more reliable alternative to the open web.
 
@@ -78,4 +78,4 @@ To ensure we build an intuitive product, we must focus on this primary user flow
 
 ## **Future Vision**
 
-While the immediate goal is to perfect the housing search, CoHabit has the potential to become a broader community hub for students and professionals. Future phases could include features like local meetups, shared community guides, and integrated rental payment processing.
+While the immediate goal is to perfect the housing search, Padly has the potential to become a broader community hub for students and professionals. Future phases could include features like local meetups, shared community guides, and integrated rental payment processing.
