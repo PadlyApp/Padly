@@ -1,0 +1,126 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.group_members (
+  group_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  is_creator boolean DEFAULT false,
+  joined_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT group_members_pkey PRIMARY KEY (group_id, user_id),
+  CONSTRAINT group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.roommate_groups(id),
+  CONSTRAINT group_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.listing_photos (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  listing_id uuid NOT NULL,
+  photo_url text NOT NULL,
+  caption text,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT listing_photos_pkey PRIMARY KEY (id),
+  CONSTRAINT listing_photos_listing_id_fkey FOREIGN KEY (listing_id) REFERENCES public.listings(id)
+);
+CREATE TABLE public.listings (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  host_user_id uuid NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'draft'::listing_status,
+  title text NOT NULL,
+  description text NOT NULL,
+  property_type USER-DEFINED NOT NULL,
+  lease_type USER-DEFINED NOT NULL,
+  lease_duration_months integer,
+  number_of_bedrooms integer,
+  number_of_bathrooms numeric,
+  area_sqft integer,
+  furnished boolean DEFAULT false,
+  price_per_month numeric NOT NULL,
+  utilities_included boolean DEFAULT false,
+  deposit_amount numeric,
+  address_line_1 text,
+  address_line_2 text,
+  city text NOT NULL,
+  state_province text,
+  postal_code text,
+  country text DEFAULT 'USA'::text,
+  latitude numeric,
+  longitude numeric,
+  available_from date NOT NULL,
+  available_to date,
+  amenities jsonb,
+  house_rules text,
+  shared_spaces ARRAY,
+  view_count integer DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT listings_pkey PRIMARY KEY (id),
+  CONSTRAINT listings_host_user_id_fkey FOREIGN KEY (host_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.personal_preferences (
+  user_id uuid NOT NULL,
+  target_city text,
+  budget_min numeric,
+  budget_max numeric,
+  move_in_date date,
+  lifestyle_preferences jsonb,
+  preferred_neighborhoods ARRAY,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT personal_preferences_pkey PRIMARY KEY (user_id),
+  CONSTRAINT personal_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.roommate_groups (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  creator_user_id uuid NOT NULL,
+  group_name text NOT NULL,
+  description text,
+  target_city text NOT NULL,
+  budget_per_person_min numeric,
+  budget_per_person_max numeric,
+  target_move_in_date date,
+  target_group_size integer NOT NULL DEFAULT 2,
+  status USER-DEFINED NOT NULL DEFAULT 'active'::post_status,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT roommate_groups_pkey PRIMARY KEY (id),
+  CONSTRAINT roommate_groups_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.roommate_posts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  status USER-DEFINED NOT NULL DEFAULT 'active'::post_status,
+  title text NOT NULL,
+  description text NOT NULL,
+  target_city text NOT NULL,
+  preferred_neighborhoods ARRAY,
+  budget_min numeric NOT NULL,
+  budget_max numeric NOT NULL,
+  move_in_date date NOT NULL,
+  lease_duration_months integer,
+  looking_for_property_type USER-DEFINED,
+  looking_for_roommates boolean DEFAULT true,
+  preferred_roommate_count integer,
+  view_count integer DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT roommate_posts_pkey PRIMARY KEY (id),
+  CONSTRAINT roommate_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.users (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  auth_id uuid UNIQUE,
+  email text NOT NULL UNIQUE,
+  full_name text NOT NULL,
+  bio text,
+  profile_picture_url text,
+  role USER-DEFINED NOT NULL DEFAULT 'renter'::user_role,
+  company_name text,
+  school_name text,
+  role_title text,
+  verification_status USER-DEFINED NOT NULL DEFAULT 'unverified'::verification_status,
+  verification_type USER-DEFINED,
+  verified_email text,
+  verified_at timestamp with time zone,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  last_active_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT users_pkey PRIMARY KEY (id)
+);
