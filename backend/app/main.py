@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Optional
 from app.db import supabase
 from app.models import (
     UserResponse,
@@ -8,6 +8,7 @@ from app.models import (
     RoommatePostResponse,
     SuccessResponse
 )
+from app.routes import users_router, listings_router, admin_router
 
 app = FastAPI(title="Padly API", version="1.0.0")
 
@@ -19,6 +20,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(users_router)
+app.include_router(listings_router)
+app.include_router(admin_router)
 
 @app.get("/")
 async def root():
@@ -59,12 +65,45 @@ async def test_database():
 @app.get("/debug-config")
 async def debug_config():
     """Debug endpoint to check configuration"""
-    from app.db import SUPABASE_URL, SUPABASE_SERVICE_KEY
+    from app.db import (
+        SUPABASE_URL, 
+        SUPABASE_ANON_KEY, 
+        SUPABASE_SERVICE_KEY,
+        VERIFY_JWT,
+        supabase_admin,
+        supabase_anon
+    )
     return {
         "supabase_url": SUPABASE_URL,
+        "anon_key_present": bool(SUPABASE_ANON_KEY),
+        "anon_key_prefix": SUPABASE_ANON_KEY[:20] + "..." if SUPABASE_ANON_KEY else None,
         "service_key_present": bool(SUPABASE_SERVICE_KEY),
         "service_key_prefix": SUPABASE_SERVICE_KEY[:20] + "..." if SUPABASE_SERVICE_KEY else None,
-        "using_service_role": "service_role" in SUPABASE_SERVICE_KEY if SUPABASE_SERVICE_KEY else False
+        "verify_jwt": VERIFY_JWT,
+        "admin_client_initialized": supabase_admin is not None,
+        "anon_client_initialized": supabase_anon is not None
+    }
+
+@app.get("/debug-client-factory")
+async def debug_client_factory(authorization: Optional[str] = Header(None)):
+    """Test client factory with and without JWT"""
+    from app.dependencies.auth import get_user_token
+    from app.dependencies.supabase import get_user_client, get_admin_client
+    
+    # Test token extraction
+    token = await get_user_token(authorization)
+    
+    # Test client creation
+    user_client = get_user_client(token)
+    admin_client = get_admin_client()
+    
+    return {
+        "token_extracted": bool(token),
+        "token_prefix": token[:20] + "..." if token else None,
+        "user_client_created": user_client is not None,
+        "admin_client_created": admin_client is not None,
+        "user_client_url": user_client.supabase_url if user_client else None,
+        "admin_client_url": admin_client.supabase_url if admin_client else None
     }
 
 @app.get("/users", response_model=SuccessResponse)
