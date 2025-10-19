@@ -1,6 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
 from app.db import supabase
+from app.models import (
+    UserResponse,
+    ListingResponse,
+    RoommatePostResponse,
+    SuccessResponse
+)
 
 app = FastAPI(title="Padly API", version="1.0.0")
 
@@ -48,4 +55,47 @@ async def test_database():
             "message": f"Database connection failed: {str(e)}",
             "connected": False
         }
+
+@app.get("/debug-config")
+async def debug_config():
+    """Debug endpoint to check configuration"""
+    from app.db import SUPABASE_URL, SUPABASE_SERVICE_KEY
+    return {
+        "supabase_url": SUPABASE_URL,
+        "service_key_present": bool(SUPABASE_SERVICE_KEY),
+        "service_key_prefix": SUPABASE_SERVICE_KEY[:20] + "..." if SUPABASE_SERVICE_KEY else None,
+        "using_service_role": "service_role" in SUPABASE_SERVICE_KEY if SUPABASE_SERVICE_KEY else False
+    }
+
+@app.get("/users", response_model=SuccessResponse)
+async def get_users():
+    """Fetch all users from the database"""
+    try:
+        response = supabase.table('users').select("*").execute()
+        return {
+            "status": "success",
+            "message": "Users fetched successfully",
+            "data": {
+                "count": len(response.data),
+                "users": response.data
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/listings", response_model=SuccessResponse)
+async def get_listings():
+    """Fetch all active listings from the database"""
+    try:
+        response = supabase.table('listings').select("*").execute()
+        return {
+            "status": "success",
+            "message": "Listings fetched successfully",
+            "data": {
+                "count": len(response.data),
+                "listings": response.data
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
