@@ -8,7 +8,7 @@ from app.models import (
     RoommatePostResponse,
     SuccessResponse
 )
-from app.routes import users_router, listings_router, admin_router
+from app.routes import users_router, listings_router, admin_router, auth_router
 
 app = FastAPI(title="Padly API", version="1.0.0")
 
@@ -22,6 +22,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(listings_router)
 app.include_router(admin_router)
