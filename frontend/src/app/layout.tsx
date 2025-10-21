@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "./contexts/AuthContext";
+import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
+import '@mantine/core/styles.css';
+import '@mantine/notifications/styles.css';
 
 export const metadata: Metadata = {
   title: "Padly",
@@ -13,7 +18,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <MantineProvider>
+          <Notifications />
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </MantineProvider>
+      </body>
     </html>
   );
 }
