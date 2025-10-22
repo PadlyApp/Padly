@@ -2,8 +2,17 @@
 
 import { Container, Title, Text, Stack, Box } from '@mantine/core';
 import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
 
 export default function AccountPage() {
+  return (
+    <ProtectedRoute>
+      <AccountPageContent />
+    </ProtectedRoute>
+  );
+}
+
+function AccountPageContent() {
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />

@@ -4,7 +4,8 @@ Manage user housing and roommate preferences
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from typing import Optional, Any
+from datetime import date, datetime
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import (
@@ -18,10 +19,24 @@ import json
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
 
+def convert_dates_to_strings(obj: Any) -> Any:
+    """Recursively convert date/datetime objects to ISO format strings"""
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: convert_dates_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_dates_to_strings(item) for item in obj]
+    return obj
+
+
 def serialize_preferences(prefs_data: dict) -> dict:
     """Convert nested preference objects to proper format for storage"""
     if not prefs_data:
         return prefs_data
+    
+    # Convert all dates to strings first
+    prefs_data = convert_dates_to_strings(prefs_data)
     
     # Build the lifestyle_preferences JSONB field
     lifestyle_prefs = {}
@@ -45,7 +60,7 @@ def serialize_preferences(prefs_data: dict) -> dict:
         "target_city": prefs_data.get("target_city"),
         "budget_min": prefs_data.get("budget_min"),
         "budget_max": prefs_data.get("budget_max"),
-        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods"),
+        # preferred_neighborhoods removed - not used
         "lifestyle_preferences": lifestyle_prefs if lifestyle_prefs else None
     }
     
@@ -68,7 +83,7 @@ def deserialize_preferences(db_data: dict) -> dict:
         "target_city": db_data.get("target_city"),
         "budget_min": db_data.get("budget_min"),
         "budget_max": db_data.get("budget_max"),
-        "preferred_neighborhoods": db_data.get("preferred_neighborhoods"),
+        # preferred_neighborhoods removed - not used
         "updated_at": db_data.get("updated_at")
     }
     
