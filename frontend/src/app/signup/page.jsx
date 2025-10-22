@@ -41,7 +41,7 @@ export default function SignupPage() {
     },
   });
 
-  const handleSubmit = async (values: typeof form.values) => {
+  const handleSubmit = async (values) => {
     setIsLoading(true);
 
     try {
@@ -52,7 +52,7 @@ export default function SignupPage() {
         color: 'green',
       });
       router.push('/');
-    } catch (err: any) {
+    } catch (err) {
       // Check if it's an email confirmation message
       if (err.message && err.message.includes('check your email')) {
         notifications.show({
@@ -132,3 +132,4 @@ export default function SignupPage() {
     </Container>
   );
 }
+

@@ -1,33 +1,56 @@
 'use client';
 
-import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box } from '@mantine/core';
+import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, Loader, Alert } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { api } from '../../../lib/api';
 
-// Mock data for demonstration - this calculates match scores based on preferences
-const calculateMatchScore = (listing) => {
-  // This is a simplified match score calculation
-  // In production, this would be done on the backend based on user preferences
-  // Using deterministic calculation to avoid hydration mismatch
-  const hash = listing.id.split('').reduce((acc, char) => {
-    return acc + char.charCodeAt(0);
-  }, 0);
-  return 85 + (hash % 15); // Score between 85-99
-};
-
 export default function MatchesPage() {
+  return (
+    <ProtectedRoute>
+      <MatchesPageContent />
+    </ProtectedRoute>
+  );
+}
+
+function MatchesPageContent() {
   const router = useRouter();
+  const { user, authState } = useAuth();
+  const userId = user?.profile?.id;
   
-  const { data: listingsData, isLoading, error } = useQuery({
-    queryKey: ['listings'],
-    queryFn: api.getListings,
+  // Fetch matches from the new matches API
+  const { data: matchesData, isLoading, error } = useQuery({
+    queryKey: ['matches', userId],
+    queryFn: async () => {
+      if (!userId || !authState?.accessToken) {
+        throw new Error('User not authenticated');
+      }
+      
+      const response = await fetch(`http://localhost:8000/api/matches/${userId}?limit=20`, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch matches');
+      }
+      
+      return response.json();
+    },
+    enabled: !!userId && !!authState?.accessToken,
     retry: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
+  // Extract matches from API response
+  const matches = matchesData?.data?.matches || [];
+  
   // Sample fallback data if API fails
   const sampleListings = [
     {
@@ -92,11 +115,8 @@ export default function MatchesPage() {
     },
   ];
 
-  // Use API data if available, otherwise use sample data
-  // Only use sample data if there's an error or no data from API
-  const listings = (listingsData?.data?.listings && listingsData.data.listings.length > 0) 
-    ? listingsData.data.listings 
-    : sampleListings;
+  // Use API matches if available, otherwise use sample data
+  const listings = (matches.length > 0) ? matches : sampleListings;
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -131,23 +151,37 @@ export default function MatchesPage() {
 
         {/* Loading State */}
         {isLoading && (
-          <Text ta="center" size="lg" c="dimmed">
-            Loading your perfect matches...
-          </Text>
+          <Stack align="center" gap="md">
+            <Loader size="lg" />
+            <Text ta="center" size="lg" c="dimmed">
+              Finding your perfect matches...
+            </Text>
+          </Stack>
         )}
 
         {/* Error State */}
         {error && (
-          <Text ta="center" size="lg" c="orange" mb="xl">
-            ⚠️ Backend not connected. Showing sample data.
-          </Text>
+          <Alert color="orange" title="Using Sample Data" mb="xl">
+            {error.message || 'Unable to load personalized matches. Showing sample listings.'}
+          </Alert>
         )}
+        
+        {/* Success State
+        {!isLoading && !error && matches.length > 0 && (
+          <Alert color="green" title="Matches Found!" mb="xl">
+            We found {matches.length} listings that match your preferences!
+          </Alert>
+        )} */}
 
         {/* Listings Grid */}
-        <Grid gutter="xl">
-          {listings.map((listing) => {
-            const matchScore = calculateMatchScore(listing);
-            const image = listing.images?.[0] || listing.image || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+        {!isLoading && (
+          <Grid gutter="xl">
+            {listings.map((listing) => {
+              // Use match_score from API or calculate for sample data
+              const matchScore = listing.match_score || (listing.id ? 
+                85 + (listing.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 15) : 
+                85);
+              const image = listing.images?.[0] || listing.image || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
             
             return (
               <Grid.Col key={listing.id} span={{ base: 12, sm: 6, lg: 4 }}>
@@ -276,9 +310,10 @@ export default function MatchesPage() {
                   </Stack>
                 </Card>
               </Grid.Col>
-            );
-          })}
-        </Grid>
+              );
+            })}
+          </Grid>
+        )}
       </Container>
     </Box>
   );

@@ -33,7 +33,7 @@ export default function LoginPage() {
     },
   });
 
-  const handleSubmit = async (values: typeof form.values) => {
+  const handleSubmit = async (values) => {
     setIsLoading(true);
 
     try {
@@ -44,7 +44,7 @@ export default function LoginPage() {
         color: 'green',
       });
       router.push('/');
-    } catch (err: any) {
+    } catch (err) {
       notifications.show({
         title: 'Login Failed',
         message: err.message || 'Invalid credentials. Please try again.',
@@ -98,3 +98,4 @@ export default function LoginPage() {
     </Container>
   );
 }
+

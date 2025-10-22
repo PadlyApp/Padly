@@ -246,7 +246,7 @@ class PersonalPreferencesBase(BaseModel):
     target_city: Optional[str] = None
     budget_min: Optional[Decimal] = None
     budget_max: Optional[Decimal] = None
-    preferred_neighborhoods: Optional[List[str]] = None
+    # preferred_neighborhoods: Removed - not used in current implementation
     
     # Housing Preferences
     housing_preferences: Optional[HousingPreferences] = None

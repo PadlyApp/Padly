@@ -6,14 +6,37 @@ import {
   TextInput, NumberInput, Select, Switch, Button, Group,
   MultiSelect, Grid, Divider, Loader, Alert
 } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
 import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
 import { IconHome, IconUsers, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 
 export default function PreferencesPage() {
+  return (
+    <ProtectedRoute>
+      <PreferencesPageContent />
+    </ProtectedRoute>
+  );
+}
+
+function PreferencesPageContent() {
+  const { user, authState, isLoading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+
+  // Debug: Log auth state changes
+  useEffect(() => {
+    console.log('Auth state changed:', { 
+      authLoading,
+      hasUser: !!user, 
+      hasProfile: !!user?.profile,
+      profileId: user?.profile?.id,
+      hasToken: !!authState?.accessToken 
+    });
+  }, [user, authState, authLoading]);
   
   
   // Housing Preferences
@@ -79,14 +102,40 @@ export default function PreferencesPage() {
   // Load preferences on mount
   useEffect(() => {
     loadPreferences();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authState]);
 
   const loadPreferences = async () => {
+    // MUST use profile.id (database user ID), not user.id (auth ID)
+    // TEMPORARY: If profile is missing, we can't load preferences
+    const userId = user?.profile?.id;
+    
+    if (!user?.profile) {
+      console.error('User profile is missing! This user needs to be recreated in the database.');
+      setError('Your user profile is incomplete. Please contact support or try logging out and signing up again.');
+      setLoading(false);
+      return;
+    }
+    
+    if (!userId || !authState?.accessToken) {
+      console.log('Cannot load preferences:', { 
+        hasUserId: !!userId, 
+        hasToken: !!authState?.accessToken,
+        user: user,
+        profile: user?.profile
+      });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      // TODO: Replace with actual user ID from auth
-      const userId = 'test-user-id';
-      const response = await fetch(`http://localhost:8000/api/preferences/${userId}`);
+      const response = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
       
       if (response.ok) {
         const result = await response.json();
@@ -104,19 +153,38 @@ export default function PreferencesPage() {
       }
     } catch (err) {
       console.error('Failed to load preferences:', err);
+      setError('Failed to load preferences');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
+    // MUST use profile.id (database user ID), not user.id (auth ID)
+    const userId = user?.profile?.id;
+    
+    if (!user?.profile) {
+      setError('Your user profile is incomplete. Please log out and sign up again, or contact support.');
+      console.error('User profile missing:', user);
+      return;
+    }
+    
+    if (!userId || !authState?.accessToken) {
+      console.error('Save failed - missing auth:', { 
+        hasUserId: !!userId, 
+        hasToken: !!authState?.accessToken,
+        user: user,
+        profile: user?.profile
+      });
+      setError('You must be logged in to save preferences. Please refresh the page and try again.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     setSuccess(false);
     
     try {
-      // TODO: Replace with actual user ID from auth
-      const userId = 'test-user-id';
       
       const payload = {
         housing_preferences: housingPrefs,
@@ -127,7 +195,7 @@ export default function PreferencesPage() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          // TODO: Add Authorization header with JWT
+          'Authorization': `Bearer ${authState.accessToken}`,
         },
         body: JSON.stringify(payload),
       });
@@ -155,13 +223,30 @@ export default function PreferencesPage() {
     setRoommatePrefs(prev => ({ ...prev, [key]: value }));
   };
 
-  if (loading) {
+  // Show loading while auth is initializing
+  if (authLoading || loading) {
     return (
       <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
         <Navigation />
         <Container size="md" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
           <Loader size="lg" />
-          <Text mt="md" c="dimmed">Loading your preferences...</Text>
+          <Text mt="md" c="dimmed">
+            {authLoading ? 'Checking authentication...' : 'Loading your preferences...'}
+          </Text>
+        </Container>
+      </Box>
+    );
+  }
+
+  // Show error if no user after auth loading is complete
+  if (!authLoading && !user) {
+    return (
+      <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
+        <Navigation />
+        <Container size="md" style={{ padding: '4rem 2rem', textAlign: 'center' }}>
+          <Alert color="red" title="Authentication Required">
+            Please log in to access your preferences.
+          </Alert>
         </Container>
       </Box>
     );
@@ -247,12 +332,23 @@ export default function PreferencesPage() {
                       />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>
-                      <TextInput
+                      <DatePickerInput
                         label="Desired Move-In Date"
-                        type="date"
-                        placeholder="YYYY-MM-DD"
-                        value={housingPrefs.move_in_date || ''}
-                        onChange={(e) => updateHousingPref('move_in_date', e.target.value || null)}
+                        placeholder="Pick a date"
+                        value={housingPrefs.move_in_date ? new Date(housingPrefs.move_in_date) : null}
+                        onChange={(date) => {
+                          if (date) {
+                            // Format date as YYYY-MM-DD
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            updateHousingPref('move_in_date', `${year}-${month}-${day}`);
+                          } else {
+                            updateHousingPref('move_in_date', null);
+                          }
+                        }}
+                        clearable
+                        minDate={new Date()}
                       />
                     </Grid.Col>
                     <Grid.Col span={{ base: 12, md: 6 }}>

@@ -1,8 +1,8 @@
 // Updated auth service to communicate with FastAPI backend
 export class AuthService {
-  private static readonly API_BASE = 'http://localhost:8000/api/auth';
+  static API_BASE = 'http://localhost:8000/api/auth';
 
-  static async signup(email: string, password: string, fullName: string) {
+  static async signup(email, password, fullName) {
     const response = await fetch(`${this.API_BASE}/signup`, {
       method: 'POST',
       headers: {
@@ -29,7 +29,7 @@ export class AuthService {
     return data;
   }
 
-  static async signin(email: string, password: string) {
+  static async signin(email, password) {
     const response = await fetch(`${this.API_BASE}/signin`, {
       method: 'POST',
       headers: {
@@ -49,7 +49,7 @@ export class AuthService {
     return response.json();
   }
 
-  static async signout(token: string) {
+  static async signout(token) {
     const response = await fetch(`${this.API_BASE}/signout`, {
       method: 'POST',
       headers: {
@@ -66,7 +66,7 @@ export class AuthService {
     return response.json();
   }
 
-  static async getCurrentUser(token: string) {
+  static async getCurrentUser(token) {
     const response = await fetch(`${this.API_BASE}/me`, {
       method: 'GET',
       headers: {
@@ -83,7 +83,7 @@ export class AuthService {
     return response.json();
   }
 
-  static async refreshToken(refreshToken: string) {
+  static async refreshToken(refreshToken) {
     const response = await fetch(`${this.API_BASE}/refresh`, {
       method: 'POST',
       headers: {
@@ -100,3 +100,4 @@ export class AuthService {
     return response.json();
   }
 }
+

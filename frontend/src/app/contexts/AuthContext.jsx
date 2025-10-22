@@ -1,63 +1,49 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { AuthService } from '../../../lib/authService';
 
-interface User {
-  id: string;
-  email: string;
-  profile?: {
-    id: string;
-    full_name: string;
-    bio?: string;
-    profile_picture_url?: string;
-    role: string;
-    verification_status: string;
-  };
-}
-
-interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
-  expiresAt: number | null;
-}
-
-interface AuthContextType {
-  user: User | null;
-  authState: AuthState | null;
-  isLoading: boolean;
-  signup: (email: string, password: string, fullName: string) => Promise<void>;
-  signin: (email: string, password: string) => Promise<void>;
-  signout: () => Promise<void>;
-  isAuthenticated: boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext(undefined);
 
 const AUTH_STORAGE_KEY = 'padly_auth';
+const USER_STORAGE_KEY = 'padly_user';
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [authState, setAuthState] = useState<AuthState | null>(null);
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [authState, setAuthState] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Load auth state from localStorage on mount
   useEffect(() => {
-    const loadAuthState = () => {
+    const loadAuthState = async () => {
       try {
         const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+        const storedUser = localStorage.getItem(USER_STORAGE_KEY);
+        
         if (stored) {
-          const parsedAuth: AuthState = JSON.parse(stored);
+          const parsedAuth = JSON.parse(stored);
           
           // Check if token is expired
           if (parsedAuth.expiresAt && Date.now() < parsedAuth.expiresAt) {
             setAuthState(parsedAuth);
-            // Load user data
-            loadCurrentUser(parsedAuth.accessToken);
+            
+            // Load user from storage or fetch from API
+            if (storedUser) {
+              try {
+                setUser(JSON.parse(storedUser));
+              } catch (e) {
+                console.error('Failed to parse stored user, fetching fresh:', e);
+                await loadCurrentUser(parsedAuth.accessToken);
+              }
+            } else {
+              // No stored user, fetch from API
+              console.log('No stored user found, fetching from API...');
+              await loadCurrentUser(parsedAuth.accessToken);
+            }
           } else {
             // Token expired, try to refresh
             if (parsedAuth.refreshToken) {
-              refreshAuthToken(parsedAuth.refreshToken);
+              await refreshAuthToken(parsedAuth.refreshToken);
             } else {
               clearAuthState();
             }
@@ -74,9 +60,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadAuthState();
   }, []);
 
-  const saveAuthState = (authData: any) => {
+  const saveAuthState = (authData) => {
     const expiresAt = Date.now() + (authData.expires_in * 1000);
-    const newAuthState: AuthState = {
+    const newAuthState = {
       accessToken: authData.access_token,
       refreshToken: authData.refresh_token,
       expiresAt,
@@ -84,27 +70,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     setAuthState(newAuthState);
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newAuthState));
+    
+    // Save user data if present
+    if (authData.user) {
+      setUser(authData.user);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(authData.user));
+    }
   };
 
   const clearAuthState = () => {
     setUser(null);
     setAuthState(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(USER_STORAGE_KEY);
   };
 
-  const loadCurrentUser = async (token: string | null) => {
+  const loadCurrentUser = async (token) => {
     if (!token) return;
     
     try {
       const response = await AuthService.getCurrentUser(token);
       setUser(response.user);
+      // Save user to localStorage for future page loads
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(response.user));
     } catch (error) {
       console.error('Failed to load current user:', error);
       clearAuthState();
     }
   };
 
-  const refreshAuthToken = async (refreshToken: string) => {
+  const refreshAuthToken = async (refreshToken) => {
     try {
       const response = await AuthService.refreshToken(refreshToken);
       saveAuthState(response);
@@ -115,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signup = async (email: string, password: string, fullName: string) => {
+  const signup = async (email, password, fullName) => {
     try {
       const response = await AuthService.signup(email, password, fullName);
       saveAuthState(response);
@@ -125,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signin = async (email: string, password: string) => {
+  const signin = async (email, password) => {
     try {
       const response = await AuthService.signin(email, password);
       saveAuthState(response);
@@ -180,3 +175,4 @@ export function useAuthHeader() {
     'Authorization': `Bearer ${authState.accessToken}`
   } : {};
 }
+
