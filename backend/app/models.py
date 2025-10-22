@@ -111,17 +111,151 @@ class UserResponse(UserBase):
 
 
 # ============================================================================
+# PREFERENCE ENUMS
+# ============================================================================
+
+class CleanlinessLevel(str, Enum):
+    """Cleanliness preferences"""
+    VERY_CLEAN = "very_clean"
+    MODERATELY_CLEAN = "moderately_clean"
+    RELAXED = "relaxed"
+
+
+class NoiseLevel(str, Enum):
+    """Noise level preferences"""
+    VERY_QUIET = "very_quiet"
+    QUIET = "quiet"
+    MODERATE = "moderate"
+    LIVELY = "lively"
+
+
+class SocialLevel(str, Enum):
+    """Social interaction preferences"""
+    PRIVATE = "private"
+    OCCASIONALLY_SOCIAL = "occasionally_social"
+    SOCIAL = "social"
+    VERY_SOCIAL = "very_social"
+
+
+class GuestPolicy(str, Enum):
+    """Guest frequency preferences"""
+    NO_GUESTS = "no_guests"
+    RARELY = "rarely"
+    OCCASIONALLY = "occasionally"
+    FREQUENTLY = "frequently"
+
+
+class WorkSchedule(str, Enum):
+    """Work schedule types"""
+    TRADITIONAL_9_TO_5 = "traditional_9_to_5"
+    REMOTE = "remote"
+    NIGHT_SHIFT = "night_shift"
+    FLEXIBLE = "flexible"
+    STUDENT = "student"
+
+
+class SleepSchedule(str, Enum):
+    """Sleep schedule preferences"""
+    EARLY_BIRD = "early_bird"
+    AVERAGE = "average"
+    NIGHT_OWL = "night_owl"
+
+
+class CookingFrequency(str, Enum):
+    """Cooking frequency"""
+    DAILY = "daily"
+    OFTEN = "often"
+    OCCASIONALLY = "occasionally"
+    RARELY = "rarely"
+
+
+class TemperaturePreference(str, Enum):
+    """Temperature preferences"""
+    COOL = "cool"
+    MODERATE = "moderate"
+    WARM = "warm"
+
+
+# ============================================================================
 # PERSONAL PREFERENCES MODELS
 # ============================================================================
 
+class HousingPreferences(BaseModel):
+    """Housing/Property hard and soft constraints"""
+    # Hard Constraints
+    lease_type: Optional[LeaseType] = None
+    move_in_date: Optional[date] = None
+    move_out_date: Optional[date] = None
+    min_bedrooms: Optional[int] = None
+    max_bedrooms: Optional[int] = None
+    min_bathrooms: Optional[Decimal] = None
+    furnished_required: Optional[bool] = None
+    pets_allowed: Optional[bool] = None
+    smoking_allowed: Optional[bool] = None
+    parking_required: Optional[bool] = None
+    accessibility_required: Optional[bool] = None
+    
+    # Soft Constraints (Amenities & Features)
+    laundry_in_unit: Optional[bool] = None
+    laundry_in_building: Optional[bool] = None
+    dishwasher: Optional[bool] = None
+    air_conditioning: Optional[bool] = None
+    heating: Optional[bool] = None
+    outdoor_space: Optional[bool] = None  # balcony, patio, yard
+    gym_access: Optional[bool] = None
+    pool_access: Optional[bool] = None
+    storage_space: Optional[bool] = None
+    high_speed_internet: Optional[bool] = None
+    utilities_included: Optional[bool] = None
+
+
+class RoommatePreferences(BaseModel):
+    """Roommate compatibility preferences"""
+    # Demographics
+    age_min: Optional[int] = None
+    age_max: Optional[int] = None
+    gender_preference: Optional[str] = None  # "male", "female", "any", "non-binary"
+    occupation_types: Optional[List[str]] = None  # ["student", "professional", "remote_worker"]
+    
+    # Lifestyle Compatibility
+    cleanliness_level: Optional[CleanlinessLevel] = None
+    noise_tolerance: Optional[NoiseLevel] = None
+    social_preference: Optional[SocialLevel] = None
+    guest_policy: Optional[GuestPolicy] = None
+    work_schedule: Optional[WorkSchedule] = None
+    sleep_schedule: Optional[SleepSchedule] = None
+    cooking_frequency: Optional[CookingFrequency] = None
+    temperature_preference: Optional[TemperaturePreference] = None
+    
+    # Substance & Lifestyle
+    smoking_ok: Optional[bool] = None
+    alcohol_ok: Optional[bool] = None
+    pets_ok: Optional[bool] = None
+    has_pets: Optional[bool] = None
+    pet_types: Optional[List[str]] = None  # ["dog", "cat", "other"]
+    
+    # Diet & Values
+    dietary_preferences: Optional[List[str]] = None  # ["vegetarian", "vegan", "halal", "kosher"]
+    languages_spoken: Optional[List[str]] = None
+    lgbtq_friendly: Optional[bool] = None
+
+
 class PersonalPreferencesBase(BaseModel):
-    """Base personal preferences model"""
+    """Base personal preferences model with comprehensive filters"""
+    # Basic Search Parameters
     target_city: Optional[str] = None
     budget_min: Optional[Decimal] = None
     budget_max: Optional[Decimal] = None
-    move_in_date: Optional[date] = None
-    lifestyle_preferences: Optional[dict] = None
     preferred_neighborhoods: Optional[List[str]] = None
+    
+    # Housing Preferences
+    housing_preferences: Optional[HousingPreferences] = None
+    
+    # Roommate Preferences
+    roommate_preferences: Optional[RoommatePreferences] = None
+    
+    # Legacy field for backward compatibility
+    lifestyle_preferences: Optional[dict] = None
 
 
 class PersonalPreferencesCreate(PersonalPreferencesBase):

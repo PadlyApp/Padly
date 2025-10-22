@@ -17,6 +17,10 @@ async def list_listings(
     token: Optional[str] = Depends(get_user_token),
     status: Optional[str] = None,
     city: Optional[str] = None,
+    property_type: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    min_bedrooms: Optional[int] = None,
     limit: Optional[int] = 100,
     offset: Optional[int] = 0
 ):
@@ -26,6 +30,10 @@ async def list_listings(
     Query params:
     - status: Filter by listing status (active, inactive, draft)
     - city: Filter by city
+    - property_type: Filter by property type (entire_place, private_room, shared_room)
+    - min_price: Minimum price per month
+    - max_price: Maximum price per month
+    - min_bedrooms: Minimum number of bedrooms
     - limit: Max results (default: 100)
     - offset: Pagination offset
     """
@@ -36,6 +44,14 @@ async def list_listings(
         filters["status"] = f"eq.{status}"
     if city:
         filters["city"] = f"ilike.*{city}*"
+    if property_type:
+        filters["property_type"] = f"eq.{property_type}"
+    if min_price is not None:
+        filters["price_per_month"] = f"gte.{min_price}"
+    if max_price is not None:
+        filters["price_per_month"] = f"lte.{max_price}"
+    if min_bedrooms is not None:
+        filters["number_of_bedrooms"] = f"gte.{min_bedrooms}"
     
     listings = await client.select(
         table="listings",
@@ -47,8 +63,11 @@ async def list_listings(
     
     return {
         "status": "success",
-        "count": len(listings),
-        "data": listings
+        "message": "Listings fetched successfully",
+        "data": {
+            "count": len(listings),
+            "listings": listings
+        }
     }
 
 
