@@ -1,8 +1,11 @@
 'use client';
 
 import './globals.css';
+import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
 import { MantineProviderWrapper } from './providers/MantineProvider';
 import { QueryProvider } from './providers/QueryProvider';
+import { AuthProvider } from './contexts/AuthContext';
 
 export default function RootLayout({ children }) {
   return (
@@ -15,7 +18,9 @@ export default function RootLayout({ children }) {
       <body>
         <QueryProvider>
           <MantineProviderWrapper>
-            {children}
+            <AuthProvider>
+              {children}
+            </AuthProvider>
           </MantineProviderWrapper>
         </QueryProvider>
       </body>

@@ -34,6 +34,7 @@ class AuthResponse(BaseModel):
 async def signup(user_data: SignUpRequest):
     """
     Register a new user with Supabase Auth and create user profile.
+    ALWAYS creates the user profile in public.users table.
     """
     try:
         # Sign up with Supabase Auth
@@ -53,25 +54,33 @@ async def signup(user_data: SignUpRequest):
                 detail="Failed to create user account"
             )
         
+        # ALWAYS create user profile in users table (regardless of email confirmation)
+        from app.db import supabase_admin
+        
+        # Check if profile already exists
+        existing_profile = supabase_admin.table("users").select("*").eq("auth_id", auth_response.user.id).execute()
+        
+        if existing_profile.data:
+            # Profile already exists, use it
+            profile = existing_profile.data[0]
+        else:
+            # Create new profile
+            user_profile = {
+                "auth_id": auth_response.user.id,
+                "email": user_data.email,
+                "full_name": user_data.full_name,
+            }
+            profile_response = supabase_admin.table("users").insert(user_profile).execute()
+            profile = profile_response.data[0] if profile_response.data else None
+        
         # Check if session is available (might be None if email confirmation required)
         if auth_response.session is None:
             # Return a different response model for email confirmation case
             return Response(
-                content='{"status": "email_confirmation_required", "message": "Account created successfully. Please check your email to confirm your account before signing in.", "user_id": "' + auth_response.user.id + '"}',
+                content='{"status": "email_confirmation_required", "message": "Account created successfully. Please check your email to confirm your account before signing in.", "user_id": "' + auth_response.user.id + '", "profile_id": "' + str(profile.get('id', '')) + '"}',
                 status_code=202,
                 media_type="application/json"
             )
-        
-        # Create user profile in users table
-        user_profile = {
-            "auth_id": auth_response.user.id,
-            "email": user_data.email,
-            "full_name": user_data.full_name,
-        }
-        
-        # Insert user profile using service client (to bypass RLS during creation)
-        from app.db import supabase_admin
-        profile_response = supabase_admin.table("users").insert(user_profile).execute()
         
         return AuthResponse(
             access_token=auth_response.session.access_token,
@@ -81,7 +90,7 @@ async def signup(user_data: SignUpRequest):
                 "id": auth_response.user.id,
                 "email": auth_response.user.email,
                 "full_name": user_data.full_name,
-                "profile": profile_response.data[0] if profile_response.data else None
+                "profile": profile
             }
         )
         
@@ -101,6 +110,7 @@ async def signup(user_data: SignUpRequest):
 async def signin(credentials: SignInRequest):
     """
     Sign in user with Supabase Auth.
+    Auto-creates profile if missing (for legacy users).
     """
     try:
         # Sign in with Supabase Auth
@@ -116,7 +126,21 @@ async def signin(credentials: SignInRequest):
             )
         
         # Get user profile from users table
-        profile_response = supabase_anon.table("users").select("*").eq("auth_id", auth_response.user.id).execute()
+        from app.db import supabase_admin
+        profile_response = supabase_admin.table("users").select("*").eq("auth_id", auth_response.user.id).execute()
+        
+        # If profile doesn't exist, create it (for legacy users)
+        if not profile_response.data:
+            user_metadata = auth_response.user.user_metadata or {}
+            full_name = user_metadata.get("full_name", auth_response.user.email.split("@")[0])
+            
+            new_profile = {
+                "auth_id": auth_response.user.id,
+                "email": auth_response.user.email,
+                "full_name": full_name,
+            }
+            
+            profile_response = supabase_admin.table("users").insert(new_profile).execute()
         
         return AuthResponse(
             access_token=auth_response.session.access_token,
@@ -189,6 +213,7 @@ async def signout(token: str = Depends(get_user_token)):
 async def get_current_user(token: str = Depends(get_user_token)):
     """
     Get current authenticated user profile.
+    Auto-creates profile if missing.
     """
     if not token:
         raise HTTPException(
@@ -208,6 +233,23 @@ async def get_current_user(token: str = Depends(get_user_token)):
         
         # Get user profile
         profile_response = supabase_anon.table("users").select("*").eq("auth_id", user_response.user.id).execute()
+        
+        # If profile doesn't exist, create it
+        if not profile_response.data:
+            from app.db import supabase_admin
+            
+            # Get user metadata from auth
+            user_metadata = user_response.user.user_metadata or {}
+            full_name = user_metadata.get("full_name", user_response.user.email.split("@")[0])
+            
+            # Create profile
+            new_profile = {
+                "auth_id": user_response.user.id,
+                "email": user_response.user.email,
+                "full_name": full_name,
+            }
+            
+            profile_response = supabase_admin.table("users").insert(new_profile).execute()
         
         return {
             "user": {

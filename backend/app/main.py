@@ -12,8 +12,9 @@ from app.routes import (
     roommates_router,
     preferences_router,
     admin_router,
+    auth_router,
+    matches_router,
 )
-from app.routes import users_router, listings_router, admin_router, auth_router
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -42,6 +43,7 @@ app.include_router(users_router)
 app.include_router(listings_router)
 app.include_router(roommates_router)
 app.include_router(preferences_router)
+app.include_router(matches_router)
 app.include_router(admin_router)
 
 

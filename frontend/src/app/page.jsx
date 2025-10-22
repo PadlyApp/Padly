@@ -3,8 +3,11 @@
 import { Container, Title, Text, Button, Stack, Box, Group } from '@mantine/core';
 import Link from 'next/link';
 import { Navigation } from './components/Navigation';
+import { useAuth } from './contexts/AuthContext';
 
 export default function Home() {
+  const { isAuthenticated, isLoading } = useAuth();
+
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
@@ -37,44 +40,90 @@ export default function Home() {
             </Text>
           </Stack>
 
-          {/* CTA Buttons */}
-          <Group gap="lg" mt="xl">
-            <Link href="/matches" style={{ textDecoration: 'none' }}>
-              <Button
-                size="lg"
-                radius="md"
-                style={{
-                  backgroundColor: '#20c997',
-                  padding: '0.75rem 2rem',
-                  fontSize: '1.125rem',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#12b886';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#20c997';
-                }}
-              >
-                View Matches
-              </Button>
-            </Link>
-            <Link href="/preferences" style={{ textDecoration: 'none' }}>
-              <Button
-                size="lg"
-                radius="md"
-                variant="outline"
-                color="gray"
-                style={{
-                  padding: '0.75rem 2rem',
-                  fontSize: '1.125rem',
-                  borderColor: '#ddd',
-                  color: '#666',
-                }}
-              >
-                Set Preferences
-              </Button>
-            </Link>
-          </Group>
+          {/* CTA Buttons - Show different buttons based on auth state */}
+          {!isLoading && (
+            <Group gap="lg" mt="xl">
+              {isAuthenticated ? (
+                // Authenticated users see View Matches and Set Preferences
+                <>
+                  <Link href="/matches" style={{ textDecoration: 'none' }}>
+                    <Button
+                      size="lg"
+                      radius="md"
+                      style={{
+                        backgroundColor: '#20c997',
+                        padding: '0.75rem 2rem',
+                        fontSize: '1.125rem',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#12b886';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#20c997';
+                      }}
+                    >
+                      View Matches
+                    </Button>
+                  </Link>
+                  <Link href="/preferences" style={{ textDecoration: 'none' }}>
+                    <Button
+                      size="lg"
+                      radius="md"
+                      variant="outline"
+                      color="gray"
+                      style={{
+                        padding: '0.75rem 2rem',
+                        fontSize: '1.125rem',
+                        borderColor: '#ddd',
+                        color: '#666',
+                      }}
+                    >
+                      Set Preferences
+                    </Button>
+                  </Link>
+                </>
+              ) : (
+                // Unauthenticated users see Login and Sign Up
+                <>
+                  <Link href="/login" style={{ textDecoration: 'none' }}>
+                    <Button
+                      size="lg"
+                      radius="md"
+                      variant="outline"
+                      color="gray"
+                      style={{
+                        padding: '0.75rem 2rem',
+                        fontSize: '1.125rem',
+                        borderColor: '#ddd',
+                        color: '#666',
+                      }}
+                    >
+                      Log In
+                    </Button>
+                  </Link>
+                  <Link href="/signup" style={{ textDecoration: 'none' }}>
+                    <Button
+                      size="lg"
+                      radius="md"
+                      style={{
+                        backgroundColor: '#20c997',
+                        padding: '0.75rem 2rem',
+                        fontSize: '1.125rem',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#12b886';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#20c997';
+                      }}
+                    >
+                      Sign Up
+                    </Button>
+                  </Link>
+                </>
+              )}
+            </Group>
+          )}
 
           {/* Feature Highlights */}
           <Stack gap="xl" mt={80} style={{ width: '100%', maxWidth: '48rem' }}>
