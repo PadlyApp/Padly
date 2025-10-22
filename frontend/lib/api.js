@@ -1,0 +1,133 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+export const api = {
+  // Listings endpoints
+  async getListings(filters = {}) {
+    const params = new URLSearchParams();
+    
+    if (filters.status) params.append('status', filters.status);
+    if (filters.city) params.append('city', filters.city);
+    if (filters.property_type) params.append('property_type', filters.property_type);
+    if (filters.min_price) params.append('min_price', filters.min_price);
+    if (filters.max_price) params.append('max_price', filters.max_price);
+    if (filters.min_bedrooms) params.append('min_bedrooms', filters.min_bedrooms);
+    if (filters.limit) params.append('limit', filters.limit);
+    if (filters.offset) params.append('offset', filters.offset);
+    
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/listings${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Failed to fetch listings');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async getListing(id) {
+    const response = await fetch(`${API_BASE_URL}/api/listings/${id}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch listing');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async createListing(listingData, token) {
+    const response = await fetch(`${API_BASE_URL}/api/listings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(listingData),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create listing');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  // Users endpoints
+  async getUsers(limit = 100, offset = 0) {
+    const response = await fetch(`${API_BASE_URL}/api/users?limit=${limit}&offset=${offset}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch users');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async getUser(id) {
+    const response = await fetch(`${API_BASE_URL}/api/users/${id}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch user');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async createUser(userData, token) {
+    const response = await fetch(`${API_BASE_URL}/api/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+      },
+      body: JSON.stringify(userData),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create user');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  // Roommate posts endpoints
+  async getRoommatePosts(filters = {}) {
+    const params = new URLSearchParams();
+    
+    if (filters.status) params.append('status', filters.status);
+    if (filters.city) params.append('city', filters.city);
+    if (filters.limit) params.append('limit', filters.limit);
+    if (filters.offset) params.append('offset', filters.offset);
+    
+    const queryString = params.toString();
+    const url = `${API_BASE_URL}/api/roommate-posts${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Failed to fetch roommate posts');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async getRoommatePost(id) {
+    const response = await fetch(`${API_BASE_URL}/api/roommate-posts/${id}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch roommate post');
+    }
+    const data = await response.json();
+    return data;
+  },
+
+  async createRoommatePost(postData, token) {
+    const response = await fetch(`${API_BASE_URL}/api/roommate-posts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(postData),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create roommate post');
+    }
+    const data = await response.json();
+    return data;
+  },
+};
+
