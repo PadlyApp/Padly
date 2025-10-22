@@ -8,6 +8,7 @@ from .listings import router as listings_router
 from .roommates import router as roommates_router
 from .preferences import router as preferences_router
 from .admin import router as admin_router
+from .auth import router as auth_router
 
 __all__ = [
     "users_router",
@@ -15,4 +16,5 @@ __all__ = [
     "roommates_router",
     "preferences_router",
     "admin_router",
+    "auth_router"
 ]
