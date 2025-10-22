@@ -13,6 +13,7 @@ from app.routes import (
     preferences_router,
     admin_router,
 )
+from app.routes import users_router, listings_router, admin_router, auth_router
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -35,7 +36,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers
+# Include routers
+app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(listings_router)
 app.include_router(roommates_router)

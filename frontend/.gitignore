@@ -40,3 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# node modules 
+/node_modules
+
+# node modules of parent directory
+../node_modules
+
