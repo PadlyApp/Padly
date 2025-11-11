@@ -148,6 +148,23 @@ def generate_roommate_groups():
         target_group_size = random.randint(2, 4)
         status = random.choice(["active", "active", "active", "inactive"])  # Mostly active
         
+        # Housing preferences for the group
+        target_lease_type = random.choice(["fixed_term", "open_ended"])
+        target_lease_duration_months = random.randint(6, 24) if target_lease_type == "fixed_term" else None
+        target_bedrooms = random.randint(2, 4)  # Groups typically need more bedrooms
+        target_bathrooms = round(random.uniform(1.5, 3.0), 1)
+        target_furnished = random.choice([True, False])
+        target_utilities_included = random.choice([True, False])
+        target_deposit_amount = float(random.randint(1000, 3000))
+        target_state_province = "CA"
+        target_country = "USA"
+        target_house_rules = random.choice([
+            "No smoking, no loud parties, respect quiet hours.",
+            "Clean common areas, pets allowed with deposit.",
+            "Shared chores, guests welcome with notice.",
+            "No smoking, no pets, keep common areas tidy.",
+        ])
+        
         group_data = {
             "creator_user_id": creator_user_id,
             "group_name": group_name,
@@ -157,7 +174,18 @@ def generate_roommate_groups():
             "budget_per_person_max": budget_per_person_max,
             "target_move_in_date": target_move_in_date,
             "target_group_size": target_group_size,
-            "status": status
+            "status": status,
+            # Housing preferences
+            "target_lease_type": target_lease_type,
+            "target_lease_duration_months": target_lease_duration_months,
+            "target_bedrooms": target_bedrooms,
+            "target_bathrooms": target_bathrooms,
+            "target_furnished": target_furnished,
+            "target_utilities_included": target_utilities_included,
+            "target_deposit_amount": target_deposit_amount,
+            "target_state_province": target_state_province,
+            "target_country": target_country,
+            "target_house_rules": target_house_rules,
         }
         
         group_data = sanitize_for_json(group_data)
