@@ -43,6 +43,13 @@ from .deferred_acceptance import (
     run_deferred_acceptance
 )
 
+from .persistence import (
+    MatchPersistenceEngine,
+    save_matching_results,
+    get_active_matches_for_group,
+    get_active_matches_for_listing
+)
+
 __all__ = [
     # Filters
     'is_listing_pair_eligible',
@@ -75,8 +82,13 @@ __all__ = [
     'DeferredAcceptanceEngine',
     'MatchResult',
     'DiagnosticMetrics',
-    'run_deferred_acceptance'
+    'run_deferred_acceptance',
+    # Database Persistence (Phase 5)
+    'MatchPersistenceEngine',
+    'save_matching_results',
+    'get_active_matches_for_group',
+    'get_active_matches_for_listing'
 ]
 
-__version__ = '0.4.0'
+__version__ = '0.5.0'
 __algorithm__ = 'Deferred Acceptance (Gale-Shapley)'
