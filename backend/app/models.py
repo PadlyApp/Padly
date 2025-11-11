@@ -452,6 +452,18 @@ class RoommateGroupBase(BaseModel):
     budget_per_person_max: Optional[Decimal] = None
     target_move_in_date: Optional[date] = None
     target_group_size: int = 2
+    
+    # Housing preferences for the group
+    target_lease_duration_months: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_furnished: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    target_deposit_amount: Optional[Decimal] = None
+    target_state_province: Optional[str] = None
+    target_country: Optional[str] = None
+    target_house_rules: Optional[str] = None
+    target_lease_type: Optional[LeaseType] = None
 
 
 class RoommateGroupCreate(RoommateGroupBase):
@@ -470,6 +482,18 @@ class RoommateGroupUpdate(BaseModel):
     target_move_in_date: Optional[date] = None
     target_group_size: Optional[int] = None
     status: Optional[PostStatus] = None
+    
+    # Housing preferences for the group
+    target_lease_duration_months: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_furnished: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    target_deposit_amount: Optional[Decimal] = None
+    target_state_province: Optional[str] = None
+    target_country: Optional[str] = None
+    target_house_rules: Optional[str] = None
+    target_lease_type: Optional[LeaseType] = None
 
     model_config = ConfigDict(extra='forbid')
 
