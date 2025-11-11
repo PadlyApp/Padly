@@ -72,6 +72,201 @@ def generate_reviews_for_all_users():
                 print(f"Review created from {reviewer_id} to {target_id} ✅")
             else:
                 print(f"Failed to create review from {reviewer_id} to {target_id}: {response.text}")
+
+#####
+# =====
+# generating roommate groups
+# =====
+#####
+def generate_roommate_groups():
+    """
+    Create roommate groups with members.
+    Strategy: 
+    - Select 30-40% of users to create groups
+    - Each group gets a creative name and random details
+    - Add creator + random additional members (creating partially filled groups)
+    """
+    users = get_all_users()
+    if len(users) < 2:
+        print("Not enough users to create groups. Need at least 2 users.")
+        return
+    
+    # Select 30-40% of users to create groups
+    num_groups = max(1, len(users) // 3)
+    group_creators = random.sample(users, min(num_groups, len(users)))
+    
+    california_cities = [
+        "San Francisco", "Los Angeles", "San Diego", "San Jose", "Sacramento",
+        "Oakland", "Fresno", "Long Beach", "Santa Ana", "Anaheim"
+    ]
+    
+    group_name_templates = [
+        "{city} {adjective} Squad",
+        "{adjective} Roomies - {city}",
+        "{city} {noun} Crew",
+        "The {city} {noun}s",
+        "{adjective} {city} Living"
+    ]
+    
+    adjectives = ["Tech", "Chill", "Social", "Quiet", "Active", "Friendly", "Professional", "Student", "Creative", "Eco"]
+    nouns = ["Roommates", "Squad", "Tribe", "Crew", "Gang", "Team", "Group", "Collective", "House"]
+    
+    descriptions = [
+        "Looking for clean, respectful roommates to share a place.",
+        "We're a group of professionals/students seeking housing together.",
+        "Friendly group looking for a place in {city}. Let's find our perfect home!",
+        "Seeking compatible roommates for a shared living experience.",
+        "Group of like-minded individuals looking to rent together.",
+        "We're organized, responsible, and ready to find a great place!",
+    ]
+    
+    created_groups = []
+    
+    for creator in group_creators:
+        creator_email = creator["email"]
+        creator_user_id = creator["user_id"]
+        
+        # Get auth token for this user
+        token, _ = get_auth_context(creator_email, "123456")
+        if not token:
+            print(f"Skipping group creation for {creator_email}: unable to get token.")
+            continue
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Generate group data
+        target_city = random.choice(california_cities)
+        group_name = random.choice(group_name_templates).format(
+            city=target_city,
+            adjective=random.choice(adjectives),
+            noun=random.choice(nouns)
+        )
+        description = random.choice(descriptions).replace("{city}", target_city)
+        budget_per_person_min = float(random.randint(600, 1500))
+        budget_per_person_max = budget_per_person_min + float(random.randint(200, 800))
+        target_move_in_date = (datetime.datetime.now() + datetime.timedelta(days=random.randint(7, 120))).date().isoformat()
+        target_group_size = random.randint(2, 4)
+        status = random.choice(["active", "active", "active", "inactive"])  # Mostly active
+        
+        group_data = {
+            "creator_user_id": creator_user_id,
+            "group_name": group_name,
+            "description": description,
+            "target_city": target_city,
+            "budget_per_person_min": budget_per_person_min,
+            "budget_per_person_max": budget_per_person_max,
+            "target_move_in_date": target_move_in_date,
+            "target_group_size": target_group_size,
+            "status": status
+        }
+        
+        group_data = sanitize_for_json(group_data)
+        
+        print(f"Creating roommate group: '{group_name}' by {creator_email} ...")
+        try:
+            response = requests.post(
+                "http://127.0.0.1:8000/api/roommate-groups",
+                json=group_data,
+                headers=headers
+            )
+            if response.status_code == 200:
+                group_result = response.json()["data"]
+                group_id = group_result["id"]
+                print(f"✅ Group created: {group_name} (ID: {group_id})")
+                
+                # Store group info for member addition
+                created_groups.append({
+                    "group_id": group_id,
+                    "creator_user_id": creator_user_id,
+                    "creator_email": creator_email,
+                    "target_group_size": target_group_size,
+                    "token": token
+                })
+            else:
+                print(f"❌ Failed to create group '{group_name}': {response.text}")
+        except Exception as e:
+            print(f"ERROR creating group '{group_name}': {e}")
+    
+    # Now add members to each group
+    print("\n" + "="*50)
+    print("Adding members to roommate groups...")
+    print("="*50)
+    
+    for group_info in created_groups:
+        add_members_to_group(
+            group_info["group_id"],
+            group_info["creator_user_id"],
+            group_info["creator_email"],
+            group_info["target_group_size"],
+            group_info["token"],
+            users
+        )
+
+
+def add_members_to_group(group_id, creator_user_id, creator_email, target_group_size, creator_token, all_users):
+    """
+    Add members to a roommate group.
+    - First add the creator as a member (is_creator=True)
+    - Then add random additional members (0 to target_group_size-1)
+    """
+    headers = {"Authorization": f"Bearer {creator_token}"}
+    
+    # 1. Add creator as first member
+    creator_member_data = {
+        "group_id": group_id,
+        "user_id": creator_user_id,
+        "is_creator": True
+    }
+    
+    print(f"  Adding creator {creator_email} to group {group_id} ...")
+    try:
+        response = requests.post(
+            f"http://127.0.0.1:8000/api/roommate-groups/{group_id}/members",
+            json=creator_member_data,
+            headers=headers
+        )
+        if response.status_code == 200:
+            print(f"  ✅ Creator added to group")
+        else:
+            print(f"  ❌ Failed to add creator: {response.text}")
+    except Exception as e:
+        print(f"  ERROR adding creator: {e}")
+    
+    # 2. Add random additional members (creating partially filled groups)
+    # Number of additional members: 0 to (target_group_size - 1)
+    num_additional_members = random.randint(0, target_group_size - 1)
+    
+    if num_additional_members > 0:
+        # Get potential members (exclude the creator)
+        potential_members = [u for u in all_users if u["user_id"] != creator_user_id]
+        
+        if len(potential_members) > 0:
+            additional_members = random.sample(
+                potential_members, 
+                min(num_additional_members, len(potential_members))
+            )
+            
+            for member in additional_members:
+                member_data = {
+                    "group_id": group_id,
+                    "user_id": member["user_id"],
+                    "is_creator": False
+                }
+                
+                print(f"  Adding member {member['email']} to group {group_id} ...")
+                try:
+                    response = requests.post(
+                        f"http://127.0.0.1:8000/api/roommate-groups/{group_id}/members",
+                        json=member_data,
+                        headers=headers
+                    )
+                    if response.status_code == 200:
+                        print(f"  ✅ Member added")
+                    else:
+                        print(f"  ❌ Failed to add member: {response.text}")
+                except Exception as e:
+                    print(f"  ERROR adding member: {e}")
+
 import random
 from mimesis import Generic, Address
 from mimesis.locales import Locale
@@ -440,17 +635,20 @@ def generate_roommate_posts(password="123456"):
 # === Main script entry: Generate all mock data ===
 if __name__ == "__main__":
     # 1. Create users
-    create_users(10)  # Adjust number as needed
-
-    # 2. Create listings for each user
-    users = get_all_users()
-    for user in users:
-        create_listings(2, user["email"], "123456")  # 2 listings per user
+    # create_users(10)  # Adjust number as needed
+    
+    # # 2. Create listings for each user
+    # users = get_all_users()
+    # for user in users:
+    #     create_listings(2, user["email"], "123456")  # 2 listings per user
 
     # 3. Create preferences for all users
-    generate_preferences_for_all_users()
+    # generate_preferences_for_all_users()
 
     # 4. Create roommate posts for all users
-    generate_roommate_posts()
+    # generate_roommate_posts()
+
+    # 5. Create roommate groups with members
+    generate_roommate_groups()
 
     # Note: Review generation is disabled (endpoint not implemented)
