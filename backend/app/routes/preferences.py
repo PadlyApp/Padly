@@ -10,9 +10,7 @@ from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import (
     PersonalPreferencesUpdate, 
-    PersonalPreferencesResponse,
-    HousingPreferences,
-    RoommatePreferences
+    PersonalPreferencesResponse
 )
 import json
 
@@ -31,81 +29,49 @@ def convert_dates_to_strings(obj: Any) -> Any:
 
 
 def serialize_preferences(prefs_data: dict) -> dict:
-    """Convert nested preference objects to proper format for storage"""
+    """
+    Convert preference data to database format.
+    Database schema is simple with direct fields matching the model.
+    """
     if not prefs_data:
         return prefs_data
     
-    # Convert all dates to strings first
+    # Convert all dates to strings
     prefs_data = convert_dates_to_strings(prefs_data)
     
-    # Build the lifestyle_preferences JSONB field
-    lifestyle_prefs = {}
-    
-    # Extract housing preferences
-    if "housing_preferences" in prefs_data and prefs_data["housing_preferences"]:
-        housing = prefs_data["housing_preferences"]
-        lifestyle_prefs["housing"] = housing
-    
-    # Extract roommate preferences
-    if "roommate_preferences" in prefs_data and prefs_data["roommate_preferences"]:
-        roommate = prefs_data["roommate_preferences"]
-        lifestyle_prefs["roommate"] = roommate
-    
-    # Merge legacy lifestyle_preferences if present
-    if "lifestyle_preferences" in prefs_data and prefs_data["lifestyle_preferences"]:
-        lifestyle_prefs.update(prefs_data["lifestyle_preferences"])
-    
-    # Build final data structure for DB
+    # Database fields match the model directly
     db_data = {
         "target_city": prefs_data.get("target_city"),
         "budget_min": prefs_data.get("budget_min"),
         "budget_max": prefs_data.get("budget_max"),
-        # preferred_neighborhoods removed - not used
-        "lifestyle_preferences": lifestyle_prefs if lifestyle_prefs else None
+        "move_in_date": prefs_data.get("move_in_date"),
+        "lifestyle_preferences": prefs_data.get("lifestyle_preferences"),  # JSONB field
+        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods")  # Array field
     }
-    
-    # Handle move_in_date from housing_preferences
-    if "housing_preferences" in prefs_data and prefs_data["housing_preferences"]:
-        if "move_in_date" in prefs_data["housing_preferences"]:
-            db_data["move_in_date"] = prefs_data["housing_preferences"]["move_in_date"]
     
     # Remove None values
     return {k: v for k, v in db_data.items() if v is not None}
 
 
 def deserialize_preferences(db_data: dict) -> dict:
-    """Convert DB format to API response format"""
+    """
+    Convert database format to API response format.
+    No transformation needed - database fields match API response.
+    """
     if not db_data:
         return db_data
     
-    result = {
+    # Database structure matches API response structure
+    return {
         "user_id": db_data.get("user_id"),
         "target_city": db_data.get("target_city"),
         "budget_min": db_data.get("budget_min"),
         "budget_max": db_data.get("budget_max"),
-        # preferred_neighborhoods removed - not used
+        "move_in_date": db_data.get("move_in_date"),
+        "lifestyle_preferences": db_data.get("lifestyle_preferences"),
+        "preferred_neighborhoods": db_data.get("preferred_neighborhoods"),
         "updated_at": db_data.get("updated_at")
     }
-    
-    # Extract nested preferences from lifestyle_preferences JSONB
-    lifestyle_prefs = db_data.get("lifestyle_preferences", {})
-    if lifestyle_prefs:
-        result["housing_preferences"] = lifestyle_prefs.get("housing")
-        result["roommate_preferences"] = lifestyle_prefs.get("roommate")
-        
-        # Keep other legacy fields
-        legacy_fields = {k: v for k, v in lifestyle_prefs.items() 
-                        if k not in ["housing", "roommate"]}
-        if legacy_fields:
-            result["lifestyle_preferences"] = legacy_fields
-    
-    # Move move_in_date to housing_preferences if it exists
-    if db_data.get("move_in_date"):
-        if not result.get("housing_preferences"):
-            result["housing_preferences"] = {}
-        result["housing_preferences"]["move_in_date"] = db_data.get("move_in_date")
-    
-    return result
 
 
 @router.get("/{user_id}")
@@ -132,8 +98,12 @@ async def get_user_preferences(
             "status": "success",
             "data": {
                 "user_id": user_id,
-                "housing_preferences": None,
-                "roommate_preferences": None
+                "target_city": None,
+                "budget_min": None,
+                "budget_max": None,
+                "move_in_date": None,
+                "lifestyle_preferences": None,
+                "preferred_neighborhoods": None
             }
         }
     

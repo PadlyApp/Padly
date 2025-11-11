@@ -15,7 +15,36 @@ from .filters import (
     DateWindow
 )
 
+from .feasible_pairs import (
+    location_matches,
+    date_matches,
+    price_matches,
+    hard_attributes_match,
+    build_feasible_pairs,
+    get_feasibility_statistics,
+    analyze_rejection_reasons
+)
+
+from .scoring import (
+    calculate_group_score,
+    calculate_listing_score,
+    rank_listings_for_group,
+    rank_groups_for_listing,
+    build_preference_lists,
+    GROUP_SCORING_WEIGHTS,
+    LISTING_SCORING_WEIGHTS,
+    AMENITY_WEIGHTS
+)
+
+from .deferred_acceptance import (
+    DeferredAcceptanceEngine,
+    MatchResult,
+    DiagnosticMetrics,
+    run_deferred_acceptance
+)
+
 __all__ = [
+    # Filters
     'is_listing_pair_eligible',
     'is_group_eligible',
     'get_eligible_listings',
@@ -24,8 +53,30 @@ __all__ = [
     'normalize_city_name',
     'validate_listing_data_quality',
     'validate_group_data_quality',
-    'DateWindow'
+    'DateWindow',
+    # Feasible Pairs
+    'location_matches',
+    'date_matches',
+    'price_matches',
+    'hard_attributes_match',
+    'build_feasible_pairs',
+    'get_feasibility_statistics',
+    'analyze_rejection_reasons',
+    # Scoring
+    'calculate_group_score',
+    'calculate_listing_score',
+    'rank_listings_for_group',
+    'rank_groups_for_listing',
+    'build_preference_lists',
+    'GROUP_SCORING_WEIGHTS',
+    'LISTING_SCORING_WEIGHTS',
+    'AMENITY_WEIGHTS',
+    # Deferred Acceptance (Phase 4)
+    'DeferredAcceptanceEngine',
+    'MatchResult',
+    'DiagnosticMetrics',
+    'run_deferred_acceptance'
 ]
 
-__version__ = '0.1.0'
+__version__ = '0.4.0'
 __algorithm__ = 'Deferred Acceptance (Gale-Shapley)'
