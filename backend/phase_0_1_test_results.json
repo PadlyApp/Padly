@@ -1,0 +1,261 @@
+{
+  "timestamp": "2025-11-11T01:47:52.774141",
+  "summary": {
+    "eligible_listings": 24,
+    "eligible_groups": 5,
+    "date_windows": 5
+  },
+  "sample_listings": [
+    {
+      "id": "3c909256-3ac7-4d3a-9b2f-009d1bd1f83e",
+      "host_user_id": "914b026b-1dfd-4717-aaeb-02fbf112d479",
+      "status": "active",
+      "title": "Affordable Entire Place on Gabilan, Santa Ana",
+      "description": "A entire place in Santa Ana with a large backyard and a large backyard. Ideal for students.",
+      "property_type": "entire_place",
+      "lease_type": "fixed_term",
+      "lease_duration_months": 17,
+      "number_of_bedrooms": 4,
+      "number_of_bathrooms": 1.5,
+      "area_sqft": 749,
+      "furnished": false,
+      "price_per_month": 2132.0,
+      "utilities_included": true,
+      "deposit_amount": 1392.0,
+      "address_line_1": "8355 Gabilan",
+      "address_line_2": null,
+      "city": "Santa Ana",
+      "state_province": "CA",
+      "postal_code": "53413",
+      "country": "USA",
+      "latitude": 36.53336229,
+      "longitude": -121.17822215,
+      "available_from": "2025-06-12",
+      "available_to": null,
+      "amenities": {
+        "gym": true,
+        "pool": false,
+        "wifi": true,
+        "heating": true,
+        "laundry": "none",
+        "parking": false,
+        "dishwasher": false,
+        "pets_allowed": true,
+        "air_conditioning": true
+      },
+      "house_rules": "Pets allowed with deposit.",
+      "shared_spaces": [
+        "bathroom",
+        "yard",
+        "kitchen",
+        "living_room"
+      ],
+      "view_count": 0,
+      "created_at": "2025-10-31T03:10:42.63175+00:00",
+      "updated_at": "2025-10-31T03:10:42.63175+00:00"
+    },
+    {
+      "id": "5d453e25-7dd6-4413-92dc-496460f3c439",
+      "host_user_id": "3cd3b4e1-06b5-4ef9-b4a9-608703989579",
+      "status": "active",
+      "title": "Cozy Entire Place on Reno, San Diego",
+      "description": "Experience the best of San Diego in this entire place, featuring natural lighting and spacious living areas. Great for young professionals.",
+      "property_type": "entire_place",
+      "lease_type": "open_ended",
+      "lease_duration_months": null,
+      "number_of_bedrooms": 4,
+      "number_of_bathrooms": 4.0,
+      "area_sqft": 1781,
+      "furnished": true,
+      "price_per_month": 3087.0,
+      "utilities_included": false,
+      "deposit_amount": 548.0,
+      "address_line_1": "8901 Reno",
+      "address_line_2": null,
+      "city": "San Diego",
+      "state_province": "CA",
+      "postal_code": "30568",
+      "country": "USA",
+      "latitude": 37.58264299,
+      "longitude": -120.53367398,
+      "available_from": "2025-11-24",
+      "available_to": null,
+      "amenities": {
+        "gym": true,
+        "pool": true,
+        "wifi": false,
+        "heating": true,
+        "laundry": "on_site",
+        "parking": false,
+        "dishwasher": false,
+        "pets_allowed": true,
+        "air_conditioning": false
+      },
+      "house_rules": "Respect quiet hours (10pm-8am).",
+      "shared_spaces": [
+        "living_room",
+        "laundry"
+      ],
+      "view_count": 0,
+      "created_at": "2025-10-31T03:10:42.086211+00:00",
+      "updated_at": "2025-10-31T03:10:42.086211+00:00"
+    },
+    {
+      "id": "30c1fd07-e10b-41e9-8103-6383d33f89c2",
+      "host_user_id": "3cd3b4e1-06b5-4ef9-b4a9-608703989579",
+      "status": "active",
+      "title": "Spacious Shared Room on Cross, Santa Ana",
+      "description": "Experience the best of Santa Ana in this shared room, featuring natural lighting and a private balcony. Great for young professionals.",
+      "property_type": "shared_room",
+      "lease_type": "fixed_term",
+      "lease_duration_months": 10,
+      "number_of_bedrooms": 5,
+      "number_of_bathrooms": 1.7,
+      "area_sqft": 692,
+      "furnished": true,
+      "price_per_month": 3358.0,
+      "utilities_included": false,
+      "deposit_amount": 2063.0,
+      "address_line_1": "3980 Cross",
+      "address_line_2": null,
+      "city": "Santa Ana",
+      "state_province": "CA",
+      "postal_code": "44241",
+      "country": "USA",
+      "latitude": 37.15951967,
+      "longitude": -117.21577591,
+      "available_from": "2024-09-30",
+      "available_to": null,
+      "amenities": {
+        "gym": false,
+        "pool": true,
+        "wifi": false,
+        "heating": true,
+        "laundry": "none",
+        "parking": true,
+        "dishwasher": true,
+        "pets_allowed": true,
+        "air_conditioning": false
+      },
+      "house_rules": "Respect quiet hours (10pm-8am).",
+      "shared_spaces": [
+        "living_room",
+        "bathroom",
+        "laundry"
+      ],
+      "view_count": 0,
+      "created_at": "2025-10-31T03:10:41.776721+00:00",
+      "updated_at": "2025-10-31T03:10:41.776721+00:00"
+    }
+  ],
+  "sample_groups": [
+    {
+      "id": "c103b526-68f6-40ba-901d-f9fa93b232d8",
+      "creator_user_id": "edad3c6c-f697-451c-9dab-f50cbd2e9270",
+      "status": "active",
+      "group_name": "Anaheim Professional Squad",
+      "description": "We're organized, responsible, and ready to find a great place!",
+      "target_city": "Anaheim",
+      "budget_per_person_min": 1326.0,
+      "budget_per_person_max": 2079.0,
+      "target_move_in_date": "2026-02-11",
+      "target_group_size": 2,
+      "created_at": "2025-11-11T00:38:24.79308+00:00",
+      "updated_at": "2025-11-11T00:38:24.79308+00:00",
+      "members": [
+        {
+          "user_id": "edad3c6c-f697-451c-9dab-f50cbd2e9270",
+          "is_creator": true,
+          "joined_at": "2025-11-11T00:38:32.08152+00:00"
+        },
+        {
+          "user_id": "193c2b4f-c0c1-4bb9-bd6d-756a84566082",
+          "is_creator": false,
+          "joined_at": "2025-11-11T00:38:32.494871+00:00"
+        }
+      ],
+      "current_size": 2
+    },
+    {
+      "id": "c79ce467-a979-4f70-87c8-cca0ea48bf76",
+      "creator_user_id": "7975dfa1-92a6-4dce-ac4c-ceed70c62815",
+      "status": "active",
+      "group_name": "Active San Diego Living",
+      "description": "Seeking compatible roommates for a shared living experience.",
+      "target_city": "San Diego",
+      "budget_per_person_min": 1241.0,
+      "budget_per_person_max": 1965.0,
+      "target_move_in_date": "2026-01-17",
+      "target_group_size": 2,
+      "created_at": "2025-11-11T00:38:23.218002+00:00",
+      "updated_at": "2025-11-11T00:38:23.218002+00:00",
+      "members": [
+        {
+          "user_id": "7975dfa1-92a6-4dce-ac4c-ceed70c62815",
+          "is_creator": true,
+          "joined_at": "2025-11-11T00:38:31.340742+00:00"
+        }
+      ],
+      "current_size": 1
+    },
+    {
+      "id": "e7ef2a3c-ef7f-4e27-9f07-539d0b397829",
+      "creator_user_id": "4d477cd5-43b4-4cdc-954d-84e3b8c7b20c",
+      "status": "active",
+      "group_name": "Santa Ana Chill Squad",
+      "description": "Seeking compatible roommates for a shared living experience.",
+      "target_city": "Santa Ana",
+      "budget_per_person_min": 1096.0,
+      "budget_per_person_max": 1652.0,
+      "target_move_in_date": "2026-01-31",
+      "target_group_size": 2,
+      "created_at": "2025-11-11T00:38:22.665775+00:00",
+      "updated_at": "2025-11-11T00:38:22.665775+00:00",
+      "members": [
+        {
+          "user_id": "4d477cd5-43b4-4cdc-954d-84e3b8c7b20c",
+          "is_creator": true,
+          "joined_at": "2025-11-11T00:38:30.439557+00:00"
+        },
+        {
+          "user_id": "32ccee0d-c834-4010-84e3-ca5084eabfae",
+          "is_creator": false,
+          "joined_at": "2025-11-11T00:38:30.954681+00:00"
+        }
+      ],
+      "current_size": 2
+    }
+  ],
+  "windows": [
+    {
+      "city": "anaheim",
+      "start": "2025-12-13",
+      "end": "2026-04-12",
+      "group_count": 1
+    },
+    {
+      "city": "san diego",
+      "start": "2025-11-18",
+      "end": "2026-03-18",
+      "group_count": 1
+    },
+    {
+      "city": "santa ana",
+      "start": "2025-12-02",
+      "end": "2026-04-01",
+      "group_count": 1
+    },
+    {
+      "city": "sacramento",
+      "start": "2025-12-20",
+      "end": "2026-04-19",
+      "group_count": 1
+    },
+    {
+      "city": "san francisco",
+      "start": "2025-12-24",
+      "end": "2026-04-23",
+      "group_count": 1
+    }
+  ]
+}
