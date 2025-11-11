@@ -88,17 +88,51 @@ def parse_group(raw_group: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Parsed group dictionary with serialized values
     """
+    # Parse house rules from comma-separated string to array
+    house_rules_str = raw_group.get('target_house_rules')
+    house_rules_array = []
+    if house_rules_str and isinstance(house_rules_str, str):
+        # Split by comma and strip whitespace from each rule
+        house_rules_array = [rule.strip() for rule in house_rules_str.split(',') if rule.strip()]
+    elif isinstance(house_rules_str, list):
+        # Already an array
+        house_rules_array = house_rules_str
+    
     parsed = {
         'id': raw_group.get('id'),
         'creator_user_id': raw_group.get('creator_user_id'),
         'status': raw_group.get('status'),
         'group_name': raw_group.get('group_name'),
         'description': raw_group.get('description'),
+        
+        # Location preferences
         'target_city': raw_group.get('target_city'),
+        'target_state_province': raw_group.get('target_state_province'),
+        'target_country': raw_group.get('target_country'),
+        
+        # Budget preferences
         'budget_per_person_min': serialize_value(raw_group.get('budget_per_person_min')),
         'budget_per_person_max': serialize_value(raw_group.get('budget_per_person_max')),
+        
+        # Move-in and lease preferences
         'target_move_in_date': serialize_value(raw_group.get('target_move_in_date')),
+        'target_lease_duration_months': raw_group.get('target_lease_duration_months'),
+        'target_lease_type': raw_group.get('target_lease_type'),
+        
+        # Property requirements
+        'target_bedrooms': raw_group.get('target_bedrooms'),
+        'target_bathrooms': serialize_value(raw_group.get('target_bathrooms')),
+        'target_furnished': raw_group.get('target_furnished'),
+        'target_utilities_included': raw_group.get('target_utilities_included'),
+        'target_deposit_amount': serialize_value(raw_group.get('target_deposit_amount')),
+        
+        # House rules (converted from comma-separated string to array)
+        'target_house_rules': house_rules_array,
+        
+        # Group size
         'target_group_size': raw_group.get('target_group_size', 2),
+        
+        # Timestamps
         'created_at': serialize_value(raw_group.get('created_at')),
         'updated_at': serialize_value(raw_group.get('updated_at'))
     }
