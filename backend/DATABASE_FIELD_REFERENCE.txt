@@ -1,0 +1,336 @@
+================================================================================
+PADLY DATABASE FIELD REFERENCE
+Generated: 2025-11-11
+================================================================================
+
+================================================================================
+TABLE: LISTINGS
+================================================================================
+
+FIELD STRUCTURE:
+--------------------------------------------------------------------------------
+Field Name                     Type                 Example Value
+--------------------------------------------------------------------------------
+address_line_1                 text                 "1523 Arnold"
+address_line_2                 null                 null
+amenities                      jsonb               
+                                                    {
+                                                      "gym": true,
+                                                      "pool": false,
+                                                      "wifi": true,
+                                                      "heating": false,
+                                                      "laundry": "none",
+                                                      "parking": false,
+                                                      "dishwasher": true,
+                                                      "pets_allowed": false,
+                                                      "air_conditioning": true
+                                                    }
+area_sqft                      integer              2112
+available_from                 timestamp/date       "2025-09-16"
+available_to                   null                 null
+city                           text                 "Oakland"
+country                        text                 "USA"
+created_at                     timestamp/date       "2025-10-30T07:44:30.909272+00:00"
+deposit_amount                 numeric/float        1044.0
+description                    text                
+                                                    "Experience the best of Oakland in this private ..."
+furnished                      boolean              false
+host_user_id                   uuid                 "80c208da-273e-4f3c-afba-6ddedb9aee52"
+house_rules                    text                 "Respect quiet hours (10pm-8am)."
+id                             uuid                 "99b6424f-07b7-4aec-944a-bef8fe2c3e91"
+latitude                       numeric/float        35.88768505
+lease_duration_months          null                 null
+lease_type                     text                 "open_ended"
+longitude                      numeric/float        -121.4916096
+number_of_bathrooms            numeric/float        2.1
+number_of_bedrooms             integer              1
+postal_code                    text                 "97438"
+price_per_month                numeric/float        1749.0
+property_type                  text                 "private_room"
+shared_spaces                  array                ["yard", "laundry", "living_room", "bathroom"]
+state_province                 text                 "CA"
+status                         text                 "draft"
+title                          text                 "Spacious Private Room on Arnold, Oakland"
+updated_at                     timestamp/date       "2025-10-30T07:44:30.909272+00:00"
+utilities_included             boolean              false
+view_count                     integer              0
+--------------------------------------------------------------------------------
+
+FULL JSON EXAMPLE:
+--------------------------------------------------------------------------------
+{
+  "id": "99b6424f-07b7-4aec-944a-bef8fe2c3e91",
+  "host_user_id": "80c208da-273e-4f3c-afba-6ddedb9aee52",
+  "status": "draft",
+  "title": "Spacious Private Room on Arnold, Oakland",
+  "description": "Experience the best of Oakland in this private room, featuring a large backyard and a private balcony. Great for families.",
+  "property_type": "private_room",
+  "lease_type": "open_ended",
+  "lease_duration_months": null,
+  "number_of_bedrooms": 1,
+  "number_of_bathrooms": 2.1,
+  "area_sqft": 2112,
+  "furnished": false,
+  "price_per_month": 1749.0,
+  "utilities_included": false,
+  "deposit_amount": 1044.0,
+  "address_line_1": "1523 Arnold",
+  "address_line_2": null,
+  "city": "Oakland",
+  "state_province": "CA",
+  "postal_code": "97438",
+  "country": "USA",
+  "latitude": 35.88768505,
+  "longitude": -121.4916096,
+  "available_from": "2025-09-16",
+  "available_to": null,
+  "amenities": {
+    "gym": true,
+    "pool": false,
+    "wifi": true,
+    "heating": false,
+    "laundry": "none",
+    "parking": false,
+    "dishwasher": true,
+    "pets_allowed": false,
+    "air_conditioning": true
+  },
+  "house_rules": "Respect quiet hours (10pm-8am).",
+  "shared_spaces": [
+    "yard",
+    "laundry",
+    "living_room",
+    "bathroom"
+  ],
+  "view_count": 0,
+  "created_at": "2025-10-30T07:44:30.909272+00:00",
+  "updated_at": "2025-10-30T07:44:30.909272+00:00"
+}
+
+
+================================================================================
+TABLE: ROOMMATE_GROUPS
+================================================================================
+
+FIELD STRUCTURE:
+--------------------------------------------------------------------------------
+Field Name                     Type                 Example Value
+--------------------------------------------------------------------------------
+budget_per_person_max          numeric/float        1769.0
+budget_per_person_min          numeric/float        1285.0
+created_at                     timestamp/date       "2025-11-11T00:38:17.308064+00:00"
+creator_user_id                uuid                 "80c208da-273e-4f3c-afba-6ddedb9aee52"
+description                    text                
+                                                    "We're organized, responsible, and ready to find..."
+group_members                  array               
+                                                    [{"user_id": "80c208da-273e-4f3c-afba-6ddedb9aee52", "group_id": "121241bc-6679-4709-b749-9e5555d67910", "joined_at": "2025-11-11T00:38:25.221489+00:00", "is_creator": true}, {"user_id": "ecdbf04a-e03f-4ea5-a664-f625169e000c", "group_id": "121241bc-6679-4709-b749-9e5555d67910", "joined_at": "2025-11-11T00:38:25.598832+00:00", "is_creator": false}, {"user_id": "820676d3-ae09-49c1-8e66-554f702d9bcf", "group_id": "121241bc-6679-4709-b749-9e5555d67910", "joined_at": "2025-11-11T00:38:25.965498+00:00", "is_creator": false}]
+group_name                     timestamp/date       "The San Francisco Collectives"
+id                             uuid                 "121241bc-6679-4709-b749-9e5555d67910"
+status                         text                 "inactive"
+target_bathrooms               null                 null
+target_bedrooms                null                 null
+target_city                    text                 "San Francisco"
+target_country                 text                 "USA"
+target_deposit_amount          null                 null
+target_furnished               boolean              false
+target_group_size              integer              4
+target_house_rules             null                 null
+target_lease_duration_months   null                 null
+target_lease_type              null                 null
+target_move_in_date            timestamp/date       "2026-02-08"
+target_state_province          null                 null
+target_utilities_included      boolean              false
+updated_at                     timestamp/date       "2025-11-11T00:38:17.308064+00:00"
+--------------------------------------------------------------------------------
+
+FULL JSON EXAMPLE:
+--------------------------------------------------------------------------------
+{
+  "id": "121241bc-6679-4709-b749-9e5555d67910",
+  "creator_user_id": "80c208da-273e-4f3c-afba-6ddedb9aee52",
+  "group_name": "The San Francisco Collectives",
+  "description": "We're organized, responsible, and ready to find a great place!",
+  "target_city": "San Francisco",
+  "budget_per_person_min": 1285.0,
+  "budget_per_person_max": 1769.0,
+  "target_move_in_date": "2026-02-08",
+  "target_group_size": 4,
+  "status": "inactive",
+  "created_at": "2025-11-11T00:38:17.308064+00:00",
+  "updated_at": "2025-11-11T00:38:17.308064+00:00",
+  "target_lease_duration_months": null,
+  "target_bedrooms": null,
+  "target_bathrooms": null,
+  "target_furnished": false,
+  "target_utilities_included": false,
+  "target_deposit_amount": null,
+  "target_state_province": null,
+  "target_country": "USA",
+  "target_house_rules": null,
+  "target_lease_type": null,
+  "group_members": [
+    {
+      "user_id": "80c208da-273e-4f3c-afba-6ddedb9aee52",
+      "group_id": "121241bc-6679-4709-b749-9e5555d67910",
+      "joined_at": "2025-11-11T00:38:25.221489+00:00",
+      "is_creator": true
+    },
+    {
+      "user_id": "ecdbf04a-e03f-4ea5-a664-f625169e000c",
+      "group_id": "121241bc-6679-4709-b749-9e5555d67910",
+      "joined_at": "2025-11-11T00:38:25.598832+00:00",
+      "is_creator": false
+    },
+    {
+      "user_id": "820676d3-ae09-49c1-8e66-554f702d9bcf",
+      "group_id": "121241bc-6679-4709-b749-9e5555d67910",
+      "joined_at": "2025-11-11T00:38:25.965498+00:00",
+      "is_creator": false
+    }
+  ]
+}
+
+
+================================================================================
+TABLE: GROUP_MEMBERS
+================================================================================
+
+FIELD STRUCTURE:
+--------------------------------------------------------------------------------
+Field Name                     Type                 Example Value
+--------------------------------------------------------------------------------
+group_id                       uuid                 "121241bc-6679-4709-b749-9e5555d67910"
+is_creator                     boolean              true
+joined_at                      timestamp/date       "2025-11-11T00:38:25.221489+00:00"
+user_id                        uuid                 "80c208da-273e-4f3c-afba-6ddedb9aee52"
+--------------------------------------------------------------------------------
+
+FULL JSON EXAMPLE:
+--------------------------------------------------------------------------------
+{
+  "group_id": "121241bc-6679-4709-b749-9e5555d67910",
+  "user_id": "80c208da-273e-4f3c-afba-6ddedb9aee52",
+  "is_creator": true,
+  "joined_at": "2025-11-11T00:38:25.221489+00:00"
+}
+
+
+================================================================================
+TABLE: USERS (Sample)
+================================================================================
+
+FIELD STRUCTURE:
+--------------------------------------------------------------------------------
+Field Name                     Type                 Example Value
+--------------------------------------------------------------------------------
+auth_id                        uuid                 "12a152a2-7102-4b59-b762-2a263dd746d5"
+bio                            null                 null
+company_name                   null                 null
+created_at                     timestamp/date       "2025-10-30T23:58:48.290333+00:00"
+email                          text                 "methodology2033@gmail.com"
+full_name                      timestamp/date       "Tammera Guthrie"
+id                             uuid                 "914b026b-1dfd-4717-aaeb-02fbf112d479"
+last_active_at                 timestamp/date       "2025-10-30T23:58:48.290333+00:00"
+profile_picture_url            null                 null
+role                           text                 "renter"
+role_title                     null                 null
+school_name                    null                 null
+updated_at                     timestamp/date       "2025-10-30T23:58:48.290333+00:00"
+verification_status            text                 "unverified"
+verification_type              null                 null
+verified_at                    null                 null
+verified_email                 null                 null
+--------------------------------------------------------------------------------
+
+
+================================================================================
+TABLE: PERSONAL_PREFERENCES
+================================================================================
+
+FIELD STRUCTURE:
+--------------------------------------------------------------------------------
+Field Name                     Type                 Example Value
+--------------------------------------------------------------------------------
+budget_max                     null                 null
+budget_min                     null                 null
+lifestyle_preferences          jsonb               
+                                                    {
+                                                      "housing": {
+                                                        "heating": true,
+                                                        "dishwasher": true,
+                                                        "gym_access": true,
+                                                        "lease_type": "fixed_term",
+                                                        "move_in_date": "2026-01-09",
+                                                        "laundry_in_unit": true,
+                                                        "air_conditioning": true,
+                                                        "parking_required": true,
+                                                        "furnished_required": true
+                                                      },
+                                                      "roommate": {
+                                                        "age_max": 24,
+                                                        "age_min": 20,
+                                                        "pet_types": [],
+                                                        "smoking_ok": true,
+                                                        "guest_policy": "rarely",
+                                                        "languages_spoken": [],
+                                                        "occupation_types": [],
+                                                        "cleanliness_level": "moderately_clean",
+                                                        "gender_preference": "male",
+                                                        "dietary_preferences": [
+                                                          "gluten_free"
+                                                        ]
+                                                      }
+                                                    }
+move_in_date                   timestamp/date       "2026-01-09"
+target_city                    null                 null
+updated_at                     timestamp/date       "2025-10-22T16:29:31.306324+00:00"
+user_id                        uuid                 "0f571334-58a1-4672-af03-46717501e7a5"
+--------------------------------------------------------------------------------
+
+FULL JSON EXAMPLE:
+--------------------------------------------------------------------------------
+{
+  "user_id": "0f571334-58a1-4672-af03-46717501e7a5",
+  "target_city": null,
+  "budget_min": null,
+  "budget_max": null,
+  "move_in_date": "2026-01-09",
+  "lifestyle_preferences": {
+    "housing": {
+      "heating": true,
+      "dishwasher": true,
+      "gym_access": true,
+      "lease_type": "fixed_term",
+      "move_in_date": "2026-01-09",
+      "laundry_in_unit": true,
+      "air_conditioning": true,
+      "parking_required": true,
+      "furnished_required": true
+    },
+    "roommate": {
+      "age_max": 24,
+      "age_min": 20,
+      "pet_types": [],
+      "smoking_ok": true,
+      "guest_policy": "rarely",
+      "languages_spoken": [],
+      "occupation_types": [],
+      "cleanliness_level": "moderately_clean",
+      "gender_preference": "male",
+      "dietary_preferences": [
+        "gluten_free"
+      ]
+    }
+  },
+  "updated_at": "2025-10-22T16:29:31.306324+00:00"
+}
+
+
+================================================================================
+SUMMARY
+================================================================================
+
+Total Listings: 123
+Total Roommate Groups: 12
+Total Users: 44
+Total Group Members: 20

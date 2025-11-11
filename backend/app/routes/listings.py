@@ -8,8 +8,6 @@ from typing import Optional
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import ListingCreate, ListingUpdate
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api", tags=["listings"])
 
@@ -63,14 +61,14 @@ async def list_listings(
         order="created_at.desc"
     )
     
-    return JSONResponse(content=jsonable_encoder({
+    return {
         "status": "success",
         "message": "Listings fetched successfully",
         "data": {
             "count": len(listings),
             "listings": listings
         }
-    }))
+    }
 
 
 @router.get("/listings/{listing_id}")
@@ -89,10 +87,10 @@ async def get_listing(
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
     
-    return JSONResponse(content=jsonable_encoder({
+    return {
         "status": "success",
         "data": listing
-    }))
+    }
 
 
 @router.post("/listings")
@@ -113,11 +111,11 @@ async def create_listing(
         data=data
     )
     
-    return JSONResponse(content=jsonable_encoder({
+    return {
         "status": "success",
         "message": "Listing created successfully",
         "data": listing
-    }))
+    }
 
 
 @router.put("/listings/{listing_id}")

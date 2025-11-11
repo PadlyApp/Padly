@@ -7,21 +7,6 @@ import httpx
 from typing import Optional, Dict, Any, List
 from fastapi import HTTPException
 from app.db import SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY
-import datetime
-from decimal import Decimal
-
-
-def sanitize_for_post(obj):
-    if isinstance(obj, dict):
-        return {k: sanitize_for_post(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize_for_post(v) for v in obj]
-    elif isinstance(obj, Decimal):
-        return float(obj)
-    elif isinstance(obj, (datetime.date, datetime.datetime)):
-        return obj.isoformat()
-    else:
-        return obj
 
 
 class SupabaseHTTPClient:
@@ -154,7 +139,6 @@ class SupabaseHTTPClient:
             Created record
         """
         url = f"{self.base_url}/{table}"
-        data = sanitize_for_post(data)
         
         try:
             async with httpx.AsyncClient() as client:
@@ -191,7 +175,6 @@ class SupabaseHTTPClient:
         """
         url = f"{self.base_url}/{table}"
         params = {id_column: f"eq.{id_value}"}
-        data = sanitize_for_post(data)
         
         try:
             async with httpx.AsyncClient() as client:
