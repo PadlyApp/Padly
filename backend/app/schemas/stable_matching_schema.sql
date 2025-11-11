@@ -1,17 +1,37 @@
 -- Stable Matching Algorithm - Database Schema
 -- Phase 0: Tables for Deferred Acceptance (Gale-Shapley) matching
+-- 
+-- NOTE: If tables already exist, use stable_matching_schema_migration.sql instead
+-- This file assumes clean slate creation
 
 -- =============================================================================
 -- 1. Extend existing tables with new fields
 -- =============================================================================
 
--- Add fields to listings table
-ALTER TABLE public.listings 
-ADD COLUMN IF NOT EXISTS accepts_groups boolean DEFAULT true,
-ADD COLUMN IF NOT EXISTS max_occupancy integer;
+DO $$ 
+BEGIN
+  -- Check and add accepts_groups column
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'listings' 
+    AND column_name = 'accepts_groups'
+  ) THEN
+    ALTER TABLE public.listings ADD COLUMN accepts_groups boolean DEFAULT true;
+    COMMENT ON COLUMN public.listings.accepts_groups IS 'Whether this listing accepts roommate groups (for stable matching)';
+  END IF;
 
-COMMENT ON COLUMN public.listings.accepts_groups IS 'Whether this listing accepts roommate groups (for stable matching)';
-COMMENT ON COLUMN public.listings.max_occupancy IS 'Maximum number of occupants allowed';
+  -- Check and add max_occupancy column
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'listings' 
+    AND column_name = 'max_occupancy'
+  ) THEN
+    ALTER TABLE public.listings ADD COLUMN max_occupancy integer;
+    COMMENT ON COLUMN public.listings.max_occupancy IS 'Maximum number of occupants allowed';
+  END IF;
+END $$;
 
 -- =============================================================================
 -- 2. Stable Matches Table - Stores matching results
