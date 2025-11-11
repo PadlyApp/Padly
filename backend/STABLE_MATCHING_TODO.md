@@ -258,43 +258,42 @@
 
 ---
 
-## 📋 Phase 5: Output & Persistence
+## 📋 Phase 5: Database Persistence ✅ **COMPLETE**
 
-### 5.1 Match Explanation Generator
-- [ ] Create function `generate_match_explanations(group: Dict, listing: Dict, scores: Dict) -> List[str]`
-  - [ ] Price explanation: "Price per person $X fits your range: $A–$B"
-  - [ ] Date explanation: "Move-in is N days from your target"
-  - [ ] Amenities explanation: "Laundry + AC + parking match your preferences"
-  - [ ] Verification explanation: "2/2 group members verified"
-  - [ ] Return top 3-4 most relevant reasons
+**Status**: Implementation complete (schema needs DB application)  
+**Documentation**: `PHASE_5_COMPLETE.md`  
+**Code**: `app/services/stable_matching/persistence.py` (450+ lines)  
+**Schema**: `app/schemas/stable_matching_schema.sql` (updated)
 
-### 5.2 Unmatched Reasons Generator
-- [ ] Create function `generate_unmatched_reasons(group: Dict, all_listings: List) -> Dict`
-  - [ ] Track why group couldn't match:
-    - [ ] No feasible pairs (count by: location, date, price, attributes)
-    - [ ] Feasible but not preferred by listings (rejected by all)
-    - [ ] Top 5 near-misses (listings that almost matched)
-  - [ ] Return structured breakdown
+### 5.1 Save Matches to Database
+- [x] Create function `save_matches(matches, diagnostics, supabase_client)`
+  - [x] Save diagnostics to match_diagnostics table
+  - [x] Save each match to stable_matches table
+  - [x] Use batch inserts for performance (100 at a time)
+  - [x] Handle transaction rollback on failure
+- [x] Return: saved_count, diagnostics_id
 
-### 5.3 Save Matches to Database
-- [ ] Create function `save_matches_to_db(matches: Dict, match_round_id: str, metadata: Dict)`
-  - [ ] For each (group_id, listing_id) in matches:
-    - [ ] Get group and listing scores
-    - [ ] Get ranks
-    - [ ] Generate explanations
-    - [ ] Insert into `stable_matches` table
-  - [ ] Set status = 'active'
-  - [ ] Store match_round_id for tracking
+### 5.2 Retrieve Matches
+- [x] Create function `get_active_matches(city, group_id, listing_id)`
+  - [x] Query stable_matches table
+  - [x] Filter by status = 'active'
+  - [x] Filter by city, group, or listing if provided
+  - [x] Order by group_rank (best matches first)
+- [x] Create function `get_match_for_group(group_id)`
+  - [x] Return single match for a group
+- [x] Create function `get_match_for_listing(listing_id)`
+  - [x] Return single match for a listing
 
-### 5.4 Save Diagnostics
-- [ ] Create function `save_diagnostics(match_round_id: str, city: str, window: DateWindow, results: Dict)`
-  - [ ] Calculate metrics:
-    - [ ] Match rate: matched_groups / total_groups
-    - [ ] Median rank of matched listings for groups
-    - [ ] Top-3 rate: % of groups that got top-3 choice
-    - [ ] Unmatched reasons breakdown
-    - [ ] Average verification rate of matched groups
-  - [ ] Insert into `match_diagnostics` table
+### 5.3 Match Management
+- [x] Create function `expire_old_matches(days_threshold=30)`
+  - [x] Update status to 'expired' for old matches
+  - [x] Return count of expired matches
+- [x] Create function `delete_matches_for_group(group_id)`
+  - [x] Use case: group dissolved or preferences changed
+- [x] Create function `delete_matches_for_listing(listing_id)`
+  - [x] Use case: listing removed or became unavailable
+
+**Note**: Schema must be applied via Supabase Dashboard before testing. See `PHASE_5_COMPLETE.md` for instructions.
 
 ---
 
