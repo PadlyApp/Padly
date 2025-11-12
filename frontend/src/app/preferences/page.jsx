@@ -484,7 +484,7 @@ function PreferencesPageContent() {
                       </Text>
                       
                       <Stack gap="md">
-                        <Select
+                        {/*<Select
                           label="Smoking Policy"
                           placeholder="Select preference"
                           data={[
@@ -496,9 +496,13 @@ function PreferencesPageContent() {
                           value={housingPrefs.smoking_allowed}
                           onChange={(v) => updateHousingPref('smoking_allowed', v)}
                           clearable
-                        />
-                        
-                        <Select
+                        /*/>}
+                        <Switch
+                        label="Smoking Policy"
+                        checked={housingPrefs.smoking_allowed=== true}
+                        onChange={(e) => updateHousingPref('smoking_allowed', e.currentTarget.checked ? true : null)}
+                      />
+                        {/*<Select
                           label="Pet Policy"
                           placeholder="Select preference"
                           data={[
@@ -512,9 +516,13 @@ function PreferencesPageContent() {
                           value={housingPrefs.pets_allowed}
                           onChange={(v) => updateHousingPref('pets_allowed', v)}
                           clearable
-                        />
-                        
-                        <Select
+                        />*/}
+                        <Switch
+                        label="Pets Policy"
+                        checked={housingPrefs.pets_allowed === true}
+                        onChange={(e) => updateHousingPref('pets_allowed', e.currentTarget.checked ? true : null)}
+                      />
+                        {/*<Select
                           label="Noise/Parties Policy"
                           placeholder="Select preference"
                           data={[
@@ -527,7 +535,12 @@ function PreferencesPageContent() {
                           onChange={(v) => updateHousingPref('noise_parties_allowed', v)}
                           clearable
                         />
-                      </Stack>
+                      </Stack>*/}
+                        <Switch
+                        label="Noise/Party Policy"
+                        checked={housingPrefs.noise_parties_allowed === true}
+                        onChange={(e) => updateHousingPref('noise_parties_allowed', e.currentTarget.checked ? true : null)}
+                      />
                     {/* <Switch
                       label="Laundry in unit"
                       checked={housingPrefs.laundry_in_unit === true}
