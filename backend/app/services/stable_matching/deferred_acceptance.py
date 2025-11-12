@@ -194,7 +194,7 @@ class DeferredAcceptanceEngine:
         if next_idx >= len(pref_list):
             return None  # Exhausted preference list
         
-        listing_id = pref_list[next_idx][0]  # (listing_id, score, rank)
+        listing_id = pref_list[next_idx][0]  # (listing_id, rank, score)
         self.next_proposal_index[group_id] += 1
         
         return listing_id
@@ -237,7 +237,8 @@ class DeferredAcceptanceEngine:
         pref_list = self.listing_prefs.get(listing_id, [])
         
         # Build rank lookup
-        ranks = {g_id: rank for g_id, score, rank in pref_list}
+        # Format: (group_id, rank, score)
+        ranks = {g_id: rank for g_id, rank, score in pref_list}
         
         rank_a = ranks.get(group_a, float('inf'))
         rank_b = ranks.get(group_b, float('inf'))
@@ -267,9 +268,10 @@ class DeferredAcceptanceEngine:
             listing_pref = self.listing_prefs.get(listing_id, [])
             
             # Find scores and ranks for this match
+            # Note: preference list format is (id, rank, score)
             group_score = 0.0
             group_rank = 0
-            for l_id, score, rank in group_pref:
+            for l_id, rank, score in group_pref:
                 if l_id == listing_id:
                     group_score = score
                     group_rank = rank
@@ -277,7 +279,7 @@ class DeferredAcceptanceEngine:
             
             listing_score = 0.0
             listing_rank = 0
-            for g_id, score, rank in listing_pref:
+            for g_id, rank, score in listing_pref:
                 if g_id == group_id:
                     listing_score = score
                     listing_rank = rank

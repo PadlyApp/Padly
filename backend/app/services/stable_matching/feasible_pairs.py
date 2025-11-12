@@ -1,19 +1,12 @@
 """
-Phase 2: Build Feasible Pairs (Hard Constraints)
-
-This module implements hard constraint checking to determine which group-listing
-pairs are feasible for matching. Only pairs that pass ALL hard constraints will
-be considered for scoring and matching.
-
-Hard constraints are non-negotiable requirements that must be met:
-- Location match (same city)
-- Date compatibility (within ±30 days)
-- Price affordability (within budget)
-- Required attributes (furnished, utilities, amenities)
+Stable Matching - Phase 2: Feasible Pair Building
+Builds pairs of (group, listing) that satisfy all hard constraints.
 """
 
-from typing import Dict, List, Tuple, Optional
-from datetime import date, datetime, timedelta
+from typing import List, Dict, Tuple, Optional
+from datetime import datetime, date, timedelta
+from decimal import Decimal
+from .scoring import check_hard_constraints
 
 
 # =============================================================================
@@ -177,8 +170,12 @@ def price_matches(group: Dict, listing: Dict) -> bool:
     # Calculate per-person price (2-person groups)
     per_person_price = listing_price / 2
     
-    # Check if within budget range
-    return budget_min <= per_person_price <= budget_max
+    # Add $100 buffer to budget max for flexibility
+    BUDGET_BUFFER = 100.0
+    budget_max_with_buffer = budget_max + BUDGET_BUFFER
+    
+    # Check if within budget range (with buffer on max)
+    return budget_min <= per_person_price <= budget_max_with_buffer
 
 
 # =============================================================================
@@ -273,29 +270,16 @@ def build_feasible_pairs(
             if not listing_id:
                 continue
             
-            # Track which constraints failed (for diagnostics)
-            failed_constraints = []
-            
-            # Check all hard constraints
-            if not location_matches(group, listing):
-                failed_constraints.append('location_mismatch')
-            
-            if not date_matches(group, listing, delta_days=date_delta_days):
-                failed_constraints.append('date_incompatible')
-            
-            if not price_matches(group, listing):
-                failed_constraints.append('price_unaffordable')
-            
-            if not hard_attributes_match(group, listing):
-                failed_constraints.append('required_attributes_missing')
+            # Check all hard constraints using the unified scoring function
+            passes, rejection_reason = check_hard_constraints(group, listing)
             
             # If all constraints passed, add to feasible pairs
-            if not failed_constraints:
+            if passes:
                 feasible_pairs.append((group_id, listing_id))
             elif include_rejection_reasons:
                 group_rejections.append({
                     'listing_id': listing_id,
-                    'reasons': failed_constraints
+                    'reasons': [rejection_reason]
                 })
         
         # Store rejection reasons for this group

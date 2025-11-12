@@ -32,8 +32,7 @@ from .scoring import (
     rank_groups_for_listing,
     build_preference_lists,
     GROUP_SCORING_WEIGHTS,
-    LISTING_SCORING_WEIGHTS,
-    AMENITY_WEIGHTS
+    LISTING_SCORING_WEIGHTS
 )
 
 from .deferred_acceptance import (
@@ -77,7 +76,6 @@ __all__ = [
     'build_preference_lists',
     'GROUP_SCORING_WEIGHTS',
     'LISTING_SCORING_WEIGHTS',
-    'AMENITY_WEIGHTS',
     # Deferred Acceptance (Phase 4)
     'DeferredAcceptanceEngine',
     'MatchResult',
