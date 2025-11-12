@@ -6,6 +6,7 @@ CREATE TABLE public.group_members (
   user_id uuid NOT NULL,
   is_creator boolean DEFAULT false,
   joined_at timestamp with time zone NOT NULL DEFAULT now(),
+  status character varying NOT NULL DEFAULT 'accepted'::character varying CHECK (status::text = ANY (ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying]::text[])),
   CONSTRAINT group_members_pkey PRIMARY KEY (group_id, user_id),
   CONSTRAINT group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.roommate_groups(id),
   CONSTRAINT group_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
@@ -52,8 +53,33 @@ CREATE TABLE public.listings (
   view_count integer DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  accepts_groups boolean DEFAULT true,
+  max_occupancy integer,
   CONSTRAINT listings_pkey PRIMARY KEY (id),
   CONSTRAINT listings_host_user_id_fkey FOREIGN KEY (host_user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.match_diagnostics (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  city text NOT NULL,
+  date_window_start date NOT NULL,
+  date_window_end date NOT NULL,
+  total_groups integer NOT NULL,
+  total_listings integer NOT NULL,
+  feasible_pairs integer NOT NULL DEFAULT 0,
+  matched_groups integer NOT NULL,
+  matched_listings integer NOT NULL,
+  unmatched_groups integer NOT NULL,
+  unmatched_listings integer NOT NULL,
+  proposals_sent integer NOT NULL DEFAULT 0,
+  proposals_rejected integer NOT NULL DEFAULT 0,
+  iterations integer NOT NULL DEFAULT 0,
+  avg_group_rank numeric NOT NULL DEFAULT 0,
+  avg_listing_rank numeric NOT NULL DEFAULT 0,
+  match_quality_score numeric NOT NULL DEFAULT 0,
+  is_stable boolean NOT NULL DEFAULT false,
+  stability_check_passed boolean NOT NULL DEFAULT false,
+  executed_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT match_diagnostics_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.personal_preferences (
   user_id uuid NOT NULL,
@@ -62,7 +88,6 @@ CREATE TABLE public.personal_preferences (
   budget_max numeric,
   move_in_date date,
   lifestyle_preferences jsonb,
-  preferred_neighborhoods ARRAY,
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT personal_preferences_pkey PRIMARY KEY (user_id),
   CONSTRAINT personal_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
@@ -80,6 +105,16 @@ CREATE TABLE public.roommate_groups (
   status USER-DEFINED NOT NULL DEFAULT 'active'::post_status,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  target_lease_duration_months integer,
+  target_bedrooms integer,
+  target_bathrooms numeric,
+  target_furnished boolean DEFAULT false,
+  target_utilities_included boolean DEFAULT false,
+  target_deposit_amount numeric,
+  target_state_province text,
+  target_country text DEFAULT 'USA'::text,
+  target_house_rules text,
+  target_lease_type USER-DEFINED,
   CONSTRAINT roommate_groups_pkey PRIMARY KEY (id),
   CONSTRAINT roommate_groups_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id)
 );
@@ -103,6 +138,22 @@ CREATE TABLE public.roommate_posts (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT roommate_posts_pkey PRIMARY KEY (id),
   CONSTRAINT roommate_posts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+);
+CREATE TABLE public.stable_matches (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  diagnostics_id uuid,
+  group_id text NOT NULL,
+  listing_id text NOT NULL,
+  group_score numeric NOT NULL,
+  listing_score numeric NOT NULL,
+  group_rank integer NOT NULL,
+  listing_rank integer NOT NULL,
+  matched_at timestamp with time zone NOT NULL DEFAULT now(),
+  is_stable boolean NOT NULL DEFAULT true,
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'accepted'::text, 'rejected'::text, 'expired'::text])),
+  expires_at timestamp with time zone,
+  CONSTRAINT stable_matches_pkey PRIMARY KEY (id),
+  CONSTRAINT stable_matches_diagnostics_id_fkey FOREIGN KEY (diagnostics_id) REFERENCES public.match_diagnostics(id)
 );
 CREATE TABLE public.users (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),

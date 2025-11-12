@@ -1,442 +1,478 @@
 """
-Stable Matching - Phase 3: Two-Sided Scoring
-Calculates scores and rankings for both groups and listings.
+Stable Matching - Phase 3: Scoring & Preference Lists
+
+This module calculates compatibility scores between groups and listings
+based on hard constraints and soft preferences.
+
+Scoring Scheme v3.0:
+- Hard Constraints: Binary (must all pass)
+  * City match
+  * State match
+  * Budget range
+  * Bedroom count (≥ group size)
+  * Move-in date (±60 days)
+  * Lease type match
+  * Lease duration match (exact)
+  
+- Soft Preferences: 100 points total (5 categories × 20 points each)
+  * Bathroom count match (20 pts)
+  * Furnished preference match (20 pts)
+  * Utilities included preference match (20 pts)
+  * Deposit amount within range (20 pts)
+  * House rules compatibility (20 pts)
+
+Author: Padly Matching Team
+Version: 3.0.0
 """
 
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime, date, timedelta
 from decimal import Decimal
-import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# Configuration - Scoring Weights
+# Scoring Weights
 # =============================================================================
 
-# Group → Listing scoring weights (total should be ~1.0)
 GROUP_SCORING_WEIGHTS = {
-    'price_fit': 0.30,        # How well price fits budget
-    'date_fit': 0.25,         # How close move-in dates are
-    'amenities_fit': 0.25,    # How well amenities match
-    'listing_quality': 0.20,  # Listing freshness and completeness
-}
-
-# Listing → Group scoring weights (total should be ~1.0)
-LISTING_SCORING_WEIGHTS = {
-    'verification_trust': 0.35,  # How verified the group members are
-    'group_readiness': 0.30,     # Is group full and active
-    'date_alignment': 0.20,      # Date compatibility
-    'house_rules_fit': 0.15,     # Future: rules compatibility
-}
-
-# Amenity importance weights (for amenities_fit calculation)
-AMENITY_WEIGHTS = {
-    'wifi': 20,
-    'laundry': 20,
+    'bathrooms': 20,
     'furnished': 20,
-    'air_conditioning': 15,
-    'parking': 15,
-    'dishwasher': 10,
+    'utilities': 20,
+    'deposit': 20,
+    'house_rules': 20
 }
 
+LISTING_SCORING_WEIGHTS = {
+    'bathrooms': 20,
+    'furnished': 20,
+    'utilities': 20,
+    'deposit': 20,
+    'house_rules': 20
+}
+
+MAX_SCORE = 100
+
 
 # =============================================================================
-# 3.1 Group → Listing Score (S_g(l))
+# Hard Constraints
 # =============================================================================
 
-def calculate_price_fit_score(
-    listing_price: float,
-    budget_min: float,
-    budget_max: float
-) -> float:
+def check_hard_constraints(
+    group: Dict[str, Any],
+    listing: Dict[str, Any]
+) -> Tuple[bool, Optional[str]]:
     """
-    Calculate how well the listing price fits the group's budget.
-    Score is highest when price is near the midpoint of budget range.
+    Check if group and listing satisfy all hard constraints.
     
     Args:
-        listing_price: Price per month for the listing
-        budget_min: Group's minimum budget per person
-        budget_max: Group's maximum budget per person
+        group: Group data dictionary
+        listing: Listing data dictionary
         
     Returns:
-        Score from 0-100
+        Tuple of (passes, rejection_reason)
+        - (True, None) if all constraints pass
+        - (False, reason_string) if any constraint fails
     """
-    # Calculate per-person price (for 2-person group)
-    per_person_price = listing_price / 2
+    # 1. City Match (case-insensitive)
+    group_city = (group.get('target_city') or '').strip().lower()
+    listing_city = (listing.get('city') or '').strip().lower()
+    if group_city != listing_city:
+        return False, f"city_mismatch_{group_city}_vs_{listing_city}"
     
-    # If price is outside budget range, score is 0
-    if per_person_price < budget_min or per_person_price > budget_max:
-        return 0.0
+    # 2. State Match (case-insensitive)
+    group_state = (group.get('target_state_province') or '').strip().lower()
+    listing_state = (listing.get('state_province') or '').strip().lower()
+    if group_state != listing_state:
+        return False, f"state_mismatch_{group_state}_vs_{listing_state}"
     
-    # Calculate budget midpoint
-    budget_midpoint = (budget_min + budget_max) / 2
-    budget_range = budget_max - budget_min
+    # 3. Budget Range
+    group_size = group.get('target_group_size', 2)
+    min_budget = group.get('budget_per_person_min', 0)
+    max_budget = group.get('budget_per_person_max', 0)
+    listing_price = listing.get('price_per_month', 0)
     
-    # Calculate distance from midpoint as percentage of range
-    if budget_range > 0:
-        distance_pct = abs(per_person_price - budget_midpoint) / (budget_range / 2)
-    else:
-        distance_pct = 0.0
+    min_total = min_budget * group_size
+    max_total = (max_budget * group_size) + 100  # $100 buffer
     
-    # Score is higher when closer to midpoint (inverse of distance)
-    # Max score of 100 at midpoint, min score of 50 at edges
-    score = 100 - (distance_pct * 50)
+    if not (min_total <= listing_price <= max_total):
+        return False, f"budget_mismatch_${listing_price}_not_in_[${min_total},${max_total}]"
     
-    return max(0, min(100, score))
-
-
-def calculate_date_fit_score(
-    listing_available_from: date,
-    listing_available_to: Optional[date],
-    group_target_date: date
-) -> float:
-    """
-    Calculate how well the listing's availability matches the group's target date.
+    # 4. Bedroom Count
+    listing_bedrooms = listing.get('number_of_bedrooms', 0)
+    if listing_bedrooms < group_size:
+        return False, f"insufficient_bedrooms_{listing_bedrooms}_<_{group_size}"
     
-    Args:
-        listing_available_from: When listing becomes available
-        listing_available_to: When listing availability ends (None = open-ended)
-        group_target_date: Group's target move-in date
+    # 5. Move-in Date (±60 days)
+    group_date = group.get('target_move_in_date')
+    listing_date = listing.get('available_from')
+    
+    if group_date and listing_date:
+        # Convert to date objects if they're strings
+        if isinstance(group_date, str):
+            group_date = datetime.fromisoformat(group_date.replace('Z', '+00:00')).date()
+        if isinstance(listing_date, str):
+            listing_date = datetime.fromisoformat(listing_date.replace('Z', '+00:00')).date()
         
-    Returns:
-        Score from 0-100
-    """
-    # Convert strings to dates if needed
-    if isinstance(listing_available_from, str):
-        listing_available_from = datetime.fromisoformat(listing_available_from.replace('Z', '+00:00')).date()
-    if isinstance(listing_available_to, str):
-        listing_available_to = datetime.fromisoformat(listing_available_to.replace('Z', '+00:00')).date()
-    if isinstance(group_target_date, str):
-        group_target_date = datetime.fromisoformat(group_target_date.replace('Z', '+00:00')).date()
+        date_diff = abs((listing_date - group_date).days)
+        if date_diff > 60:
+            return False, f"date_mismatch_{date_diff}_days_apart"
     
-    # Calculate days difference
-    days_diff = abs((group_target_date - listing_available_from).days)
+    # 6. Lease Type Match
+    group_lease_type = (group.get('target_lease_type') or '').strip().lower()
+    listing_lease_type = (listing.get('lease_type') or '').strip().lower()
     
-    # Bonus if within ±7 days
-    if days_diff <= 7:
-        return 100.0
+    if group_lease_type and listing_lease_type:
+        if group_lease_type != listing_lease_type:
+            return False, f"lease_type_mismatch_{group_lease_type}_vs_{listing_lease_type}"
     
-    # Score decreases with distance
-    # 100 at 0 days, ~75 at 14 days, ~50 at 30 days, ~25 at 60 days
-    score = max(0, 100 - (days_diff / 60 * 75))
+    # 7. Lease Duration Match (Exact)
+    group_duration = group.get('target_lease_duration_months')
+    listing_duration = listing.get('lease_duration_months')
     
-    return score
+    if group_duration is not None and listing_duration is not None:
+        if group_duration != listing_duration:
+            return False, f"lease_duration_mismatch_{group_duration}_vs_{listing_duration}_months"
+    
+    return True, None
 
 
-def calculate_amenities_fit_score(
-    listing_amenities: Dict[str, Any],
-    group_preferences: Optional[Dict[str, Any]] = None
-) -> float:
-    """
-    Calculate how well listing amenities match group preferences.
-    
-    Args:
-        listing_amenities: Dictionary of listing amenities
-        group_preferences: Group's target preferences (optional)
-        
-    Returns:
-        Score from 0-100
-    """
-    if not listing_amenities:
-        return 50.0  # Neutral score if no amenity data
-    
-    total_weight = sum(AMENITY_WEIGHTS.values())
-    score = 0
-    
-    # Score each amenity
-    for amenity, weight in AMENITY_WEIGHTS.items():
-        # Check if listing has this amenity
-        has_amenity = False
-        
-        if amenity == 'laundry':
-            # Special handling for laundry (can be "in_unit", "on_site", "none", or boolean)
-            laundry = listing_amenities.get('laundry', False)
-            has_amenity = laundry and laundry != 'none'
-        elif amenity == 'furnished':
-            # This might be top-level or in amenities
-            has_amenity = listing_amenities.get('furnished', False)
-        else:
-            # Standard boolean amenity
-            has_amenity = listing_amenities.get(amenity, False) is True
-        
-        # Add weighted score
-        if has_amenity:
-            score += weight
-    
-    # Convert to 0-100 scale
-    return (score / total_weight) * 100
+# =============================================================================
+# Soft Preferences - Individual Scoring Functions
+# =============================================================================
 
-
-def calculate_listing_quality_score(
+def calculate_bathroom_score(
+    group: Dict[str, Any],
     listing: Dict[str, Any]
 ) -> float:
     """
-    Calculate listing quality score based on freshness and completeness.
-    
-    Args:
-        listing: Full listing dictionary
-        
-    Returns:
-        Score from 0-100
+    Score: 20 points max
+    - Meets or exceeds target: 20
+    - Within 0.5 of target: 10
+    - Below target: 5
     """
-    score = 0
+    target_bathrooms = group.get('target_bathrooms', 1.0)
+    listing_bathrooms = listing.get('number_of_bathrooms', 1.0)
     
-    # Freshness score (40 points max)
-    created_at = listing.get('created_at')
-    if created_at:
-        if isinstance(created_at, str):
-            try:
-                created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            except:
-                created_at = datetime.now()
-        
-        days_old = (datetime.now(created_at.tzinfo) - created_at).days
-        
-        # Newer is better: 40 pts if <30 days, 30 pts if <90 days, 20 pts if <180 days
-        if days_old < 30:
-            score += 40
-        elif days_old < 90:
-            score += 30
-        elif days_old < 180:
-            score += 20
-        else:
-            score += 10
-    else:
-        score += 20  # Neutral if no date
+    # Convert to float for comparison
+    if isinstance(target_bathrooms, (int, str)):
+        target_bathrooms = float(target_bathrooms)
+    if isinstance(listing_bathrooms, (int, str)):
+        listing_bathrooms = float(listing_bathrooms)
     
-    # Completeness score (60 points max)
-    completeness_points = 0
+    # Meets or exceeds target
+    if listing_bathrooms >= target_bathrooms:
+        return 20.0
     
-    # Has description (15 pts)
-    if listing.get('description'):
-        completeness_points += 15
+    # Within 0.5 of target
+    if listing_bathrooms >= target_bathrooms - 0.5:
+        return 10.0
     
-    # Has amenities data (15 pts)
-    if listing.get('amenities'):
-        completeness_points += 15
-    
-    # Has house rules (10 pts)
-    if listing.get('house_rules'):
-        completeness_points += 10
-    
-    # Has photos (future - 10 pts)
-    # For now, give partial credit if listing looks complete
-    completeness_points += 5
-    
-    # Has address details (10 pts)
-    if listing.get('address_line_1') and listing.get('postal_code'):
-        completeness_points += 10
-    
-    # Has coordinates (5 pts)
-    if listing.get('latitude') and listing.get('longitude'):
-        completeness_points += 5
-    
-    score += completeness_points
-    
-    return min(100, score)
+    # Below target
+    return 5.0
 
+
+def calculate_furnished_score(
+    group: Dict[str, Any],
+    listing: Dict[str, Any]
+) -> float:
+    """
+    Score: 20 points max
+    - Matches preference: 20
+    - Doesn't match: 10
+    """
+    group_prefers_furnished = group.get('target_furnished', False)
+    listing_is_furnished = listing.get('furnished', False)
+    
+    # Convert to boolean
+    if isinstance(group_prefers_furnished, str):
+        group_prefers_furnished = group_prefers_furnished.lower() in ['true', 't', '1', 'yes']
+    if isinstance(listing_is_furnished, str):
+        listing_is_furnished = listing_is_furnished.lower() in ['true', 't', '1', 'yes']
+    
+    # Preferences match
+    if group_prefers_furnished == listing_is_furnished:
+        return 20.0
+    
+    # Preferences don't match
+    return 10.0
+
+
+def calculate_utilities_score(
+    group: Dict[str, Any],
+    listing: Dict[str, Any]
+) -> float:
+    """
+    Score: 20 points max
+    - Matches preference: 20
+    - Doesn't match: 10
+    """
+    group_prefers_utilities = group.get('target_utilities_included', False)
+    listing_has_utilities = listing.get('utilities_included', False)
+    
+    # Convert to boolean
+    if isinstance(group_prefers_utilities, str):
+        group_prefers_utilities = group_prefers_utilities.lower() in ['true', 't', '1', 'yes']
+    if isinstance(listing_has_utilities, str):
+        listing_has_utilities = listing_has_utilities.lower() in ['true', 't', '1', 'yes']
+    
+    # Preferences match
+    if group_prefers_utilities == listing_has_utilities:
+        return 20.0
+    
+    # Preferences don't match
+    return 10.0
+
+
+def calculate_deposit_score(
+    group: Dict[str, Any],
+    listing: Dict[str, Any]
+) -> float:
+    """
+    Score: 20 points max
+    - listing_deposit ≤ target_deposit: 20
+    - target_deposit < listing_deposit ≤ target_deposit + 500: 10
+    - target_deposit + 500 < listing_deposit ≤ target_deposit + 1500: 5
+    - listing_deposit > target_deposit + 1500: 0
+    """
+    target_deposit = group.get('target_deposit_amount', 0)
+    listing_deposit = listing.get('deposit_amount', 0)
+    
+    # Convert to float for comparison
+    if target_deposit is None:
+        target_deposit = 0
+    if listing_deposit is None:
+        listing_deposit = 0
+    
+    target_deposit = float(target_deposit)
+    listing_deposit = float(listing_deposit)
+    
+    # Listing deposit is at or below target
+    if listing_deposit <= target_deposit:
+        return 20.0
+    
+    # Listing deposit is $0-$500 over target
+    if listing_deposit <= target_deposit + 500:
+        return 10.0
+    
+    # Listing deposit is $500-$1500 over target
+    if listing_deposit <= target_deposit + 1500:
+        return 5.0
+    
+    # Listing deposit is more than $1500 over target
+    return 0.0
+
+
+def calculate_house_rules_score(
+    group: Dict[str, Any],
+    listing: Dict[str, Any]
+) -> float:
+    """
+    Score: 20 points max
+    Compare house rules compatibility between group and listing.
+    - Perfect match (all rules compatible): 20
+    - Good match (1-2 conflicts): 10
+    - Poor match (3+ conflicts): 0
+    """
+    group_rules = group.get('target_house_rules', '')
+    listing_rules = listing.get('house_rules', '')
+    
+    # If either is empty/None, give neutral score
+    if not group_rules or not listing_rules:
+        return 10.0
+    
+    # Convert to lowercase for comparison
+    group_rules_lower = group_rules.lower()
+    listing_rules_lower = listing_rules.lower()
+    
+    # Check for common rule keywords and conflicts
+    conflicts = 0
+    
+    # Smoking conflict
+    if 'no smoking' in listing_rules_lower and 'smoking' in group_rules_lower and 'no smoking' not in group_rules_lower:
+        conflicts += 1
+    
+    # Pet conflict
+    if 'no pets' in listing_rules_lower and 'pet' in group_rules_lower and 'no pet' not in group_rules_lower:
+        conflicts += 1
+    
+    # Party/guests conflict
+    if 'no parties' in listing_rules_lower and 'parties' in group_rules_lower and 'no parties' not in group_rules_lower:
+        conflicts += 1
+    
+    # If rules are very similar (high text overlap), likely compatible
+    if group_rules_lower == listing_rules_lower:
+        return 20.0
+    
+    # Score based on conflicts
+    if conflicts == 0:
+        return 20.0
+    elif conflicts <= 2:
+        return 10.0
+    else:
+        return 0.0
+
+
+# =============================================================================
+# Overall Scoring Functions
+# =============================================================================
 
 def calculate_group_score(
     group: Dict[str, Any],
     listing: Dict[str, Any]
 ) -> float:
     """
-    Calculate overall score for this (group, listing) pair from group's perspective.
+    Calculate how much a group likes a listing (0-100 points).
+    
+    This represents the group's preference for this listing based on
+    how well it matches their target criteria.
     
     Args:
-        group: Group dictionary
-        listing: Listing dictionary
+        group: Group data dictionary
+        listing: Listing data dictionary
         
     Returns:
-        Weighted score from 0-1000
+        Score from 0-100 (higher is better)
     """
-    # Calculate component scores (each 0-100)
-    price_score = calculate_price_fit_score(
-        listing.get('price_per_month', 0),
-        group.get('budget_per_person_min', 0),
-        group.get('budget_per_person_max', 0)
-    )
-    
-    date_score = calculate_date_fit_score(
-        listing.get('available_from'),
-        listing.get('available_to'),
-        group.get('target_move_in_date')
-    )
-    
-    amenities_score = calculate_amenities_fit_score(
-        listing.get('amenities', {}),
-        group.get('target_preferences', {})
-    )
-    
-    quality_score = calculate_listing_quality_score(listing)
-    
-    # Apply weights and sum (scale to 0-1000)
-    total_score = (
-        price_score * GROUP_SCORING_WEIGHTS['price_fit'] +
-        date_score * GROUP_SCORING_WEIGHTS['date_fit'] +
-        amenities_score * GROUP_SCORING_WEIGHTS['amenities_fit'] +
-        quality_score * GROUP_SCORING_WEIGHTS['listing_quality']
-    ) * 10  # Scale to 0-1000
-    
-    return total_score
-
-
-# =============================================================================
-# 3.2 Listing → Group Score (S_l(g))
-# =============================================================================
-
-def calculate_verification_trust_score(
-    group_members: List[Dict[str, Any]],
-    users_data: Optional[Dict[str, Dict[str, Any]]] = None
-) -> float:
-    """
-    Calculate trust score based on member verification.
-    
-    Args:
-        group_members: List of group member dictionaries
-        users_data: Optional dictionary of user_id -> user data
-        
-    Returns:
-        Score from 0-100
-    """
-    if not group_members:
+    # Check hard constraints first
+    passes, reason = check_hard_constraints(group, listing)
+    if not passes:
+        logger.debug(f"Group {group.get('id')} rejected listing {listing.get('id')}: {reason}")
         return 0.0
     
-    verified_count = 0
-    total_count = len(group_members)
+    # Calculate soft preference scores (5 categories × 20 points = 100 max)
+    score = 0.0
     
-    for member in group_members:
-        user_id = member.get('user_id')
-        
-        # Check if we have user data
-        if users_data and user_id in users_data:
-            user = users_data[user_id]
-            verification_status = user.get('verification_status', 'unverified')
-            
-            if verification_status == 'verified':
-                verified_count += 1
-        # If no user data, assume unverified
+    score += calculate_bathroom_score(group, listing)
+    score += calculate_furnished_score(group, listing)
+    score += calculate_utilities_score(group, listing)
+    score += calculate_deposit_score(group, listing)
+    score += calculate_house_rules_score(group, listing)
     
-    # Calculate percentage
-    if total_count > 0:
-        verification_rate = verified_count / total_count
-        return verification_rate * 100
+    # Ensure score is within bounds
+    score = max(0.0, min(MAX_SCORE, score))
     
-    return 0.0
-
-
-def calculate_group_readiness_score(
-    group: Dict[str, Any]
-) -> float:
-    """
-    Calculate readiness score based on group completeness and status.
-    
-    Args:
-        group: Group dictionary with members
-        
-    Returns:
-        Score from 0-100
-    """
-    score = 0
-    
-    # Check if group is active (50 points)
-    if group.get('status', '').lower() == 'active':
-        score += 50
-    
-    # Check if group is full (50 points)
-    current_size = len(group.get('members', []))
-    target_size = group.get('target_group_size', 2)
-    
-    if current_size >= target_size:
-        score += 50
-    else:
-        # Partial credit based on how close to full
-        score += (current_size / target_size) * 50
-    
+    logger.debug(f"Group {group.get('id')} scores listing {listing.get('id')}: {score:.2f}/100")
     return score
-
-
-def calculate_date_alignment_score(
-    listing_available_from: date,
-    group_target_date: date
-) -> float:
-    """
-    Calculate date alignment from listing's perspective.
-    (Same as date_fit but from host's view)
-    
-    Args:
-        listing_available_from: When listing becomes available
-        group_target_date: Group's target move-in date
-        
-    Returns:
-        Score from 0-100
-    """
-    return calculate_date_fit_score(listing_available_from, None, group_target_date)
-
-
-def calculate_house_rules_fit_score(
-    listing: Dict[str, Any],
-    group: Dict[str, Any]
-) -> float:
-    """
-    Calculate how well group fits listing's house rules (future implementation).
-    
-    Args:
-        listing: Listing dictionary
-        group: Group dictionary
-        
-    Returns:
-        Score from 0-100 (currently returns neutral 50)
-    """
-    # Future: Parse house_rules and match with group preferences
-    # For now, return neutral score
-    return 50.0
 
 
 def calculate_listing_score(
     listing: Dict[str, Any],
-    group: Dict[str, Any],
-    users_data: Optional[Dict[str, Dict[str, Any]]] = None
+    group: Dict[str, Any]
 ) -> float:
     """
-    Calculate overall score for this (listing, group) pair from listing's perspective.
+    Calculate how much a listing likes a group (0-100 points).
+    
+    Listings prefer groups with:
+    - Higher budgets (willing to pay more = 40 points)
+    - Larger security deposits (more protection = 30 points)  
+    - Matching preferences (furnished, utilities, etc. = 30 points)
     
     Args:
-        listing: Listing dictionary
-        group: Group dictionary
-        users_data: Optional dictionary of user data for verification checks
+        listing: Listing data dictionary
+        group: Group data dictionary
         
     Returns:
-        Weighted score from 0-1000
+        Score from 0-100 (higher is better)
     """
-    # Calculate component scores (each 0-100)
-    verification_score = calculate_verification_trust_score(
-        group.get('members', []),
-        users_data
-    )
+    score = 0.0
     
-    readiness_score = calculate_group_readiness_score(group)
+    # 1. Budget Score (40 points) - Prefer groups with higher budgets
+    listing_price = listing.get('price_per_month', 0)
+    group_budget = group.get('budget_per_person_max', 0) * group.get('target_group_size', 2)
     
-    date_score = calculate_date_alignment_score(
-        listing.get('available_from'),
-        group.get('target_move_in_date')
-    )
+    if listing_price > 0 and group_budget > 0:
+        # Calculate budget ratio (how much over asking price)
+        budget_ratio = group_budget / listing_price
+        
+        if budget_ratio >= 1.5:  # 50%+ over asking
+            score += 40
+        elif budget_ratio >= 1.3:  # 30-50% over
+            score += 35
+        elif budget_ratio >= 1.15:  # 15-30% over
+            score += 30
+        elif budget_ratio >= 1.05:  # 5-15% over
+            score += 25
+        elif budget_ratio >= 1.0:  # Exactly at or slightly over asking
+            score += 20
+        elif budget_ratio >= 0.95:  # Within 5% of asking
+            score += 15
+        else:  # Less than 95% (shouldn't happen due to hard constraints)
+            score += 5
     
-    rules_score = calculate_house_rules_fit_score(listing, group)
+    # 2. Security Deposit Score (30 points) - Prefer groups willing to pay higher deposits
+    listing_deposit = listing.get('deposit_amount', 0)
+    group_target_deposit = group.get('target_deposit_amount', 0)
     
-    # Apply weights and sum (scale to 0-1000)
-    total_score = (
-        verification_score * LISTING_SCORING_WEIGHTS['verification_trust'] +
-        readiness_score * LISTING_SCORING_WEIGHTS['group_readiness'] +
-        date_score * LISTING_SCORING_WEIGHTS['date_alignment'] +
-        rules_score * LISTING_SCORING_WEIGHTS['house_rules_fit']
-    ) * 10  # Scale to 0-1000
+    if listing_deposit and group_target_deposit:
+        deposit_ratio = group_target_deposit / listing_deposit
+        
+        if deposit_ratio >= 1.5:  # Willing to pay 50%+ more
+            score += 30
+        elif deposit_ratio >= 1.2:  # 20-50% more
+            score += 25
+        elif deposit_ratio >= 1.0:  # At or above asking
+            score += 20
+        elif deposit_ratio >= 0.8:  # 80-100% of asking
+            score += 15
+        else:  # Less than 80%
+            score += 10
+    elif not listing_deposit:  # Listing has no deposit requirement
+        score += 20  # Neutral score
     
-    return total_score
+    # 3. Preference Match Score (30 points) - Groups that want what listing offers
+    pref_score = 0.0
+    pref_count = 0
+    
+    # Furnished match (10 points)
+    listing_furnished = listing.get('furnished', False)
+    group_wants_furnished = group.get('target_furnished', None)
+    if group_wants_furnished is not None:
+        if listing_furnished == group_wants_furnished:
+            pref_score += 10
+        pref_count += 1
+    
+    # Utilities match (10 points)
+    listing_utilities = listing.get('utilities_included', False)
+    group_wants_utilities = group.get('target_utilities_included', None)
+    if group_wants_utilities is not None:
+        if listing_utilities == group_wants_utilities:
+            pref_score += 10
+        pref_count += 1
+    
+    # House rules compatibility (10 points)
+    listing_rules = listing.get('house_rules', {})
+    group_rules = group.get('target_house_rules', {})
+    
+    if isinstance(listing_rules, dict) and isinstance(group_rules, dict):
+        conflicts = 0
+        rules_to_check = ['smoking_allowed', 'pets_allowed', 'parties_allowed']
+        
+        for rule in rules_to_check:
+            listing_allows = listing_rules.get(rule, True)
+            group_wants = group_rules.get(rule, False)
+            
+            # Conflict: group wants something listing doesn't allow
+            if group_wants and not listing_allows:
+                conflicts += 1
+        
+        # Perfect match = 10, each conflict = -3.33
+        pref_score += max(0, 10 - (conflicts * 3.33))
+        pref_count += 1
+    
+    # Add preference score (max 30 points)
+    score += pref_score
+    
+    logger.debug(f"Listing {listing.get('id', 'unknown')} scores group {group.get('id', 'unknown')}: "
+                f"budget={budget_ratio:.2f}x, deposit={deposit_ratio:.2f}x, total={score:.1f}")
+    
+    return round(score, 1)
 
 
 # =============================================================================
-# 3.3 Ranking & Tie-Breaking
+# Ranking & Preference Lists
 # =============================================================================
 
 def rank_listings_for_group(
@@ -444,168 +480,178 @@ def rank_listings_for_group(
     feasible_listings: List[Dict[str, Any]]
 ) -> List[Tuple[str, int, float]]:
     """
-    Rank all feasible listings for this group and assign ranks.
+    Rank all feasible listings for a group.
     
     Args:
-        group: Group dictionary
+        group: Group data dictionary
         feasible_listings: List of listings that passed hard constraints
         
     Returns:
-        List of (listing_id, rank, score) tuples, sorted by rank (1 = best)
+        List of tuples: (listing_id, rank, score)
+        Sorted by score descending (rank 1 = best)
     """
-    # Calculate scores for all listings
+    # Score each listing
     scored_listings = []
     for listing in feasible_listings:
         score = calculate_group_score(group, listing)
-        scored_listings.append({
-            'listing_id': listing['id'],
-            'score': score,
-            'created_at': listing.get('created_at', ''),
-            'price': listing.get('price_per_month', 0)
-        })
+        if score > 0:  # Only include if score is positive
+            scored_listings.append({
+                'listing_id': listing['id'],
+                'score': score,
+                'created_at': listing.get('created_at', ''),
+                'price': listing.get('price_per_month', 0)
+            })
     
-    # Sort by score (descending), then by tie-breaks
-    # Note: created_at is ISO string, so reverse=True for newest first
+    # Sort by: score (desc), created_at (desc), price (asc), id (alpha)
     scored_listings.sort(
-        key=lambda x: (
-            x['score'],                     # For reverse=True, lower values come first, so we keep positive
-            x['created_at'],                # Older dates (earlier strings) with reverse=True = newer first
-            x['price'],                     # Lower price first
-            x['listing_id']                 # UUID as final tie-break
-        ),
-        reverse=True                        # Reverse to get highest score first
+        key=lambda x: (-x['score'], -ord(x['created_at'][0]) if x['created_at'] else 0, x['price'], x['listing_id'])
     )
     
     # Assign ranks
-    ranked = []
+    ranked_listings = []
     for rank, item in enumerate(scored_listings, start=1):
-        ranked.append((item['listing_id'], rank, item['score']))
+        ranked_listings.append((item['listing_id'], rank, item['score']))
     
-    return ranked
+    logger.info(f"Group {group.get('id')} ranked {len(ranked_listings)} listings")
+    return ranked_listings
 
 
 def rank_groups_for_listing(
     listing: Dict[str, Any],
-    feasible_groups: List[Dict[str, Any]],
-    users_data: Optional[Dict[str, Dict[str, Any]]] = None
+    feasible_groups: List[Dict[str, Any]]
 ) -> List[Tuple[str, int, float]]:
     """
-    Rank all feasible groups for this listing and assign ranks.
+    Rank all feasible groups for a listing.
     
     Args:
-        listing: Listing dictionary
+        listing: Listing data dictionary
         feasible_groups: List of groups that passed hard constraints
-        users_data: Optional dictionary of user data for verification
         
     Returns:
-        List of (group_id, rank, score) tuples, sorted by rank (1 = best)
+        List of tuples: (group_id, rank, score)
+        Sorted by score descending (rank 1 = best)
     """
-    # Calculate scores for all groups
+    # Score each group
     scored_groups = []
     for group in feasible_groups:
-        score = calculate_listing_score(listing, group, users_data)
-        
-        # Calculate verification rate for tie-break
-        members = group.get('members', [])
-        verified_count = 0
-        if users_data:
-            for member in members:
-                user_id = member.get('user_id')
-                if user_id in users_data:
-                    if users_data[user_id].get('verification_status') == 'verified':
-                        verified_count += 1
-        
-        verification_rate = verified_count / len(members) if members else 0
-        
-        scored_groups.append({
-            'group_id': group['id'],
-            'score': score,
-            'verification_rate': verification_rate,
-            'target_date': group.get('target_move_in_date', ''),
-        })
+        score = calculate_listing_score(listing, group)
+        if score > 0:  # Only include if score is positive
+            scored_groups.append({
+                'group_id': group['id'],
+                'score': score,
+                'created_at': group.get('created_at', '')
+            })
     
-    # Sort by score (descending), then by tie-breaks
+    # Sort by: score (desc), created_at (desc), id (alpha)
     scored_groups.sort(
-        key=lambda x: (
-            x['score'],                      # For reverse=True, this gets highest first
-            x['verification_rate'],          # Higher verification first
-            x['target_date'],                # Earlier date (earlier string) first with normal comparison
-            x['group_id']                    # UUID as final tie-break
-        ),
-        reverse=True                         # Reverse to get highest score and verification first
+        key=lambda x: (-x['score'], -ord(x['created_at'][0]) if x['created_at'] else 0, x['group_id'])
     )
     
     # Assign ranks
-    ranked = []
+    ranked_groups = []
     for rank, item in enumerate(scored_groups, start=1):
-        ranked.append((item['group_id'], rank, item['score']))
+        ranked_groups.append((item['group_id'], rank, item['score']))
     
-    return ranked
+    logger.info(f"Listing {listing.get('id')} ranked {len(ranked_groups)} groups")
+    return ranked_groups
 
-
-# =============================================================================
-# 3.4 Build Preference Lists
-# =============================================================================
 
 def build_preference_lists(
     feasible_pairs: List[Tuple[str, str]],
     groups: List[Dict[str, Any]],
-    listings: List[Dict[str, Any]],
-    users_data: Optional[Dict[str, Dict[str, Any]]] = None
-) -> Tuple[Dict[str, List[Tuple[str, int, float]]], Dict[str, List[Tuple[str, int, float]]]]:
+    listings: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
     Build preference lists for all groups and listings.
     
     Args:
         feasible_pairs: List of (group_id, listing_id) tuples that passed hard constraints
-        groups: List of all eligible groups
-        listings: List of all eligible listings
-        users_data: Optional dictionary of user data
+        groups: List of all eligible group dictionaries
+        listings: List of all eligible listing dictionaries
         
     Returns:
-        Tuple of (group_preferences, listing_preferences)
-        - group_preferences: Dict[group_id] = [(listing_id, rank, score), ...]
-        - listing_preferences: Dict[listing_id] = [(group_id, rank, score), ...]
+        Dictionary with:
+        - 'group_preferences': Dict[group_id, List[(listing_id, rank, score)]]
+        - 'listing_preferences': Dict[listing_id, List[(group_id, rank, score)]]
+        - 'metadata': Dict with statistics
     """
-    # Create lookup dictionaries
+    logger.info(f"Building preference lists from {len(feasible_pairs)} feasible pairs...")
+    
+    # Build lookup dictionaries
     groups_dict = {g['id']: g for g in groups}
     listings_dict = {l['id']: l for l in listings}
     
-    # Build adjacency lists
-    group_to_listings = {}  # group_id -> [listing_id, ...]
-    listing_to_groups = {}  # listing_id -> [group_id, ...]
+    # Build compatibility map
+    group_compatible_listings = {}
+    listing_compatible_groups = {}
     
     for group_id, listing_id in feasible_pairs:
-        if group_id not in group_to_listings:
-            group_to_listings[group_id] = []
-        group_to_listings[group_id].append(listing_id)
+        if group_id not in group_compatible_listings:
+            group_compatible_listings[group_id] = []
+        group_compatible_listings[group_id].append(listing_id)
         
-        if listing_id not in listing_to_groups:
-            listing_to_groups[listing_id] = []
-        listing_to_groups[listing_id].append(group_id)
+        if listing_id not in listing_compatible_groups:
+            listing_compatible_groups[listing_id] = []
+        listing_compatible_groups[listing_id].append(group_id)
     
-    # Build preference lists for each group
+    # Build group preferences
     group_preferences = {}
-    for group in groups:
-        group_id = group['id']
-        feasible_listing_ids = group_to_listings.get(group_id, [])
-        feasible_listing_objs = [listings_dict[lid] for lid in feasible_listing_ids if lid in listings_dict]
+    for group_id in group_compatible_listings.keys():
+        group = groups_dict.get(group_id)
+        if not group:
+            continue
+            
+        # Get all listings this group is compatible with
+        compatible_listing_ids = group_compatible_listings[group_id]
+        compatible_listings = [listings_dict[lid] for lid in compatible_listing_ids if lid in listings_dict]
         
-        if feasible_listing_objs:
-            group_preferences[group_id] = rank_listings_for_group(group, feasible_listing_objs)
-        else:
-            group_preferences[group_id] = []
+        # Rank them
+        ranked = rank_listings_for_group(group, compatible_listings)
+        group_preferences[group_id] = ranked
     
-    # Build preference lists for each listing
+    # Build listing preferences
     listing_preferences = {}
-    for listing in listings:
-        listing_id = listing['id']
-        feasible_group_ids = listing_to_groups.get(listing_id, [])
-        feasible_group_objs = [groups_dict[gid] for gid in feasible_group_ids if gid in groups_dict]
+    for listing_id in listing_compatible_groups.keys():
+        listing = listings_dict.get(listing_id)
+        if not listing:
+            continue
+            
+        # Get all groups this listing is compatible with
+        compatible_group_ids = listing_compatible_groups[listing_id]
+        compatible_groups = [groups_dict[gid] for gid in compatible_group_ids if gid in groups_dict]
         
-        if feasible_group_objs:
-            listing_preferences[listing_id] = rank_groups_for_listing(listing, feasible_group_objs, users_data)
-        else:
-            listing_preferences[listing_id] = []
+        # Rank them
+        ranked = rank_groups_for_listing(listing, compatible_groups)
+        listing_preferences[listing_id] = ranked
     
-    return group_preferences, listing_preferences
+    metadata = {
+        'total_groups': len(group_preferences),
+        'total_listings': len(listing_preferences),
+        'feasible_pairs': len(feasible_pairs),
+        'avg_listings_per_group': len(feasible_pairs) / len(group_preferences) if group_preferences else 0,
+        'avg_groups_per_listing': len(feasible_pairs) / len(listing_preferences) if listing_preferences else 0
+    }
+    
+    logger.info(f"Built preferences for {len(group_preferences)} groups and {len(listing_preferences)} listings")
+    logger.info(f"Avg listings per group: {metadata['avg_listings_per_group']:.2f}")
+    logger.info(f"Avg groups per listing: {metadata['avg_groups_per_listing']:.2f}")
+    
+    return {
+        'group_preferences': group_preferences,
+        'listing_preferences': listing_preferences,
+        'metadata': metadata
+    }
+
+
+# Export public API
+__all__ = [
+    'check_hard_constraints',
+    'calculate_group_score',
+    'calculate_listing_score',
+    'rank_listings_for_group',
+    'rank_groups_for_listing',
+    'build_preference_lists',
+    'GROUP_SCORING_WEIGHTS',
+    'LISTING_SCORING_WEIGHTS',
+    'MAX_SCORE'
+]
