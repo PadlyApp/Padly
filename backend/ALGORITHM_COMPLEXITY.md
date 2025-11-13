@@ -25,15 +25,21 @@
 - With strict constraints (city, exact lease duration, budget, dates)
 - Only ~3-10 feasible pairs per group stored
 
-## Why O(n² log n)?
+## Phase-by-Phase Runtime
 
-1. **Hard Constraints:** O(n²) - check all group-listing pairs
-2. **Scoring:** O(n²) - score each feasible pair
-3. **Sorting Preferences:** **O(n² log n)** ← bottleneck
-4. **Deferred Acceptance:** O(n²) - each group proposes ≤ n times
-5. **Stability Check:** O(n²) - verify no blocking pairs
+| Phase | Operation | Complexity | File & Lines |
+|-------|-----------|------------|--------------|
+| 1. Hard Constraints | Check all n×m pairs | O(n²) | `feasible_pairs.py` lines 238-290 |
+| 2. Scoring | Score each feasible pair | O(n²) | `scoring.py` lines 308-459 |
+| 3. **Sorting Preferences** | **n groups sort m listings each** | **O(n² log n)** ⬅ bottleneck | `scoring.py` lines 389-461 |
+| 4. Deferred Acceptance | n groups propose ≤ m times | O(n²) | `deferred_acceptance.py` lines 157-208 |
+| 5. Stability Check | Check all potential blocking pairs | O(n²) | `deferred_acceptance.py` lines 384-430 |
 
-**Sorting dominates:** Each of n groups sorts their m listings = O(n × m log m) = O(n² log n)
+**Total: O(n² log n)** - sorting dominates
+
+**Phase 3 Details:**
+- `rank_listings_for_group()`: lines 389-421 - sorts m listings for each group
+- `rank_groups_for_listing()`: lines 424-461 - sorts n groups for each listing
 
 ## Gale-Shapley Properties
 
