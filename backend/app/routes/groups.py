@@ -117,6 +117,144 @@ async def list_groups(
         "data": groups
     }
 
+# Group Discovery & User-to-Group Matching
+# =============================================================================
+
+@router.get("/discover", response_model=dict)
+async def discover_groups(
+    city: str = Query(..., description="Target city"),
+    budget_min: Optional[float] = Query(None, description="Minimum budget per person"),
+    budget_max: Optional[float] = Query(None, description="Maximum budget per person"),
+    move_in_date: Optional[str] = Query(None, description="Target move-in date (ISO format)"),
+    min_compatibility_score: int = Query(50, ge=0, le=100, description="Minimum compatibility score"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    token: str = Depends(require_user_token)
+):
+    """
+    Discover compatible roommate groups based on user preferences.
+    
+    Returns groups ranked by compatibility score with detailed reasons.
+    """
+    from app.services.user_group_matching import find_compatible_groups
+    
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    user_id = user_response.user.id
+    
+    # Get user from database
+    user_db_response = supabase.table("users").select("*").eq("id", user_id).single().execute()
+    
+    if not user_db_response.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user = user_db_response.data
+    
+    # Get or build user preferences
+    prefs_response = supabase.table("personal_preferences").select("*").eq("user_id", user_id).execute()
+    
+    if prefs_response.data:
+        user_prefs = prefs_response.data[0]
+    else:
+        # Use query parameters as preferences if no stored preferences
+        user_prefs = {"target_city": city, "budget_min": budget_min, "budget_max": budget_max, "move_in_date": move_in_date}
+    
+    # Override with query params if provided
+    if budget_min is not None:
+        user_prefs["budget_min"] = budget_min
+    if budget_max is not None:
+        user_prefs["budget_max"] = budget_max
+    if move_in_date is not None:
+        user_prefs["move_in_date"] = move_in_date
+    
+    # Ensure city is set
+    if not user_prefs.get("target_city"):
+        user_prefs["target_city"] = city
+    
+    # Find compatible groups
+    compatible_groups = await find_compatible_groups(user_id=user_id, user_prefs=user_prefs, min_score=min_compatibility_score, limit=limit)
+    
+    # Format response
+    formatted_groups = []
+    for group in compatible_groups:
+        # Get member details
+        members_response = supabase.table("group_members").select("*, users(id, full_name, company_name, school_name, verification_status)").eq("group_id", group["id"]).eq("status", "accepted").execute()
+        
+        members = []
+        for member_data in members_response.data:
+            user_data = member_data.get("users", {}) if isinstance(member_data.get("users"), dict) else {}
+            members.append({"id": user_data.get("id"), "full_name": user_data.get("full_name"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "is_creator": member_data.get("is_creator", False)})
+        
+        # Calculate open spots
+        current_count = group.get("current_member_count", len(members))
+        target_size = group.get("target_group_size")
+        open_spots = (target_size - current_count) if target_size else None
+        
+        formatted_groups.append({"id": group["id"], "group_name": group["group_name"], "description": group.get("description"), "target_city": group["target_city"], "budget_per_person_min": group.get("budget_per_person_min"), "budget_per_person_max": group.get("budget_per_person_max"), "target_move_in_date": str(group["target_move_in_date"]) if group.get("target_move_in_date") else None, "target_group_size": target_size, "current_member_count": current_count, "open_spots": open_spots, "members": members, "compatibility": group["compatibility"], "created_at": str(group["created_at"]) if group.get("created_at") else None})
+    
+    return {"status": "success", "count": len(formatted_groups), "groups": formatted_groups}
+
+
+@router.get("/{group_id}/pending-requests", response_model=dict)
+async def get_pending_requests(group_id: str, token: str = Depends(require_user_token)):
+    """Get pending join requests for a group (creator only).
+    
+    Returns list of users who requested to join with compatibility scores.
+    """
+    from app.services.user_group_matching import calculate_user_group_compatibility
+    
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    current_user_id = user_response.user.id
+    
+    # Verify user is group creator
+    group_response = supabase.table("roommate_groups").select("*").eq("id", group_id).single().execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
+    
+    if group["creator_user_id"] != current_user_id:
+        raise HTTPException(status_code=403, detail="Only group creator can view pending requests")
+    
+    # Get pending members
+    pending_response = supabase.table("group_members").select("*, users(id, email, full_name, company_name, school_name, verification_status, profile_picture_url)").eq("group_id", group_id).eq("status", "pending").execute()
+    
+    # Calculate compatibility for each pending user
+    requests = []
+    for member_data in pending_response.data:
+        user_data = member_data.get("users", {}) if isinstance(member_data.get("users"), dict) else {}
+        user_id = user_data.get("id")
+        
+        if not user_id:
+            continue
+        
+        # Get user preferences
+        prefs_response = supabase.table("personal_preferences").select("*").eq("user_id", user_id).execute()
+        
+        user_prefs = prefs_response.data[0] if prefs_response.data else {}
+        
+        # Calculate compatibility
+        compatibility = calculate_user_group_compatibility(user_data, user_prefs, group)
+        
+        requests.append({"user_id": user_id, "full_name": user_data.get("full_name"), "email": user_data.get("email"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "profile_picture_url": user_data.get("profile_picture_url"), "requested_at": str(member_data.get("joined_at")) if member_data.get("joined_at") else None, "user_preferences": {"budget_min": user_prefs.get("budget_min"), "budget_max": user_prefs.get("budget_max"), "target_city": user_prefs.get("target_city"), "move_in_date": str(user_prefs.get("move_in_date")) if user_prefs.get("move_in_date") else None, "lifestyle_preferences": user_prefs.get("lifestyle_preferences", {})}, "compatibility": compatibility})
+    
+    # Sort by compatibility score (highest first)
+    requests.sort(key=lambda r: r["compatibility"]["score"], reverse=True)
+    
+    return {"status": "success", "count": len(requests), "requests": requests}
+
+
 
 @router.get("/{group_id}", response_model=dict)
 async def get_group(
@@ -882,3 +1020,5 @@ async def get_group_matches(
         "count": len(matches),
         "data": matches
     }
+
+# =============================================================================
