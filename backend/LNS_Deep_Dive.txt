@@ -1,0 +1,84 @@
+# TOPIC: Large Neighborhood Search (LNS) - Technical Specification
+
+## 1. Algorithm Overview
+Large Neighborhood Search (LNS) is a metaheuristic method used primarily for solving hard combinatorial optimization problems. Unlike "Local Search" (which makes small moves like swapping two items), LNS continually destroys and repairs a solution to explore the search space.
+
+The core philosophy is: "A good solution is likely close to another good solution." LNS attempts to find a better neighbor by partially dismantling the current solution and reconstructing it.
+
+## 2. The Core Mechanism (The LNS Loop)
+
+The algorithm maintains a "Current Solution" ($S_{curr}$) and a "Best Solution Found" ($S_{best}$).
+
+### Step 1: Initialization
+Start with a feasible solution. This can be generated using a simple greedy heuristic or a random construction. It does not need to be optimal.
+
+### Step 2: The Destroy Operator (Relaxation)
+The algorithm selects a subset of variables from the current solution and "unfixes" them.
+* **Input:** Complete Solution $S$.
+* **Action:** Remove $k$ elements (where $k$ is the degree of destruction).
+* **Output:** Partial Solution $S_{partial}$ + List of Unassigned Elements $U$.
+* *Note:* The size of $k$ is crucial. If $k$ is too small, it behaves like local search (stuck in local optima). If $k$ is too large, it behaves like random restart (too chaotic).
+
+### Step 3: The Repair Operator (Re-optimization)
+The algorithm attempts to re-insert the unassigned elements $U$ back into $S_{partial}$ to form a new complete solution $S_{new}$.
+* **Input:** Partial Solution $S_{partial}$, Unassigned Elements $U$.
+* **Action:** Re-assign elements from $U$ into the solution in a way that minimizes the global cost/objective function.
+* **Method:** This step often uses a greedy heuristic, but for smaller $k$, it can use an Exact Solver (like CP or MIP) to find the *optimal* insertion for those specific elements.
+
+### Step 4: Acceptance Criteria
+Decide whether to accept $S_{new}$ as the new $S_{curr}$.
+* **Strict Descent:** Only accept if $Cost(S_{new}) < Cost(S_{curr})$.
+* **Simulated Annealing (Standard):** Accept worse solutions with a probability $e^{-(Cost(S_{new}) - Cost(S_{curr})) / T}$, where $T$ is a temperature parameter that decreases over time. This prevents getting trapped in local optima.
+
+---
+
+## 3. Operator Types (For Implementation)
+
+To implement LNS effectively, you need specific logic for Destroy and Repair.
+
+### Common Destroy Heuristics
+1.  **Random Removal:** Randomly select $k$ elements to remove. Good for diversification.
+2.  **Worst Removal:** Remove the $k$ elements that contribute most to the current high cost (e.g., the most expensive edges in a graph). Good for intensification.
+3.  **Shaw Removal (Relatedness):** Remove a set of elements that are "related" to each other (e.g., geographically close or similar properties). This makes it easier to shuffle them around efficiently.
+
+### Common Repair Heuristics
+1.  **Greedy Insertion:** Insert one unassigned element at a time into its best possible position.
+2.  **Regret-based Insertion:** Calculate the "regret" value (difference between the best insertion spot and the second-best). Prioritize inserting elements that would be very costly if we delayed inserting them.
+
+---
+
+## 4. Pseudocode Skeleton
+
+```python
+def large_neighborhood_search(initial_solution, max_iterations):
+    current_solution = initial_solution
+    best_solution = initial_solution
+    
+    for i in range(max_iterations):
+        # 1. Copy current solution to modify
+        temp_solution = current_solution.copy()
+        
+        # 2. DESTROY: Remove k elements
+        unassigned_elements = destroy_heuristic(temp_solution, k=10)
+        
+        # 3. REPAIR: Re-insert elements optimally
+        repaired_solution = repair_heuristic(temp_solution, unassigned_elements)
+        
+        # 4. EVALUATE
+        current_cost = cost_function(current_solution)
+        new_cost = cost_function(repaired_solution)
+        
+        # 5. ACCEPTANCE (Simulated Annealing logic)
+        if new_cost < current_cost:
+            current_solution = repaired_solution
+            if new_cost < cost_function(best_solution):
+                best_solution = repaired_solution
+        else:
+            # Acceptance probability calculation
+            if random() < acceptance_probability(current_cost, new_cost, temperature):
+                current_solution = repaired_solution
+                
+        # Cool down temperature
+        update_temperature()
+        
+    return best_solution
