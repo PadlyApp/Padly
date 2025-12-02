@@ -35,6 +35,7 @@ async def signup(user_data: SignUpRequest):
     """
     Register a new user with Supabase Auth and create user profile.
     ALWAYS creates the user profile in public.users table.
+    Also auto-creates a solo group for immediate housing search.
     """
     try:
         # Sign up with Supabase Auth
@@ -63,6 +64,7 @@ async def signup(user_data: SignUpRequest):
         if existing_profile.data:
             # Profile already exists, use it
             profile = existing_profile.data[0]
+            profile_id = profile['id']
         else:
             # Create new profile
             user_profile = {
@@ -72,6 +74,45 @@ async def signup(user_data: SignUpRequest):
             }
             profile_response = supabase_admin.table("users").insert(user_profile).execute()
             profile = profile_response.data[0] if profile_response.data else None
+            profile_id = profile.get('id') if profile else None
+        
+        # 🔥 AUTO-CREATE SOLO GROUP for new users
+        if profile_id:
+            # Check if user already has a group
+            existing_groups = supabase_admin.table("group_members")\
+                .select("group_id")\
+                .eq("user_id", profile_id)\
+                .eq("status", "accepted")\
+                .execute()
+            
+            if not existing_groups.data:
+                # Create solo group
+                solo_group_data = {
+                    "creator_user_id": profile_id,
+                    "group_name": f"{user_data.full_name}'s Housing Search",
+                    "description": "Solo housing search",
+                    "target_city": "San Francisco",  # Default, user can update
+                    "target_group_size": 1,
+                    "is_solo": True,
+                    "status": "active"
+                }
+                
+                group_response = supabase_admin.table("roommate_groups")\
+                    .insert(solo_group_data)\
+                    .execute()
+                
+                if group_response.data:
+                    solo_group = group_response.data[0]
+                    
+                    # Add user as member
+                    member_data = {
+                        "group_id": solo_group['id'],
+                        "user_id": profile_id,
+                        "is_creator": True,
+                        "status": "accepted"
+                    }
+                    
+                    supabase_admin.table("group_members").insert(member_data).execute()
         
         # Check if session is available (might be None if email confirmation required)
         if auth_response.session is None:

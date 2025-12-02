@@ -419,10 +419,36 @@ async def update_group(
         .eq('id', group_id)\
         .execute()
     
+    # 🔥 TRIGGER STABLE MATCHING if preference fields changed
+    preference_fields = [
+        'budget_per_person_min', 'budget_per_person_max', 
+        'target_move_in_date', 'target_city'
+    ]
+    
+    matching_result = {'status': 'skipped', 'message': 'No preference changes detected'}
+    
+    if any(field in update_dict for field in preference_fields):
+        from app.routes.stable_matching import run_matching, RunMatchingRequest
+        
+        target_city = group.get('target_city')
+        if target_city:
+            try:
+                matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+                matching_response = await run_matching(matching_request)
+                matching_result = {
+                    "status": "success",
+                    "city": target_city,
+                    "total_matches": len(matching_response.matches),
+                    "message": matching_response.message
+                }
+            except Exception as e:
+                matching_result = {"status": "error", "message": str(e)}
+    
     return {
         "status": "success",
         "message": "Group updated successfully",
-        "data": updated_response.data[0] if updated_response.data else None
+        "data": updated_response.data[0] if updated_response.data else None,
+        "matching": matching_result
     }
 
 
@@ -789,14 +815,16 @@ async def join_group(
         raise HTTPException(status_code=400, detail="You previously rejected this invitation")
     
     # Check if group is full
-    current_members = supabase.table('group_members')\
-        .select('id')\
-        .eq('group_id', group_id)\
-        .eq('status', 'accepted')\
-        .execute()
-    
-    if len(current_members.data) >= group['target_group_size']:
-        raise HTTPException(status_code=400, detail="Group is already full")
+    target_size = group.get('target_group_size')
+    if target_size is not None:
+        current_members = supabase.table('group_members')\
+            .select('id')\
+            .eq('group_id', group_id)\
+            .eq('status', 'accepted')\
+            .execute()
+        
+        if len(current_members.data) >= target_size:
+            raise HTTPException(status_code=400, detail="Group is already full")
     
     # Accept invitation
     supabase.table('group_members')\
@@ -804,14 +832,45 @@ async def join_group(
         .eq('id', member['id'])\
         .execute()
     
+    # 🔥 TRIGGER STABLE MATCHING
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+    
+    target_city = group.get('target_city')
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if target_city:
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": matching_response.message
+            }
+        except Exception as e:
+            matching_result = {"status": "error", "message": str(e)}
+    
+    # Get updated group info
+    updated_group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    updated_group = updated_group_response.data if updated_group_response.data else group
+    
     return {
         "status": "success",
         "message": "Successfully joined the group",
         "data": {
             "group_id": group_id,
-            "group_name": group['group_name']
-        }
+            "group_name": group['group_name'],
+            "current_member_count": updated_group.get('current_member_count', 1)
+        },
+        "matching": matching_result
     }
+
 
 
 @router.post("/{group_id}/reject", response_model=dict)
@@ -962,9 +1021,29 @@ async def remove_member(
         .eq('id', member['id'])\
         .execute()
     
+    # 🔥 TRIGGER STABLE MATCHING
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+    
+    target_city = group.get('target_city')
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if target_city:
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": matching_response.message
+            }
+        except Exception as e:
+            matching_result = {"status": "error", "message": str(e)}
+    
     return {
         "status": "success",
-        "message": "Member removed successfully"
+        "message": "Member removed successfully",
+        "matching": matching_result
     }
 
 
