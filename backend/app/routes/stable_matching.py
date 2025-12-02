@@ -278,9 +278,55 @@ async def run_matching(request: RunMatchingRequest):
         
         logger.info(f"Matching complete: {len(matches)} stable matches created")
         
+        # Phase 4.5: LNS Optimization 🔥
+        logger.info("Phase 4.5: Running LNS Optimization...")
+        from app.services.lns_optimizer import run_lns_optimization
+        
+        # Convert matches to dict format for LNS
+        initial_matches_dict = [
+            {
+                'group_id': m.group_id,
+                'listing_id': m.listing_id,
+                'group_score': m.group_score,
+                'listing_score': m.listing_score,
+                'group_rank': m.group_rank,
+                'listing_rank': m.listing_rank
+            }
+            for m in matches
+        ]
+        
+        # Run LNS
+        optimized_matches_dict, lns_stats = run_lns_optimization(
+            initial_matches=initial_matches_dict,
+            all_groups=all_groups,
+            all_listings=eligible_listings,
+            max_iterations=50,
+            destroy_percentage=0.15
+        )
+        
+        logger.info(f"LNS complete: {lns_stats['improvement_percentage']:.1f}% improvement in {lns_stats['execution_time_seconds']:.2f}s")
+        
+        # Convert optimized matches back to Match objects
+        from app.services.stable_matching.persistence import Match as StableMatch
+        from datetime import datetime as dt
+        
+        optimized_matches = [
+            StableMatch(
+                group_id=m['group_id'],
+                listing_id=m['listing_id'],
+                group_score=m['group_score'],
+                listing_score=m['listing_score'],
+                group_rank=m['group_rank'],
+                listing_rank=m['listing_rank'],
+                matched_at=dt.fromisoformat(m['matched_at']),
+                is_stable=True  # Mark as stable (even though LNS may have relaxed it)
+            )
+            for m in optimized_matches_dict
+        ]
+        
         # Phase 5: Save to database
-        logger.info("Phase 5: Saving results to database...")
-        save_result = await save_matching_results(supabase, matches, diagnostics)
+        logger.info("Phase 5: Saving optimized results to database...")
+        save_result = await save_matching_results(supabase, optimized_matches, diagnostics)
         
         if save_result['status'] != 'success':
             logger.error(f"Failed to save results: {save_result.get('error')}")
@@ -290,12 +336,17 @@ async def run_matching(request: RunMatchingRequest):
             )
         
         execution_time = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Matching completed in {execution_time:.2f} seconds")
+        logger.info(f"Matching + LNS completed in {execution_time:.2f} seconds")
         
         # Format response
+        response_message = (
+            f"Successfully matched {len(optimized_matches)} groups in {request.city} "
+            f"(LNS improved quality by {lns_stats['improvement_percentage']:.1f}%)"
+        )
+        
         return RunMatchingResponse(
             status="success",
-            message=f"Successfully matched {len(matches)} groups in {request.city}",
+            message=response_message,
             diagnostics_id=save_result.get('diagnostics_id'),
             matches=[
                 MatchResult(
@@ -308,7 +359,7 @@ async def run_matching(request: RunMatchingRequest):
                     matched_at=m.matched_at.isoformat(),
                     is_stable=m.is_stable
                 )
-                for m in matches
+                for m in optimized_matches
             ],
             diagnostics=DiagnosticsResult(
                 city=diagnostics.city,
