@@ -22,7 +22,12 @@ import {
   Paper,
   Tabs,
   Loader,
-  Center
+  Center,
+  Tooltip,
+  ScrollArea,
+  ThemeIcon,
+  Progress,
+  Skeleton
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { 
@@ -41,7 +46,14 @@ import {
   IconCalendar,
   IconBuildingCommunity,
   IconAlertCircle,
-  IconHome
+  IconHome,
+  IconSearch,
+  IconSparkles,
+  IconMoon,
+  IconVolume,
+  IconSmokingNo,
+  IconDog,
+  IconFriends
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
@@ -49,7 +61,7 @@ import { Navigation } from '../../components/Navigation';
 export default function GroupDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { user, token } = useAuth();
+  const { user, token, getValidToken } = useAuth();
   const groupId = params.id;
 
   const [group, setGroup] = useState(null);
@@ -60,6 +72,10 @@ export default function GroupDetailPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [inviteTab, setInviteTab] = useState('compatible');
+  const [compatibleUsers, setCompatibleUsers] = useState([]);
+  const [loadingCompatible, setLoadingCompatible] = useState(false);
+  const [invitingUserId, setInvitingUserId] = useState(null);
 
   useEffect(() => {
     if (groupId) {
@@ -158,6 +174,87 @@ export default function GroupDetailPage() {
       setInviting(false);
     }
   };
+
+  const fetchCompatibleUsers = async () => {
+    setLoadingCompatible(true);
+    try {
+      const validToken = await getValidToken();
+      if (!validToken) {
+        throw new Error('Please log in to view compatible users');
+      }
+      const response = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/compatible-users`,
+        {
+          headers: { 'Authorization': `Bearer ${validToken}` }
+        }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        setCompatibleUsers(data.users || []);
+      } else {
+        throw new Error(data.detail || 'Failed to load compatible users');
+      }
+    } catch (error) {
+      console.error('Error fetching compatible users:', error);
+      notifications.show({
+        title: 'Error',
+        message: error.message || 'Failed to load compatible users',
+        color: 'red',
+      });
+    } finally {
+      setLoadingCompatible(false);
+    }
+  };
+
+  const handleInviteUser = async (userId, userEmail) => {
+    setInvitingUserId(userId);
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/invite`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ email: userEmail })
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        notifications.show({
+          title: 'Invitation Sent',
+          message: `Invitation sent to ${userEmail}`,
+          color: 'green',
+          icon: <IconCheck />,
+        });
+        // Remove user from compatible list
+        setCompatibleUsers(prev => prev.filter(u => u.id !== userId));
+        fetchGroupData();
+      } else {
+        throw new Error(data.detail || 'Failed to send invitation');
+      }
+    } catch (error) {
+      console.error('Error sending invitation:', error);
+      notifications.show({
+        title: 'Error',
+        message: error.message || 'Failed to send invitation',
+        color: 'red',
+      });
+    } finally {
+      setInvitingUserId(null);
+    }
+  };
+
+  // Fetch compatible users when invite modal opens
+  useEffect(() => {
+    if (inviteModalOpen && inviteTab === 'compatible') {
+      fetchCompatibleUsers();
+    }
+  }, [inviteModalOpen, inviteTab]);
 
   const handleLeaveGroup = async () => {
     if (!confirm('Are you sure you want to leave this group?')) return;
@@ -295,7 +392,8 @@ export default function GroupDetailPage() {
   }
 
   const isCreator = user && group.created_by === user.id;
-  const isMember = user && members.some(m => m.user_id === user.id);
+  // Compare by email since user.id is auth_id but members have app's user_id
+  const isMember = user && members.some(m => m.user_email === user.email);
   const statusColor = {
     active: 'blue',
     matched: 'green',
@@ -378,8 +476,10 @@ export default function GroupDetailPage() {
                 <Button
                   leftSection={<IconUserPlus size={18} />}
                   onClick={() => setInviteModalOpen(true)}
+                  variant="gradient"
+                  gradient={{ from: 'blue', to: 'cyan' }}
                 >
-                  Invite Members
+                  Find & Invite Members
                 </Button>
               )}
             </Group>
@@ -472,27 +572,27 @@ export default function GroupDetailPage() {
                         <Group justify="space-between">
                           <Group>
                             <Avatar size="md" radius="xl">
-                              {member.users?.full_name?.charAt(0) || 'U'}
+                              {member.user_name?.charAt(0) || 'U'}
                             </Avatar>
                             <div>
                               <Text fw={500}>
-                                {member.users?.full_name || 'Unknown User'}
+                                {member.user_name || 'Unknown User'}
                               </Text>
                               <Group gap="xs">
                                 <Text size="sm" c="dimmed">
-                                  {member.users?.email}
+                                  {member.user_email}
                                 </Text>
-                                {member.user_id === group.created_by && (
+                                {member.is_creator && (
                                   <Badge size="sm" variant="light">Creator</Badge>
                                 )}
-                                {member.role === 'pending' && (
+                                {member.status === 'pending' && (
                                   <Badge size="sm" color="orange">Pending</Badge>
                                 )}
                               </Group>
                             </div>
                           </Group>
 
-                          {isCreator && member.user_id !== group.created_by && (
+                          {isCreator && !member.is_creator && (
                             <ActionIcon
                               color="red"
                               variant="subtle"
@@ -600,26 +700,230 @@ export default function GroupDetailPage() {
       {/* Invite Modal */}
       <Modal
         opened={inviteModalOpen}
-        onClose={() => setInviteModalOpen(false)}
-        title="Invite Member"
+        onClose={() => {
+          setInviteModalOpen(false);
+          setInviteEmail('');
+          setInviteTab('compatible');
+        }}
+        title={
+          <Group gap="xs">
+            <IconUserPlus size={20} />
+            <Text fw={600}>Invite Members</Text>
+          </Group>
+        }
+        size="lg"
       >
-        <Stack gap="md">
-          <TextInput
-            label="Email Address"
-            placeholder="friend@example.com"
-            leftSection={<IconMail size={16} />}
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleInvite()}
-          />
-          <Button
-            onClick={handleInvite}
-            loading={inviting}
-            fullWidth
-          >
-            Send Invitation
-          </Button>
-        </Stack>
+        <Tabs value={inviteTab} onChange={setInviteTab}>
+          <Tabs.List mb="md">
+            <Tabs.Tab value="compatible" leftSection={<IconSparkles size={16} />}>
+              Compatible Users
+            </Tabs.Tab>
+            <Tabs.Tab value="email" leftSection={<IconMail size={16} />}>
+              Invite by Email
+            </Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="compatible">
+            <Stack gap="md">
+              <Text size="sm" c="dimmed">
+                These users match your group's hard constraints (city, budget, move-in date).
+                Hover over each user to see their preferences.
+              </Text>
+
+              {loadingCompatible ? (
+                <Stack gap="sm">
+                  {[1, 2, 3].map(i => (
+                    <Skeleton key={i} height={80} radius="md" />
+                  ))}
+                </Stack>
+              ) : compatibleUsers.length === 0 ? (
+                <Paper p="xl" withBorder>
+                  <Stack align="center" gap="sm">
+                    <ThemeIcon size="xl" variant="light" color="gray">
+                      <IconSearch size={24} />
+                    </ThemeIcon>
+                    <Text c="dimmed" ta="center">
+                      No compatible users found at this time.
+                    </Text>
+                    <Text size="sm" c="dimmed" ta="center">
+                      Try adjusting your group's preferences or check back later.
+                    </Text>
+                  </Stack>
+                </Paper>
+              ) : (
+                <ScrollArea.Autosize mah={400}>
+                  <Stack gap="sm">
+                    {compatibleUsers.map((user) => (
+                      <Tooltip
+                        key={user.id}
+                        position="right"
+                        withArrow
+                        multiline
+                        w={300}
+                        label={
+                          <Stack gap="xs" p="xs">
+                            <Text size="sm" fw={600}>Preferences</Text>
+                            <Divider />
+                            
+                            <Group gap="xs">
+                              <IconMapPin size={14} />
+                              <Text size="xs">City: {user.preferences?.target_city || 'Any'}</Text>
+                            </Group>
+                            
+                            <Group gap="xs">
+                              <IconCurrencyDollar size={14} />
+                              <Text size="xs">
+                                Budget: ${user.preferences?.budget_min || 0} - ${user.preferences?.budget_max || '∞'}
+                              </Text>
+                            </Group>
+                            
+                            <Group gap="xs">
+                              <IconCalendar size={14} />
+                              <Text size="xs">
+                                Move-in: {user.preferences?.move_in_date 
+                                  ? new Date(user.preferences.move_in_date).toLocaleDateString()
+                                  : 'Flexible'}
+                              </Text>
+                            </Group>
+
+                            {user.preferences?.lifestyle_preferences && Object.keys(user.preferences.lifestyle_preferences).length > 0 && (
+                              <>
+                                <Divider label="Lifestyle" labelPosition="center" />
+                                
+                                {user.preferences.lifestyle_preferences.sleep_time && (
+                                  <Group gap="xs">
+                                    <IconMoon size={14} />
+                                    <Text size="xs">
+                                      Sleep: {user.preferences.lifestyle_preferences.sleep_time}
+                                    </Text>
+                                  </Group>
+                                )}
+                                
+                                {user.preferences.lifestyle_preferences.noise_level && (
+                                  <Group gap="xs">
+                                    <IconVolume size={14} />
+                                    <Text size="xs">
+                                      Noise: {user.preferences.lifestyle_preferences.noise_level}
+                                    </Text>
+                                  </Group>
+                                )}
+                                
+                                {user.preferences.lifestyle_preferences.smoking !== undefined && (
+                                  <Group gap="xs">
+                                    <IconSmokingNo size={14} />
+                                    <Text size="xs">
+                                      Smoking: {user.preferences.lifestyle_preferences.smoking ? 'Yes' : 'No'}
+                                    </Text>
+                                  </Group>
+                                )}
+                                
+                                {user.preferences.lifestyle_preferences.pets !== undefined && (
+                                  <Group gap="xs">
+                                    <IconDog size={14} />
+                                    <Text size="xs">
+                                      Pets: {user.preferences.lifestyle_preferences.pets ? 'Yes' : 'No'}
+                                    </Text>
+                                  </Group>
+                                )}
+                                
+                                {user.preferences.lifestyle_preferences.guests && (
+                                  <Group gap="xs">
+                                    <IconFriends size={14} />
+                                    <Text size="xs">
+                                      Guests: {user.preferences.lifestyle_preferences.guests}
+                                    </Text>
+                                  </Group>
+                                )}
+                              </>
+                            )}
+
+                            <Divider />
+                            <Group gap="xs">
+                              <Text size="xs" c="dimmed">Compatibility Score:</Text>
+                              <Progress 
+                                value={user.compatibility_score} 
+                                size="sm" 
+                                color={user.compatibility_score >= 80 ? 'green' : user.compatibility_score >= 50 ? 'yellow' : 'red'}
+                                style={{ flex: 1 }}
+                              />
+                              <Text size="xs" fw={500}>{Math.round(user.compatibility_score)}%</Text>
+                            </Group>
+                          </Stack>
+                        }
+                      >
+                        <Paper p="md" withBorder style={{ cursor: 'pointer' }}>
+                          <Group justify="space-between">
+                            <Group>
+                              <Avatar size="md" radius="xl" color="blue">
+                                {user.full_name?.charAt(0) || user.email?.charAt(0) || 'U'}
+                              </Avatar>
+                              <div>
+                                <Text fw={500}>{user.full_name || 'User'}</Text>
+                                <Text size="sm" c="dimmed">{user.email}</Text>
+                              </div>
+                            </Group>
+                            <Group gap="sm">
+                              <Badge 
+                                color={user.compatibility_score >= 80 ? 'green' : user.compatibility_score >= 50 ? 'yellow' : 'orange'}
+                                variant="light"
+                              >
+                                {Math.round(user.compatibility_score)}% match
+                              </Badge>
+                              <Button
+                                size="xs"
+                                leftSection={<IconUserPlus size={14} />}
+                                loading={invitingUserId === user.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleInviteUser(user.id, user.email);
+                                }}
+                              >
+                                Invite
+                              </Button>
+                            </Group>
+                          </Group>
+                        </Paper>
+                      </Tooltip>
+                    ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              )}
+
+              <Button 
+                variant="light" 
+                leftSection={<IconSearch size={16} />}
+                onClick={fetchCompatibleUsers}
+                loading={loadingCompatible}
+              >
+                Refresh List
+              </Button>
+            </Stack>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="email">
+            <Stack gap="md">
+              <Text size="sm" c="dimmed">
+                Enter the email address of someone you'd like to invite to your group.
+              </Text>
+              <TextInput
+                label="Email Address"
+                placeholder="friend@example.com"
+                leftSection={<IconMail size={16} />}
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleInvite()}
+              />
+              <Button
+                onClick={handleInvite}
+                loading={inviting}
+                fullWidth
+                leftSection={<IconUserPlus size={16} />}
+              >
+                Send Invitation
+              </Button>
+            </Stack>
+          </Tabs.Panel>
+        </Tabs>
       </Modal>
     </Container>
     </>
