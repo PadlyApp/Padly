@@ -103,11 +103,30 @@ export function AuthProvider({ children }) {
     try {
       const response = await AuthService.refreshToken(refreshToken);
       saveAuthState(response);
-      loadCurrentUser(response.access_token);
+      await loadCurrentUser(response.access_token);
+      return response.access_token;
     } catch (error) {
       console.error('Token refresh failed:', error);
       clearAuthState();
+      return null;
     }
+  };
+
+  // Get a valid access token, refreshing if needed
+  const getValidToken = async () => {
+    if (!authState) return null;
+    
+    // Check if token is expired or about to expire (within 60 seconds)
+    const bufferTime = 60 * 1000; // 60 seconds buffer
+    const isExpired = authState.expiresAt && Date.now() >= (authState.expiresAt - bufferTime);
+    
+    if (isExpired && authState.refreshToken) {
+      console.log('Token expired or expiring soon, refreshing...');
+      const newToken = await refreshAuthToken(authState.refreshToken);
+      return newToken;
+    }
+    
+    return authState.accessToken;
   };
 
   const signup = async (email, password, fullName) => {
@@ -153,6 +172,7 @@ export function AuthProvider({ children }) {
       signin,
       signout,
       isAuthenticated,
+      getValidToken,
     }}>
       {children}
     </AuthContext.Provider>

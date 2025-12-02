@@ -25,7 +25,7 @@ import { Navigation } from '../../components/Navigation';
 
 export default function CreateGroupPage() {
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { user, authState, getValidToken } = useAuth();
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(0);
 
@@ -39,9 +39,10 @@ export default function CreateGroupPage() {
   const [groupSize, setGroupSize] = useState(2);
 
   const handleSubmit = async (e) => {
+    console.log("we submitting baby")
     e.preventDefault();
 
-    if (!user || !token) {
+    if (!user || !authState?.accessToken) {
       notifications.show({
         title: 'Authentication Required',
         message: 'Please log in to create a group',
@@ -73,6 +74,18 @@ export default function CreateGroupPage() {
     setLoading(true);
 
     try {
+      // Get a valid token (refreshes if expired)
+      const token = await getValidToken();
+      if (!token) {
+        notifications.show({
+          title: 'Session Expired',
+          message: 'Please log in again',
+          color: 'red',
+        });
+        router.push('/login');
+        return;
+      }
+
       const response = await fetch('http://localhost:8000/api/roommate-groups', {
         method: 'POST',
         headers: {
@@ -127,7 +140,7 @@ export default function CreateGroupPage() {
         return;
       }
     }
-    setActive((current) => (current < 2 ? current + 1 : current));
+    setActive((current) => (current < 3 ? current + 1 : current));
   };
 
   const prevStep = () => setActive((current) => (current > 0 ? current - 1 : current));

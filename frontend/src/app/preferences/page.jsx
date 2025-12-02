@@ -496,7 +496,7 @@ function PreferencesPageContent() {
                           value={housingPrefs.smoking_allowed}
                           onChange={(v) => updateHousingPref('smoking_allowed', v)}
                           clearable
-                        /*/>}
+                        />*/}
                         <Switch
                         label="Smoking Policy"
                         checked={housingPrefs.smoking_allowed=== true}
@@ -541,6 +541,7 @@ function PreferencesPageContent() {
                         checked={housingPrefs.noise_parties_allowed === true}
                         onChange={(e) => updateHousingPref('noise_parties_allowed', e.currentTarget.checked ? true : null)}
                       />
+                      </Stack>
                     {/* <Switch
                       label="Laundry in unit"
                       checked={housingPrefs.laundry_in_unit === true}
@@ -898,4 +899,5 @@ function PreferencesPageContent() {
     </Box>
   );
 }
+
 
