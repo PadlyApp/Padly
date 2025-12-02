@@ -127,6 +127,8 @@ async def update_user_preferences(
     
     Creates preferences if they don't exist, updates if they do.
     All fields are optional - only provided fields will be updated.
+    
+    Also automatically triggers stable matching for the city.
     """
     client = SupabaseHTTPClient(token=token)
     
@@ -162,13 +164,54 @@ async def update_user_preferences(
             data=db_data
         )
     
+    # 🔥 AUTO-TRIGGER STABLE MATCHING after preferences saved
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+    
+    matching_result = {"status": "skipped", "message": "No city specified"}
+    
+    # Get the target city from preferences
+    target_city = db_data.get("target_city")
+    
+    if target_city:
+        try:
+            # Run stable matching for the entire city
+            matching_request = RunMatchingRequest(
+                city=target_city,
+                date_flexibility_days=30
+            )
+            
+            matching_response = await run_matching(matching_request)
+            
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "execution_time_seconds": matching_response.execution_time_seconds,
+                "message": matching_response.message
+            }
+        except HTTPException as e:
+            # Don't fail if matching fails (e.g., no listings available)
+            matching_result = {
+                "status": "no_matches",
+                "city": target_city,
+                "message": str(e.detail)
+            }
+        except Exception as e:
+            # Don't fail the whole request if matching fails
+            matching_result = {
+                "status": "error",
+                "city": target_city,
+                "message": f"Matching failed: {str(e)}"
+            }
+    
     # Convert back to API format
     formatted_prefs = deserialize_preferences(updated)
     
     return {
         "status": "success",
         "message": "Preferences updated successfully",
-        "data": formatted_prefs
+        "data": formatted_prefs,
+        "matching": matching_result  # Include matching results
     }
 
 
