@@ -329,7 +329,7 @@ class RoommateGroupBase(BaseModel):
 
 class RoommateGroupCreate(RoommateGroupBase):
     """Model for creating a roommate group"""
-    creator_user_id: str
+    creator_user_id: Optional[str] = None  # Made optional - set by endpoint
     status: PostStatus = PostStatus.ACTIVE
 
 

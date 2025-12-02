@@ -100,16 +100,25 @@ async def list_groups(
         # Get current user from token
         user_response = supabase.auth.get_user(token)
         if user_response:
-            user_id = user_response.user.id
+            auth_user_id = user_response.user.id
             
-            # Get groups where user is a member
-            member_response = supabase.table('group_members')\
-                .select('group_id')\
-                .eq('user_id', user_id)\
-                .execute()
+            # Look up the user in the users table by auth_id
+            user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
             
-            member_group_ids = [m['group_id'] for m in member_response.data]
-            groups = [g for g in groups if g['id'] in member_group_ids]
+            if user_record.data:
+                user_id = user_record.data[0]['id']
+                
+                # Get groups where user is a member
+                member_response = supabase.table('group_members')\
+                    .select('group_id')\
+                    .eq('user_id', user_id)\
+                    .execute()
+                
+                member_group_ids = [m['group_id'] for m in member_response.data]
+                groups = [g for g in groups if g['id'] in member_group_ids]
+            else:
+                # User not found in users table, return empty
+                groups = []
     
     return {
         "status": "success",
@@ -328,12 +337,29 @@ async def create_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found. Please complete your profile first.")
+    
+    user_id = user_record.data[0]['id']
     
     # Create group
     group_dict = group_data.model_dump(exclude_none=True)
     group_dict['creator_user_id'] = user_id
     
+    # Convert non-JSON-serializable types
+    from decimal import Decimal
+    from datetime import date as date_type, datetime as datetime_type
+    for key, value in group_dict.items():
+        if isinstance(value, Decimal):
+            group_dict[key] = float(value)
+        elif isinstance(value, date_type) and not isinstance(value, datetime_type):
+            group_dict[key] = value.isoformat()  # Convert date to "YYYY-MM-DD" string
+
     group_response = supabase.table('roommate_groups')\
         .insert(group_dict)\
         .execute()
@@ -1098,6 +1124,172 @@ async def get_group_matches(
         "group_id": group_id,
         "count": len(matches),
         "data": matches
+    }
+
+
+@router.get("/{group_id}/compatible-users", response_model=dict)
+async def get_compatible_users(
+    group_id: str,
+    token: str = Depends(require_user_token)
+):
+    """
+    Get users who are compatible with the group's hard constraints.
+    
+    Filters users based on:
+    - Target city match
+    - Budget overlap
+    - Move-in date compatibility (within 30 days)
+    - Not already a member or has pending invitation
+    
+    Returns user profiles with their preferences for invitation.
+    """
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
+    
+    # Get the group details
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
+    
+    # Check if current user is a member of this group
+    member_check = supabase.table('group_members')\
+        .select('user_id')\
+        .eq('group_id', group_id)\
+        .eq('user_id', current_user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if not member_check.data:
+        raise HTTPException(status_code=403, detail="Only group members can view compatible users")
+    
+    # Get existing members and pending invitations to exclude them
+    existing_members = supabase.table('group_members')\
+        .select('user_id')\
+        .eq('group_id', group_id)\
+        .execute()
+    
+    excluded_user_ids = [m['user_id'] for m in existing_members.data]
+    
+    # Get all users with their preferences
+    users_response = supabase.table('users')\
+        .select('id, email, full_name, profile_picture_url, company_name, school_name, verification_status, bio')\
+        .execute()
+    
+    # Get all personal preferences
+    prefs_response = supabase.table('personal_preferences')\
+        .select('*')\
+        .execute()
+    
+    # Create a map of user_id -> preferences
+    prefs_map = {p['user_id']: p for p in prefs_response.data}
+    
+    # Filter users based on hard constraints
+    compatible_users = []
+    
+    group_city = group.get('target_city', '').lower().strip()
+    group_budget_min = group.get('budget_per_person_min') or 0
+    group_budget_max = group.get('budget_per_person_max') or float('inf')
+    group_move_in = group.get('target_move_in_date')
+    
+    for user_data in users_response.data:
+        user_id = user_data['id']
+        
+        # Skip excluded users (already members or self)
+        if user_id in excluded_user_ids:
+            continue
+        
+        prefs = prefs_map.get(user_id, {})
+        
+        # Hard constraint 1: City match
+        user_city = (prefs.get('target_city') or '').lower().strip()
+        if group_city and user_city and group_city != user_city:
+            # Allow partial match (e.g., "sf" matches "san francisco")
+            if group_city not in user_city and user_city not in group_city:
+                continue
+        
+        # Hard constraint 2: Budget overlap
+        user_budget_min = prefs.get('budget_min') or 0
+        user_budget_max = prefs.get('budget_max') or float('inf')
+        
+        # Check if ranges overlap
+        if user_budget_max < group_budget_min or user_budget_min > group_budget_max:
+            continue
+        
+        # Hard constraint 3: Move-in date compatibility (within 30 days)
+        if group_move_in and prefs.get('move_in_date'):
+            from datetime import datetime, timedelta
+            try:
+                group_date = datetime.fromisoformat(str(group_move_in).replace('Z', '+00:00')).date() if isinstance(group_move_in, str) else group_move_in
+                user_date = datetime.fromisoformat(str(prefs['move_in_date']).replace('Z', '+00:00')).date() if isinstance(prefs['move_in_date'], str) else prefs['move_in_date']
+                
+                date_diff = abs((group_date - user_date).days)
+                if date_diff > 30:
+                    continue
+            except (ValueError, TypeError):
+                pass  # If dates can't be parsed, don't filter on this constraint
+        
+        # Calculate compatibility score (soft constraints)
+        compatibility_score = 100  # Start with perfect score
+        compatibility_reasons = []
+        
+        # Check lifestyle preferences overlap
+        user_lifestyle = prefs.get('lifestyle_preferences', {}) or {}
+        
+        # Add user to compatible list
+        compatible_users.append({
+            'id': user_id,
+            'email': user_data.get('email'),
+            'full_name': user_data.get('full_name'),
+            'profile_picture_url': user_data.get('profile_picture_url'),
+            'company_name': user_data.get('company_name'),
+            'school_name': user_data.get('school_name'),
+            'verification_status': user_data.get('verification_status'),
+            'bio': user_data.get('bio'),
+            'preferences': {
+                'target_city': prefs.get('target_city'),
+                'budget_min': prefs.get('budget_min'),
+                'budget_max': prefs.get('budget_max'),
+                'move_in_date': str(prefs.get('move_in_date')) if prefs.get('move_in_date') else None,
+                'lifestyle_preferences': user_lifestyle,
+                'preferred_neighborhoods': prefs.get('preferred_neighborhoods', [])
+            },
+            'compatibility_score': compatibility_score
+        })
+    
+    # Sort by compatibility score (highest first)
+    compatible_users.sort(key=lambda u: u['compatibility_score'], reverse=True)
+    
+    return {
+        "status": "success",
+        "group_id": group_id,
+        "group_constraints": {
+            "target_city": group.get('target_city'),
+            "budget_min": group.get('budget_per_person_min'),
+            "budget_max": group.get('budget_per_person_max'),
+            "move_in_date": str(group.get('target_move_in_date')) if group.get('target_move_in_date') else None
+        },
+        "count": len(compatible_users),
+        "users": compatible_users
     }
 
 # =============================================================================
