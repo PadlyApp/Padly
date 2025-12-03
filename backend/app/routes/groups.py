@@ -380,10 +380,32 @@ async def create_group(
     
     supabase.table('group_members').insert(member_data).execute()
     
+    # 🔥 TRIGGER STABLE MATCHING for the new group's city
+    # Option 3: Hybrid re-matching - preserves confirmed matches
+    target_city = created_group.get('target_city')
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if target_city:
+        from app.routes.stable_matching import run_matching, RunMatchingRequest
+        
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": matching_response.message
+            }
+        except Exception as e:
+            # Don't fail group creation if matching fails
+            matching_result = {"status": "error", "message": str(e)}
+    
     return {
         "status": "success",
         "message": "Group created successfully",
-        "data": created_group
+        "data": created_group,
+        "matching": matching_result
     }
 
 
@@ -1244,6 +1266,198 @@ async def get_eligible_listings_for_group(
         },
         "count": len(eligible_listings),
         "listings": eligible_listings
+    }
+
+
+@router.post("/{group_id}/confirm-match", response_model=dict)
+async def confirm_match_as_group(
+    group_id: str,
+    token: str = Depends(require_user_token)
+):
+    """
+    Confirm the current stable match as the group.
+    
+    This sets group_confirmed_at timestamp on the match.
+    A match is fully confirmed when BOTH group and listing owner confirm.
+    
+    Confirmed matches are preserved during re-matching - only unconfirmed
+    matches are recalculated when new groups join or preferences change.
+    """
+    from datetime import datetime, timezone
+    
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
+    
+    # Check if user is a member of this group
+    member_check = supabase.table('group_members')\
+        .select('user_id, is_creator')\
+        .eq('group_id', group_id)\
+        .eq('user_id', current_user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if not member_check.data:
+        raise HTTPException(status_code=403, detail="Only group members can confirm matches")
+    
+    # Get the active match for this group
+    match_response = supabase.table('stable_matches')\
+        .select('*, listings(id, title, city, price_per_month)')\
+        .eq('group_id', group_id)\
+        .eq('status', 'active')\
+        .execute()
+    
+    if not match_response.data:
+        raise HTTPException(status_code=404, detail="No active match found for this group")
+    
+    match = match_response.data[0]
+    
+    # Check if already confirmed by group
+    if match.get('group_confirmed_at'):
+        return {
+            "status": "already_confirmed",
+            "message": "This match was already confirmed by your group",
+            "match_id": match['id'],
+            "group_confirmed_at": match['group_confirmed_at'],
+            "listing_confirmed_at": match.get('listing_confirmed_at'),
+            "fully_confirmed": match.get('listing_confirmed_at') is not None
+        }
+    
+    # Confirm the match
+    now = datetime.now(timezone.utc).isoformat()
+    
+    update_response = supabase.table('stable_matches')\
+        .update({'group_confirmed_at': now})\
+        .eq('id', match['id'])\
+        .execute()
+    
+    # Check if now fully confirmed
+    listing_confirmed = match.get('listing_confirmed_at') is not None
+    fully_confirmed = listing_confirmed  # Group just confirmed, so fully_confirmed depends on listing
+    
+    listing_info = match.get('listings', {})
+    
+    return {
+        "status": "success",
+        "message": "Match confirmed by group" + (" - Waiting for listing owner" if not fully_confirmed else " - Both parties confirmed!"),
+        "match_id": match['id'],
+        "listing": {
+            "id": listing_info.get('id'),
+            "title": listing_info.get('title'),
+            "city": listing_info.get('city'),
+            "price_per_month": listing_info.get('price_per_month')
+        },
+        "group_confirmed_at": now,
+        "listing_confirmed_at": match.get('listing_confirmed_at'),
+        "fully_confirmed": fully_confirmed
+    }
+
+
+@router.delete("/{group_id}/reject-match", response_model=dict)
+async def reject_match_as_group(
+    group_id: str,
+    token: str = Depends(require_user_token)
+):
+    """
+    Reject the current stable match as the group.
+    
+    This removes the match and optionally triggers re-matching
+    to find a new match for the group.
+    """
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
+    
+    # Check if user is a member of this group
+    member_check = supabase.table('group_members')\
+        .select('user_id')\
+        .eq('group_id', group_id)\
+        .eq('user_id', current_user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if not member_check.data:
+        raise HTTPException(status_code=403, detail="Only group members can reject matches")
+    
+    # Get the active match for this group
+    match_response = supabase.table('stable_matches')\
+        .select('*')\
+        .eq('group_id', group_id)\
+        .eq('status', 'active')\
+        .execute()
+    
+    if not match_response.data:
+        raise HTTPException(status_code=404, detail="No active match found for this group")
+    
+    match = match_response.data[0]
+    
+    # Check if already confirmed by BOTH parties - can't reject a fully confirmed match
+    if match.get('group_confirmed_at') and match.get('listing_confirmed_at'):
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot reject a fully confirmed match. Contact support if needed."
+        )
+    
+    # Mark the match as cancelled
+    supabase.table('stable_matches')\
+        .update({'status': 'cancelled'})\
+        .eq('id', match['id'])\
+        .execute()
+    
+    # Get group to trigger re-matching
+    group_response = supabase.table('roommate_groups')\
+        .select('target_city')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if group_response.data and group_response.data.get('target_city'):
+        from app.routes.stable_matching import run_matching, RunMatchingRequest
+        
+        target_city = group_response.data['target_city']
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": "Re-matching completed"
+            }
+        except Exception as e:
+            matching_result = {"status": "error", "message": str(e)}
+    
+    return {
+        "status": "success",
+        "message": "Match rejected. Re-matching triggered to find new options.",
+        "rejected_match_id": match['id'],
+        "matching": matching_result
     }
 
 
