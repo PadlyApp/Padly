@@ -442,12 +442,12 @@ async def find_compatible_groups(
         List of groups with compatibility scores, sorted by score DESC
     """
     
-    from app.services.supabase_client import get_supabase_admin_client
+    from app.dependencies.supabase import get_admin_client
     
-    supabase = get_supabase_admin_client()
+    supabase = get_admin_client()
     
     # 1. Get user details
-    user_response = await supabase.table("users").select("*").eq("id", user_id).execute()
+    user_response = supabase.table("users").select("*").eq("id", user_id).execute()
     if not user_response.data:
         raise ValueError(f"User not found: {user_id}")
     user = user_response.data[0]
@@ -456,12 +456,14 @@ async def find_compatible_groups(
     if not target_city:
         return []
     
-    # 2. Get open groups in target city
-    # Open = status='active' AND (target_group_size IS NULL OR current < target)
-    groups_response = await supabase.table("roommate_groups").select("""
-        *,
-        group_members!inner(user_id, status)
-    """).eq("status", "active").eq("target_city", target_city).execute()
+    # 2. Get open groups in target city (exclude solo groups)
+    # Open = status='active' AND is_solo=false AND (target_group_size IS NULL OR current < target)
+    groups_response = supabase.table("roommate_groups")\
+        .select("*, group_members(user_id, status)")\
+        .eq("status", "active")\
+        .ilike("target_city", target_city)\
+        .eq("is_solo", False)\
+        .execute()
     
     if not groups_response.data:
         return []
@@ -470,7 +472,8 @@ async def find_compatible_groups(
     open_groups = []
     for group in groups_response.data:
         # Check if user is already a member
-        member_ids = [m['user_id'] for m in group.get('group_members', []) if m['status'] == 'accepted']
+        members = group.get('group_members', []) or []
+        member_ids = [m['user_id'] for m in members if m.get('status') == 'accepted']
         if user_id in member_ids:
             continue  # Skip groups user is already in
         

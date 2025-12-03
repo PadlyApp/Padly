@@ -101,7 +101,7 @@ CREATE TABLE public.roommate_groups (
   budget_per_person_min numeric,
   budget_per_person_max numeric,
   target_move_in_date date,
-  target_group_size integer NOT NULL DEFAULT 2,
+  target_group_size integer DEFAULT 2,
   status USER-DEFINED NOT NULL DEFAULT 'active'::post_status,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -115,6 +115,8 @@ CREATE TABLE public.roommate_groups (
   target_country text DEFAULT 'USA'::text,
   target_house_rules text,
   target_lease_type USER-DEFINED,
+  current_member_count integer NOT NULL DEFAULT 1,
+  is_solo boolean NOT NULL DEFAULT false,
   CONSTRAINT roommate_groups_pkey PRIMARY KEY (id),
   CONSTRAINT roommate_groups_creator_user_id_fkey FOREIGN KEY (creator_user_id) REFERENCES public.users(id)
 );
