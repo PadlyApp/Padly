@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { 
   Container, Title, Text, Stack, Box, Paper, Tabs, 
   TextInput, NumberInput, Select, Switch, Button, Group,
-  MultiSelect, Grid, Divider, Loader, Alert
+  MultiSelect, Grid, Divider, Loader, Alert, Textarea
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { Navigation } from '../components/Navigation';
@@ -42,30 +42,21 @@ function PreferencesPageContent() {
   // Housing Preferences
   const [housingPrefs, setHousingPrefs] = useState({
     // Hard Constraints
-    lease_type: null,
+    target_city: null,
+    target_state_province: null,
+    budget_min: null,
+    budget_max: null,
+    required_bedrooms: null,
     move_in_date: null,
-    move_out_date: null,
-    min_bedrooms: null,
-    max_bedrooms: null,
-    min_bathrooms: null,
-    furnished_required: null,
-    pets_allowed: null,
-    smoking_allowed: null,
-    parking_required: null,
-    accessibility_required: null,
+    target_lease_type: null,
+    target_lease_duration_months: null,
     
-    // Soft Constraints (Amenities)
-    laundry_in_unit: null,
-    laundry_in_building: null,
-    dishwasher: null,
-    air_conditioning: null,
-    heating: null,
-    outdoor_space: null,
-    gym_access: null,
-    pool_access: null,
-    storage_space: null,
-    high_speed_internet: null,
-    utilities_included: null,
+    // Soft Preferences
+    target_bathrooms: null,
+    target_furnished: null,
+    target_utilities_included: null,
+    target_deposit_amount: null,
+    target_house_rules: null,
   });
   
   // Roommate Preferences
@@ -142,13 +133,30 @@ function PreferencesPageContent() {
         const data = result.data;
         
         if (data) {
-          if (data.housing_preferences) {
-            setHousingPrefs(prev => ({ ...prev, ...data.housing_preferences }));
-          }
+          // Backend returns preferences fields directly in data (not nested)
+          // Extract the 13 preference fields
+          const housingPrefsData = {
+            // Hard Constraints
+            target_city: data.target_city,
+            target_state_province: data.target_state_province,
+            budget_min: data.budget_min,
+            budget_max: data.budget_max,
+            required_bedrooms: data.required_bedrooms,
+            move_in_date: data.move_in_date,
+            target_lease_type: data.target_lease_type,
+            target_lease_duration_months: data.target_lease_duration_months,
+            // Soft Preferences
+            target_bathrooms: data.target_bathrooms,
+            target_furnished: data.target_furnished,
+            target_utilities_included: data.target_utilities_included,
+            target_deposit_amount: data.target_deposit_amount,
+            target_house_rules: data.target_house_rules,
+          };
           
-          if (data.roommate_preferences) {
-            setRoommatePrefs(prev => ({ ...prev, ...data.roommate_preferences }));
-          }
+          setHousingPrefs(prev => ({ ...prev, ...housingPrefsData }));
+          
+          // Note: Roommate preferences are not persisted on backend,
+          // they're frontend-only for now per team decision
         }
       }
     } catch (err) {
@@ -186,10 +194,7 @@ function PreferencesPageContent() {
     
     try {
       
-      const payload = {
-        housing_preferences: housingPrefs,
-        roommate_preferences: roommatePrefs,
-      };
+      const payload = housingPrefs;
       
       const response = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
         method: 'PUT',
@@ -374,7 +379,7 @@ function PreferencesPageContent() {
                       <DatePickerInput
                         label="Target Move-in Date"
                         placeholder="Select date"
-                        value={housingPrefs.target_move_in_date ? new Date(housingPrefs.target_move_in_date) : null}
+                        value={housingPrefs.move_in_date ? new Date(housingPrefs.move_in_date) : null}
                         onChange={(date) => updateHousingPref('move_in_date', date ? date.toISOString().split('T')[0] : null)}
                         minDate={new Date()}
                         required
@@ -390,8 +395,8 @@ function PreferencesPageContent() {
                           { value: 'sublet', label: 'Sublet' },
                           { value: 'any', label: 'Any type' }
                         ]}
-                        value={housingPrefs.lease_type}
-                        onChange={(v) => updateHousingPref('lease_type', v)}
+                        value={housingPrefs.target_lease_type}
+                        onChange={(v) => updateHousingPref('target_lease_type', v)}
                         required
                       />
                     </Grid.Col>
@@ -421,8 +426,8 @@ function PreferencesPageContent() {
                       <NumberInput
                         label="Lease Duration (months)"
                         placeholder="Duration"
-                        value={housingPrefs.lease_duration_months}
-                        onChange={(v) => updateHousingPref('lease_duration_months', v)}
+                        value={housingPrefs.target_lease_duration_months}
+                        onChange={(v) => updateHousingPref('target_lease_duration_months', v)}
                         min={1}
                         max={24}
                       />
@@ -442,8 +447,8 @@ function PreferencesPageContent() {
                         <NumberInput
                           label="Minimum Bathrooms"
                           placeholder="e.g., 1"
-                          value={housingPrefs.min_bathrooms}
-                          onChange={(v) => updateHousingPref('min_bathrooms', v)}
+                          value={housingPrefs.target_bathrooms}
+                          onChange={(v) => updateHousingPref('target_bathrooms', v)}
                           min={1}
                           max={10}
                           step={0.5}
@@ -453,8 +458,8 @@ function PreferencesPageContent() {
                         <NumberInput
                           label="Min Deposit Amount"
                           placeholder="Minimum acceptable deposit"
-                          value={housingPrefs.min_deposit}
-                          onChange={(v) => updateHousingPref('min_deposit', v)}
+                          value={housingPrefs.target_deposit_amount}
+                          onChange={(v) => updateHousingPref('target_deposit_amount', v)}
                           min={0}
                           prefix="$"
                         />
@@ -462,82 +467,33 @@ function PreferencesPageContent() {
                     <Grid.Col span={{ base: 12, md: 6 }}>
                       <Switch
                         label="Furnished Preference"
-                        checked={housingPrefs.furnished === true}
-                        onChange={(e) => updateHousingPref('furnished', e.currentTarget.checked ? true : null)}
+                        checked={housingPrefs.target_furnished === true}
+                        onChange={(e) => updateHousingPref('target_furnished', e.currentTarget.checked ? true : null)}
                       />
                     </Grid.Col>
                       <Grid.Col span={{ base: 12, md: 6 }}>
                       <Switch
                         label="Utilities included in rent"
-                        checked={housingPrefs.utilities_included === true}
-                        onChange={(e) => updateHousingPref('utilities_included', e.currentTarget.checked ? true : null)}
+                        checked={housingPrefs.target_utilities_included === true}
+                        onChange={(e) => updateHousingPref('target_utilities_included', e.currentTarget.checked ? true : null)}
                       />
                       </Grid.Col>
                     </Grid>
                     <Divider my="lg" />
-                      <Title order={5} mb="md">🏠 House Rules Compatibility</Title>
+                      <Title order={5} mb="md">🏠 House Rules & Lifestyle</Title>
                       <Text size="sm" c="dimmed" mb="md">
-                        Your preferences for house rules and lifestyle
+                        Describe any house rules or lifestyle preferences that matter to you
                       </Text>
                       
                       <Stack gap="md">
-                        {/*<Select
-                          label="Smoking Policy"
-                          placeholder="Select preference"
-                          data={[
-                            { value: 'allowed', label: 'Smoking allowed' },
-                            { value: 'not_allowed', label: 'No smoking' },
-                            { value: 'outdoor_only', label: 'Outdoor smoking only' },
-                            { value: 'no_preference', label: 'No preference' }
-                          ]}
-                          value={housingPrefs.smoking_allowed}
-                          onChange={(v) => updateHousingPref('smoking_allowed', v)}
-                          clearable
-                        />*/}
-                        <Switch
-                        label="Smoking Policy"
-                        checked={housingPrefs.smoking_allowed=== true}
-                        onChange={(e) => updateHousingPref('smoking_allowed', e.currentTarget.checked ? true : null)}
-                      />
-                        {/*<Select
-                          label="Pet Policy"
-                          placeholder="Select preference"
-                          data={[
-                            { value: 'allowed', label: 'Pets allowed' },
-                            { value: 'not_allowed', label: 'No pets' },
-                            { value: 'cats_only', label: 'Cats only' },
-                            { value: 'dogs_only', label: 'Dogs only' },
-                            { value: 'small_pets_only', label: 'Small pets only' },
-                            { value: 'no_preference', label: 'No preference' }
-                          ]}
-                          value={housingPrefs.pets_allowed}
-                          onChange={(v) => updateHousingPref('pets_allowed', v)}
-                          clearable
-                        />*/}
-                        <Switch
-                        label="Pets Policy"
-                        checked={housingPrefs.pets_allowed === true}
-                        onChange={(e) => updateHousingPref('pets_allowed', e.currentTarget.checked ? true : null)}
-                      />
-                        {/*<Select
-                          label="Noise/Parties Policy"
-                          placeholder="Select preference"
-                          data={[
-                            { value: 'quiet_only', label: 'Quiet environment only' },
-                            { value: 'occasional_gatherings', label: 'Occasional small gatherings OK' },
-                            { value: 'parties_allowed', label: 'Parties allowed' },
-                            { value: 'no_preference', label: 'No preference' }
-                          ]}
-                          value={housingPrefs.noise_parties_allowed}
-                          onChange={(v) => updateHousingPref('noise_parties_allowed', v)}
-                          clearable
+                        <Textarea
+                          label="House Rules & Lifestyle Preferences"
+                          placeholder="E.g., smoking policy, pet preferences, noise level, etc."
+                          value={housingPrefs.target_house_rules || ''}
+                          onChange={(e) => updateHousingPref('target_house_rules', e.currentTarget.value)}
+                          minRows={3}
+                          maxRows={6}
                         />
-                      </Stack>*/}
-                        <Switch
-                        label="Noise/Party Policy"
-                        checked={housingPrefs.noise_parties_allowed === true}
-                        onChange={(e) => updateHousingPref('noise_parties_allowed', e.currentTarget.checked ? true : null)}
-                      />
                       </Stack>
                     {/* <Switch
                       label="Laundry in unit"
