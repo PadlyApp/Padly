@@ -1,51 +1,73 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from app.db import supabase
+"""
+Padly API - Main Application
+A trusted platform for students, interns, and early-career professionals 
+to find housing and compatible roommates.
+"""
 
-app = FastAPI(title="Padly API", version="1.0.0")
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes import (
+    users_router, 
+    listings_router,
+    roommates_router,
+    preferences_router,
+    admin_router,
+    auth_router,
+    matches_router,
+)
+from app.routes.stable_matching import router as stable_matching_router
+from app.routes.groups import router as groups_router
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="Padly API",
+    version="1.0.0",
+    description="Backend API for Padly - Housing and Roommate Matching Platform",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:3000",  # Next.js frontend
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
+# Include routers
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(listings_router)
+app.include_router(roommates_router)
+app.include_router(groups_router)  # Roommate groups endpoints
+app.include_router(preferences_router)
+app.include_router(matches_router)
+app.include_router(stable_matching_router)  # Stable matching endpoints
+app.include_router(admin_router)
+
+
+# Root endpoints
+@app.get("/", tags=["root"])
 async def root():
-    return {"message": "Welcome to Padly API"}
+    """Welcome endpoint"""
+    return {
+        "message": "Welcome to Padly API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
-@app.get("/health")
+
+@app.get("/health", tags=["root"])
 async def health_check():
-    return {"status": "healthy"}
-
-@app.get("/test-db")
-async def test_database():
-    """Simple endpoint to test if database connection works"""
-    try:
-        # Test the connection by executing a simple query
-        # This will check if we can communicate with Supabase
-        response = supabase.rpc('version', {}).execute()
-        return {
-            "status": "success",
-            "message": "Database connection is working!",
-            "connected": True,
-            "supabase_url": supabase.supabase_url
-        }
-    except Exception as e:
-        # If the above fails, just check if the client is initialized
-        if supabase and supabase.supabase_url:
-            return {
-                "status": "success",
-                "message": "Supabase client is initialized and configured!",
-                "connected": True,
-                "supabase_url": supabase.supabase_url
-            }
-        return {
-            "status": "error",
-            "message": f"Database connection failed: {str(e)}",
-            "connected": False
-        }
-
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "Padly API",
+        "version": "1.0.0"
+    }
