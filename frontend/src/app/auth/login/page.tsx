@@ -129,7 +129,6 @@ export default function LoginPage() {
             mt="xl"
             loading={loading}
           >
-            Sign in
           </Button>
         </form>
       </Paper>
