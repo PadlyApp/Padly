@@ -34,10 +34,13 @@ export default function LoginPage() {
   });
 
   const handleSubmit = async (values) => {
+    console.log("clicked - attempting signin with:", values.email);
     setIsLoading(true);
 
     try {
+      console.log("Calling signin...");
       await signin(values.email, values.password);
+      console.log("Signin successful!");
       notifications.show({
         title: 'Welcome back!',
         message: 'Successfully signed in',
@@ -45,6 +48,7 @@ export default function LoginPage() {
       });
       router.push('/');
     } catch (err) {
+      console.error("Signin error:", err);
       notifications.show({
         title: 'Login Failed',
         message: err.message || 'Invalid credentials. Please try again.',
