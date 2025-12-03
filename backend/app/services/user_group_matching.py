@@ -1,73 +1,40 @@
 """
-User-to-Group Matching Service
-
-This module provides compatibility scoring between individual users and existing
-roommate groups, enabling users to discover groups that match their preferences.
-
-Scoring Algorithm:
-- Hard Constraints (Binary): City, budget overlap, date proximity, open spots
-- Soft Preferences (0-100 points): Budget fit, date fit, company match, 
-  verification, lifestyle compatibility
+User-Group Matching - Compatibility scoring between users and roommate groups.
+Score: 0-100 pts. Weights: budget(20), date(15), lease(15), amenity(10), 
+company(10), verification(10), lifestyle(20).
 """
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 
-
-# =============================================================================
-# Constants
-# =============================================================================
-
-# Scoring weights (total: 100 points)
-# Updated to include new preference fields from personal_preferences
+# Scoring weights (100 pts total)
 SCORING_WEIGHTS = {
-    'budget_fit': 20,           # How close are budget midpoints
-    'date_fit': 15,             # How close are move-in dates
-    'lease_preferences': 15,    # NEW: Lease type & duration match
-    'amenity_preferences': 10,  # NEW: Furnished, utilities included
-    'company_school_match': 10, # Same company/school bonus
+    'budget_fit': 20,           # Budget range alignment
+    'date_fit': 15,             # Move-in date proximity
+    'lease_preferences': 15,    # Lease type/duration match
+    'amenity_preferences': 10,  # Furnished, utilities
+    'company_school_match': 10, # Same company/school
     'verification': 10,         # User verification status
-    'lifestyle': 20             # Lifestyle compatibility (smoking, pets, etc.)
+    'lifestyle': 20             # Lifestyle compatibility
 }
 
-# Date flexibility for hard constraint (days)
-DATE_FLEXIBILITY_DAYS = 60
+DATE_FLEXIBILITY_DAYS = 60  # Max days apart for date matching
 
-
-# =============================================================================
-# Main Compatibility Function
-# =============================================================================
 
 def calculate_user_group_compatibility(
     user: Dict[str, Any],
     user_prefs: Dict[str, Any],
     group: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Calculate compatibility score between a user and a group.
-    
-    Args:
-        user: User data dict (from users table)
-        user_prefs: User preferences dict (from personal_preferences table)
-        group: Group data dict (from roommate_groups table)
-        
-    Returns:
-        Dict with keys:
-        - score: float (0-100)
-        - eligible: bool (passed hard constraints)
-        - reasons: List[str] (explanation of score)
-        - compatibility_level: str (Excellent/Great/Good/Fair/Poor Match)
-    """
+    """Calculate compatibility between user and group. Returns score 0-100."""
     
     score = 0
     reasons = []
     
-    # =========================================================================
-    # HARD CONSTRAINTS (Must ALL pass or return score=0)
-    # =========================================================================
+    # --- HARD CONSTRAINTS (all must pass) ---
     
-    # 1. City Match (REQUIRED)
+    # City must match
     user_city = str(user_prefs.get('target_city') or '').lower().strip()
     group_city = str(group.get('target_city') or '').lower().strip()
     
@@ -79,13 +46,11 @@ def calculate_user_group_compatibility(
             'compatibility_level': 'Not Compatible'
         }
     
-    # 2. Budget Overlap (REQUIRED)
+    # Budget must overlap
     user_budget_min = float(user_prefs.get('budget_min') or 0)
     user_budget_max = float(user_prefs.get('budget_max') or float('inf'))
     group_budget_min = float(group.get('budget_per_person_min') or 0)
     group_budget_max = float(group.get('budget_per_person_max') or float('inf'))
-    
-    # Check if ranges overlap
     overlaps = user_budget_max >= group_budget_min and user_budget_min <= group_budget_max
     
     if not overlaps:
@@ -96,12 +61,11 @@ def calculate_user_group_compatibility(
             'compatibility_level': 'Not Compatible'
         }
     
-    # 3. Move-in Date Proximity (REQUIRED - within ±60 days)
+    # Move-in date within ±60 days
     user_date = user_prefs.get('move_in_date')
     group_date = group.get('target_move_in_date')
     
     if user_date and group_date:
-        # Convert to date objects if strings
         if isinstance(user_date, str):
             user_date = datetime.fromisoformat(user_date.replace('Z', '+00:00')).date()
         if isinstance(group_date, str):
@@ -117,7 +81,7 @@ def calculate_user_group_compatibility(
                 'compatibility_level': 'Not Compatible'
             }
     
-    # 4. Group has space (REQUIRED)
+    # Group must have space
     current_count = int(group.get('current_member_count') or 0)
     target_size = group.get('target_group_size')
     
@@ -131,15 +95,9 @@ def calculate_user_group_compatibility(
                 'compatibility_level': 'Not Compatible'
             }
     
-    # If we made it here, all hard constraints passed!
+    # --- SOFT PREFERENCES (scoring 0-100) ---
     
-    # =========================================================================
-    # SOFT PREFERENCES (Scoring 0-100)
-    # Using new personal_preferences fields from PR #7
-    # =========================================================================
-    
-    # 1. Budget Fit (20 points)
-    # Handle infinity for max budgets
+    # Budget Fit (20 pts)
     user_max_for_calc = user_budget_max if user_budget_max != float('inf') else user_budget_min + 2000
     group_max_for_calc = group_budget_max if group_budget_max != float('inf') else group_budget_min + 2000
     user_budget_mid = (user_budget_min + user_max_for_calc) / 2
@@ -158,10 +116,9 @@ def calculate_user_group_compatibility(
     else:
         budget_score = 8
         reasons.append('Budget somewhat aligned')
-    
     score += budget_score
     
-    # 2. Move-in Date Fit (15 points)
+    # Move-in Date Fit (15 pts)
     if user_date and group_date:
         if date_diff <= 7:
             date_score = 15
@@ -175,15 +132,11 @@ def calculate_user_group_compatibility(
         else:
             date_score = 6
     else:
-        # No date data, give neutral score
         date_score = 8
-    
     score += date_score
     
-    # 3. Lease Preferences Match (15 points) - NEW from personal_preferences
+    # Lease Preferences (15 pts)
     lease_score = 0
-    
-    # Lease type match (e.g., "month-to-month", "fixed", "sublet")
     user_lease_type = user_prefs.get('target_lease_type')
     group_lease_type = group.get('target_lease_type')
     
@@ -194,9 +147,8 @@ def calculate_user_group_compatibility(
         else:
             lease_score += 3
     else:
-        lease_score += 4  # Neutral if not specified
+        lease_score += 4
     
-    # Lease duration match
     user_lease_duration = user_prefs.get('target_lease_duration_months')
     group_lease_duration = group.get('target_lease_duration_months')
     
@@ -211,30 +163,23 @@ def calculate_user_group_compatibility(
         else:
             lease_score += 2
     else:
-        lease_score += 3  # Neutral if not specified
-    
+        lease_score += 3
     score += lease_score
     
-    # 4. Amenity Preferences Match (10 points) - NEW from personal_preferences
+    # Amenity Preferences (10 pts)
     amenity_score = 0
-    
-    # Furnished preference
     user_furnished = user_prefs.get('target_furnished')
     group_furnished = group.get('target_furnished')
     
     if user_furnished is not None and group_furnished is not None:
         if user_furnished == group_furnished:
             amenity_score += 5
-            if user_furnished:
-                reasons.append('Both prefer furnished')
-            else:
-                reasons.append('Both prefer unfurnished')
+            reasons.append('Both prefer furnished' if user_furnished else 'Both prefer unfurnished')
         else:
-            amenity_score += 1  # Mismatch
+            amenity_score += 1
     else:
-        amenity_score += 2  # Neutral if not specified
+        amenity_score += 2
     
-    # Utilities included preference
     user_utilities = user_prefs.get('target_utilities_included')
     group_utilities = group.get('target_utilities_included')
     
@@ -244,17 +189,14 @@ def calculate_user_group_compatibility(
             if user_utilities:
                 reasons.append('Both prefer utilities included')
         else:
-            amenity_score += 1  # Mismatch
+            amenity_score += 1
     else:
-        amenity_score += 2  # Neutral if not specified
-    
+        amenity_score += 2
     score += amenity_score
     
-    # 5. Company/School Match (10 points)
+    # Company/School Match (10 pts)
     user_company = (user.get('company_name') or '').lower().strip()
     user_school = (user.get('school_name') or '').lower().strip()
-    
-    company_school_score = 0
     
     if user_company:
         company_school_score = 7
@@ -264,12 +206,9 @@ def calculate_user_group_compatibility(
         reasons.append(f'Academic affiliation: {user.get("school_name")}')
     else:
         company_school_score = 3
-    
-    # TODO: Bonus points if same company/school as group members
-    
     score += company_school_score
     
-    # 6. Verification Status (10 points)
+    # Verification Status (10 pts)
     verification_status = user.get('verification_status') or 'unverified'
     
     if verification_status == 'admin_verified':
@@ -280,17 +219,14 @@ def calculate_user_group_compatibility(
         reasons.append('Email verified user')
     else:
         verification_score = 3
-    
     score += verification_score
     
-    # 7. Lifestyle Compatibility (20 points)
+    # Lifestyle Compatibility (20 pts)
     user_lifestyle = user_prefs.get('lifestyle_preferences') or {}
-    # Group lifestyle would need to be aggregated from members
     group_lifestyle = group.get('lifestyle_preferences') or {}
     
     lifestyle_score = calculate_lifestyle_compatibility(user_lifestyle, group_lifestyle)
-    # Scale from 0-25 to 0-20
-    lifestyle_score = int(lifestyle_score * 0.8)
+    lifestyle_score = int(lifestyle_score * 0.8)  # Scale from 0-25 to 0-20
     score += lifestyle_score
     
     if lifestyle_score >= 16:
@@ -300,11 +236,8 @@ def calculate_user_group_compatibility(
     elif lifestyle_score >= 8:
         reasons.append('Moderate lifestyle match')
     
-    # =========================================================================
-    # FINAL RESULT
-    # =========================================================================
-    
-    final_score = min(score, 100)  # Cap at 100
+    # --- FINAL RESULT ---
+    final_score = min(score, 100)
     compatibility_level = get_compatibility_level(final_score)
     
     return {
@@ -314,10 +247,6 @@ def calculate_user_group_compatibility(
         'compatibility_level': compatibility_level
     }
 
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
 
 def get_compatibility_level(score: float) -> str:
     """Convert numeric score to human-readable level."""
@@ -329,78 +258,44 @@ def get_compatibility_level(score: float) -> str:
         return 'Good Match'
     elif score >= 35:
         return 'Fair Match'
-    else:
-        return 'Poor Match'
+    return 'Poor Match'
 
 
-def calculate_lifestyle_compatibility(
-    user_lifestyle: Dict[str, Any],
-    group_lifestyle: Dict[str, Any]
-) -> float:
-    """
-    Compare lifestyle preferences between user and group.
-    
-    Returns score 0-25 based on compatibility of lifestyle attributes:
-    - cleanliness, noise_level, smoking, pets, guests_frequency
-    
-    Args:
-        user_lifestyle: User's lifestyle_preferences JSONB
-        group_lifestyle: Aggregated group lifestyle preferences
-        
-    Returns:
-        float: Score from 0-25
-    """
+def calculate_lifestyle_compatibility(user_lifestyle: Dict, group_lifestyle: Dict) -> float:
+    """Compare lifestyle preferences. Returns 0-25 score."""
     
     if not user_lifestyle or not group_lifestyle:
-        return 12.5  # Neutral score if no data
+        return 12.5  # Neutral score
     
     score = 0
-    max_points = 25
     
-    # Define compatibility rules for each attribute
+    # Scoring rules: (user_val, group_val) -> points
     compatibility_rules = {
         'cleanliness': {
-            ('very_clean', 'very_clean'): 5,
-            ('very_clean', 'clean'): 4,
-            ('clean', 'clean'): 5,
-            ('clean', 'moderate'): 3,
-            ('moderate', 'moderate'): 5,
-            ('moderate', 'messy'): 2,
-            ('messy', 'messy'): 5,
-            # Opposite extremes = low score
-            ('very_clean', 'messy'): 1,
+            ('very_clean', 'very_clean'): 5, ('very_clean', 'clean'): 4, ('clean', 'clean'): 5,
+            ('clean', 'moderate'): 3, ('moderate', 'moderate'): 5, ('moderate', 'messy'): 2,
+            ('messy', 'messy'): 5, ('very_clean', 'messy'): 1,
         },
         'noise_level': {
-            ('quiet', 'quiet'): 5,
-            ('quiet', 'moderate'): 3,
-            ('moderate', 'moderate'): 5,
-            ('moderate', 'loud'): 3,
-            ('loud', 'loud'): 5,
-            ('quiet', 'loud'): 0,  # Incompatible
+            ('quiet', 'quiet'): 5, ('quiet', 'moderate'): 3, ('moderate', 'moderate'): 5,
+            ('moderate', 'loud'): 3, ('loud', 'loud'): 5, ('quiet', 'loud'): 0,
         },
         'smoking': {
-            ('no_smoking', 'no_smoking'): 5,
-            ('no_smoking', 'outdoor_only'): 3,
-            ('outdoor_only', 'outdoor_only'): 5,
-            ('smoking_ok', 'smoking_ok'): 5,
-            ('no_smoking', 'smoking_ok'): 0,  # Deal-breaker
+            ('no_smoking', 'no_smoking'): 5, ('no_smoking', 'outdoor_only'): 3,
+            ('outdoor_only', 'outdoor_only'): 5, ('smoking_ok', 'smoking_ok'): 5,
+            ('no_smoking', 'smoking_ok'): 0,
         },
         'pets': {
-            ('no_pets', 'no_pets'): 5,
-            ('no_pets', 'pets_ok'): 2,
-            ('pets_ok', 'pets_ok'): 5,
+            ('no_pets', 'no_pets'): 5, ('no_pets', 'pets_ok'): 2, ('pets_ok', 'pets_ok'): 5,
         },
         'guests_frequency': {
-            ('rarely', 'rarely'): 3,
-            ('rarely', 'occasionally'): 2,
-            ('occasionally', 'occasionally'): 3,
-            ('occasionally', 'frequently'): 2,
-            ('frequently', 'frequently'): 3,
-            ('rarely', 'frequently'): 1,
+            ('rarely', 'rarely'): 3, ('rarely', 'occasionally'): 2, ('occasionally', 'occasionally'): 3,
+            ('occasionally', 'frequently'): 2, ('frequently', 'frequently'): 3, ('rarely', 'frequently'): 1,
         }
     }
     
-    # Calculate compatibility for each attribute
+    # Calculate score for each attribute
+    max_points = 25
     for attribute, rules in compatibility_rules.items():
         user_val = user_lifestyle.get(attribute)
         group_val = group_lifestyle.get(attribute)
@@ -409,24 +304,14 @@ def calculate_lifestyle_compatibility(
             pair = (user_val, group_val)
             if pair in rules:
                 score += rules[pair]
-            elif (group_val, user_val) in rules:  # Check reverse pair
+            elif (group_val, user_val) in rules:
                 score += rules[(group_val, user_val)]
     
-    # Normalize to 0-25
     return min(score, max_points)
 
 
-def aggregate_group_lifestyle(members_preferences: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Aggregate lifestyle preferences from multiple group members.
-    Uses MOST RESTRICTIVE approach (highest standards win).
-    
-    Args:
-        members_preferences: List of lifestyle_preferences dicts from each member
-        
-    Returns:
-        Dict with aggregated lifestyle preferences
-    """
+def aggregate_group_lifestyle(members_preferences: List[Dict]) -> Dict:
+    """Aggregate lifestyle from members using most restrictive approach."""
     
     if not members_preferences:
         return {}
@@ -491,37 +376,21 @@ def aggregate_group_lifestyle(members_preferences: List[Dict[str, Any]]) -> Dict
     return aggregated
 
 
-# =============================================================================
-# Database Integration Functions
-# =============================================================================
+# --- DATABASE INTEGRATION ---
 
 async def find_compatible_groups(
     user_id: str,
-    user_prefs: Dict[str, Any],
+    user_prefs: Dict,
     min_score: int = 50,
     limit: int = 20
-) -> List[Dict[str, Any]]:
-    """
-    Find groups compatible with a user's preferences.
-    
-    This function fetches open groups from the database, scores them,
-    and returns the top matches above the minimum score threshold.
-    
-    Args:
-        user_id: User's ID
-        user_prefs: User's preferences dict
-        min_score: Minimum compatibility score (0-100)
-        limit: Max results to return
-        
-    Returns:
-        List of groups with compatibility scores, sorted by score DESC
-    """
+) -> List[Dict]:
+    """Find groups compatible with user's preferences. Returns top matches sorted by score."""
     
     from app.dependencies.supabase import get_admin_client
     
     supabase = get_admin_client()
     
-    # 1. Get user details
+    # Get user details
     user_response = supabase.table("users").select("*").eq("id", user_id).execute()
     if not user_response.data:
         raise ValueError(f"User not found: {user_id}")
@@ -531,38 +400,34 @@ async def find_compatible_groups(
     if not target_city:
         return []
     
-    # 2. Get open groups in target city (exclude solo groups)
-    # Open = status='active' AND (is_solo IS NULL OR is_solo=false)
+    # Get open groups in target city (exclude solo groups)
     groups_response = supabase.table("roommate_groups")\
         .select("*, group_members(user_id, status)")\
         .eq("status", "active")\
         .ilike("target_city", target_city)\
         .execute()
     
-    # Filter out solo groups (is_solo = True)
     if groups_response.data:
         groups_response.data = [g for g in groups_response.data if g.get('is_solo') != True]
     
     if not groups_response.data:
         return []
     
-    # 3. Filter to groups with open spots and not already a member
+    # Filter to groups with open spots and not already a member
     open_groups = []
     for group in groups_response.data:
-        # Check if user is already a member
         members = group.get('group_members', []) or []
         member_ids = [m['user_id'] for m in members if m.get('status') == 'accepted']
         if user_id in member_ids:
-            continue  # Skip groups user is already in
+            continue
         
-        # Check if group has space
         current_count = group.get('current_member_count', len(member_ids))
         target_size = group.get('target_group_size')
         
         if target_size is None or current_count < target_size:
             open_groups.append(group)
     
-    # 4. Score each group
+    # Score each group
     scored_groups = []
     for group in open_groups:
         compatibility = calculate_user_group_compatibility(user, user_prefs, group)
@@ -571,19 +436,15 @@ async def find_compatible_groups(
             group['compatibility'] = compatibility
             scored_groups.append(group)
     
-    # 5. Sort by score (highest first)
+    # Sort by score and return
     scored_groups.sort(key=lambda g: g['compatibility']['score'], reverse=True)
-    
-    # 6. Return top results
     return scored_groups[:limit]
 
 
-# Export public API
 __all__ = [
     'calculate_user_group_compatibility',
-    'calculate_lifestyle_compatibility',
+    'calculate_lifestyle_compatibility', 
     'aggregate_group_lifestyle',
     'find_compatible_groups',
-    'SCORING_WEIGHTS',
-    'DATE_FLEXIBILITY_DAYS'
+    'SCORING_WEIGHTS'
 ]
