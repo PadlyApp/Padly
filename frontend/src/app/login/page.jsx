@@ -46,7 +46,15 @@ export default function LoginPage() {
         message: 'Successfully signed in',
         color: 'green',
       });
-      router.push('/');
+      
+      // Check if user has completed onboarding
+      const onboardingComplete = localStorage.getItem('padly_onboarding_complete');
+      if (!onboardingComplete) {
+        // Redirect to onboarding if not completed
+        router.push('/onboarding');
+      } else {
+        router.push('/');
+      }
     } catch (err) {
       console.error("Signin error:", err);
       notifications.show({

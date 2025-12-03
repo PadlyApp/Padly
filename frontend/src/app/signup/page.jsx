@@ -51,7 +51,8 @@ export default function SignupPage() {
         message: 'Account created successfully',
         color: 'green',
       });
-      router.push('/');
+      // Redirect to onboarding to complete profile
+      router.push('/onboarding');
     } catch (err) {
       // Check if it's an email confirmation message
       if (err.message && err.message.includes('check your email')) {
