@@ -24,6 +24,11 @@ async def discover_compatible_groups(
     budget_min: Optional[float] = Query(None, description="Minimum budget per person"),
     budget_max: Optional[float] = Query(None, description="Maximum budget per person"),
     move_in_date: Optional[str] = Query(None, description="Target move-in date (ISO format)"),
+    # NEW: Additional preference filters from personal_preferences
+    target_lease_type: Optional[str] = Query(None, description="Preferred lease type (month-to-month, fixed, sublet)"),
+    target_lease_duration_months: Optional[int] = Query(None, description="Preferred lease duration in months"),
+    target_furnished: Optional[bool] = Query(None, description="Prefer furnished places"),
+    target_utilities_included: Optional[bool] = Query(None, description="Prefer utilities included"),
     min_score: int = Query(50, ge=0, le=100, description="Minimum compatibility score"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     token: str = Depends(require_user_token)
@@ -33,8 +38,8 @@ async def discover_compatible_groups(
     
     This uses the User-to-Group matching algorithm which scores groups based on:
     - Hard Constraints: City match, budget overlap, date proximity (±60 days), open spots
-    - Soft Preferences: Budget fit (25pts), Date fit (20pts), Company/School (15pts), 
-      Verification (15pts), Lifestyle (25pts)
+    - Soft Preferences: Budget fit (20pts), Date fit (15pts), Lease preferences (15pts),
+      Amenity preferences (10pts), Company/School (10pts), Verification (10pts), Lifestyle (20pts)
     
     Returns groups ranked by compatibility score with detailed reasons.
     """
@@ -67,6 +72,15 @@ async def discover_compatible_groups(
         user_prefs['budget_max'] = budget_max
     if move_in_date is not None:
         user_prefs['move_in_date'] = move_in_date
+    # NEW: Override with new preference query params
+    if target_lease_type is not None:
+        user_prefs['target_lease_type'] = target_lease_type
+    if target_lease_duration_months is not None:
+        user_prefs['target_lease_duration_months'] = target_lease_duration_months
+    if target_furnished is not None:
+        user_prefs['target_furnished'] = target_furnished
+    if target_utilities_included is not None:
+        user_prefs['target_utilities_included'] = target_utilities_included
     
     # Find compatible groups
     try:
@@ -87,6 +101,10 @@ async def discover_compatible_groups(
             "budget_min": user_prefs.get('budget_min'),
             "budget_max": user_prefs.get('budget_max'),
             "move_in_date": user_prefs.get('move_in_date'),
+            "target_lease_type": user_prefs.get('target_lease_type'),
+            "target_lease_duration_months": user_prefs.get('target_lease_duration_months'),
+            "target_furnished": user_prefs.get('target_furnished'),
+            "target_utilities_included": user_prefs.get('target_utilities_included'),
             "min_score": min_score
         },
         "count": len(compatible_groups),

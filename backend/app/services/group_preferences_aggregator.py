@@ -10,6 +10,10 @@ Key Principles:
 - Lifestyle: MOST RESTRICTIVE (highest standards)
 - Bedrooms: Group size (minimum needed)
 - Bathrooms: Scale with group size
+- Furnished: ANY (if anyone wants furnished, group wants furnished)
+- Utilities: ANY (if anyone wants utilities included, group wants it)
+- Lease Type: MOST COMMON (among members)
+- Lease Duration: MEDIAN (middle value)
 """
 
 from typing import List, Dict, Any, Optional
@@ -135,6 +139,54 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
     # 5. Lifestyle: Aggregate with MOST RESTRICTIVE
     aggregated['lifestyle_preferences'] = aggregate_lifestyle_preferences(all_member_prefs)
     
+    # =========================================================================
+    # NEW: Aggregate additional personal preference fields (from PR #7)
+    # =========================================================================
+    
+    # 6. Furnished preference: If ANY member wants furnished, group wants furnished
+    furnished_prefs = [
+        p.get('target_furnished') 
+        for p in all_member_prefs 
+        if p.get('target_furnished') is not None
+    ]
+    if furnished_prefs:
+        # If anyone requires furnished, group requires furnished
+        aggregated['target_furnished'] = any(furnished_prefs)
+    
+    # 7. Utilities included: If ANY member wants utilities included, group wants it
+    utilities_prefs = [
+        p.get('target_utilities_included') 
+        for p in all_member_prefs 
+        if p.get('target_utilities_included') is not None
+    ]
+    if utilities_prefs:
+        # If anyone requires utilities, group requires utilities
+        aggregated['target_utilities_included'] = any(utilities_prefs)
+    
+    # 8. Lease type: Use most common, fallback to "any"
+    lease_types = [
+        p.get('target_lease_type') 
+        for p in all_member_prefs 
+        if p.get('target_lease_type') and p.get('target_lease_type') != 'any'
+    ]
+    if lease_types:
+        # Use the most common lease type
+        from collections import Counter
+        most_common = Counter(lease_types).most_common(1)
+        if most_common:
+            aggregated['target_lease_type'] = most_common[0][0]
+    
+    # 9. Lease duration: Use MEDIAN of all preferences
+    lease_durations = [
+        int(p.get('target_lease_duration_months')) 
+        for p in all_member_prefs 
+        if p.get('target_lease_duration_months') is not None
+    ]
+    if lease_durations:
+        sorted_durations = sorted(lease_durations)
+        median_index = len(sorted_durations) // 2
+        aggregated['target_lease_duration_months'] = sorted_durations[median_index]
+    
     return aggregated
 
 
@@ -166,6 +218,10 @@ def get_group_level_preferences(group_id: str) -> Dict[str, Any]:
         'target_move_in_date': group.get('target_move_in_date'),
         'target_bedrooms': group.get('target_bedrooms'),
         'target_bathrooms': group.get('target_bathrooms'),
+        'target_furnished': group.get('target_furnished'),
+        'target_utilities_included': group.get('target_utilities_included'),
+        'target_lease_type': group.get('target_lease_type'),
+        'target_lease_duration_months': group.get('target_lease_duration_months'),
         'lifestyle_preferences': {}
     }
 
