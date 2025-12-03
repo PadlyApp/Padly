@@ -123,12 +123,28 @@ class UserResponse(UserBase):
 
 class PersonalPreferencesBase(BaseModel):
     """Base personal preferences model matching database schema"""
+    # Hard Constraints (Non-Negotiables)
     target_city: Optional[str] = None
-    budget_min: Optional[Decimal] = None
-    budget_max: Optional[Decimal] = None
-    move_in_date: Optional[date] = None
+    target_state_province: Optional[str] = None
+    budget_min: Optional[float] = None  # Accept float from frontend
+    budget_max: Optional[float] = None  # Accept float from frontend
+    required_bedrooms: Optional[int] = None
+    move_in_date: Optional[str] = None  # Accept ISO string from frontend
+    target_lease_type: Optional[str] = None
+    target_lease_duration_months: Optional[int] = None
+    
+    # Soft Preferences (Nice-to-Haves)
+    target_bathrooms: Optional[float] = None  # Accept float from frontend
+    target_furnished: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    target_deposit_amount: Optional[float] = None  # Accept float from frontend
+    target_house_rules: Optional[str] = None
+    
+    # Generic preferences field for future extensibility
     lifestyle_preferences: Optional[dict] = None  # JSONB field for flexible preferences
-    preferred_neighborhoods: Optional[List[str]] = None  # Array field
+    preferred_neighborhoods: Optional[list] = None  # Array field
+    
+    model_config = ConfigDict(extra='forbid')
 
 
 class PersonalPreferencesCreate(PersonalPreferencesBase):
@@ -137,14 +153,14 @@ class PersonalPreferencesCreate(PersonalPreferencesBase):
 
 
 class PersonalPreferencesUpdate(PersonalPreferencesBase):
-    """Model for updating personal preferences"""
-    model_config = ConfigDict(extra='forbid')
+    """Model for updating personal preferences - inherits forbid config"""
+    pass
 
 
 class PersonalPreferencesResponse(PersonalPreferencesBase):
     """Model for personal preferences response"""
     user_id: str
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

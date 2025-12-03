@@ -4,8 +4,10 @@ Manage user housing and roommate preferences
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from typing import Optional, Any
 from datetime import date, datetime
+from decimal import Decimal
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import (
@@ -28,6 +30,28 @@ def convert_dates_to_strings(obj: Any) -> Any:
     return obj
 
 
+def make_json_serializable(obj: Any) -> Any:
+    """
+    Convert non-JSON-serializable types to JSON-compatible types.
+    Handles Decimal, date, datetime, and nested structures.
+    """
+    if isinstance(obj, Decimal):
+        # Convert Decimal to float for JSON serialization
+        return float(obj)
+    elif isinstance(obj, (date, datetime)):
+        # Convert date/datetime to ISO format string
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        # Recursively process dictionary values
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        # Recursively process list items
+        return [make_json_serializable(item) for item in obj]
+    else:
+        # Return as-is for primitives (str, int, bool, None)
+        return obj
+
+
 def serialize_preferences(prefs_data: dict) -> dict:
     """
     Convert preference data to database format.
@@ -41,12 +65,24 @@ def serialize_preferences(prefs_data: dict) -> dict:
     
     # Database fields match the model directly
     db_data = {
+        # Hard Constraints
         "target_city": prefs_data.get("target_city"),
+        "target_state_province": prefs_data.get("target_state_province"),
         "budget_min": prefs_data.get("budget_min"),
         "budget_max": prefs_data.get("budget_max"),
+        "required_bedrooms": prefs_data.get("required_bedrooms"),
         "move_in_date": prefs_data.get("move_in_date"),
-        "lifestyle_preferences": prefs_data.get("lifestyle_preferences"),  # JSONB field
-        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods")  # Array field
+        "target_lease_type": prefs_data.get("target_lease_type"),
+        "target_lease_duration_months": prefs_data.get("target_lease_duration_months"),
+        # Soft Preferences
+        "target_bathrooms": prefs_data.get("target_bathrooms"),
+        "target_furnished": prefs_data.get("target_furnished"),
+        "target_utilities_included": prefs_data.get("target_utilities_included"),
+        "target_deposit_amount": prefs_data.get("target_deposit_amount"),
+        "target_house_rules": prefs_data.get("target_house_rules"),
+        # Generic fields
+        "lifestyle_preferences": prefs_data.get("lifestyle_preferences"),
+        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods")
     }
     
     # Remove None values
@@ -56,22 +92,37 @@ def serialize_preferences(prefs_data: dict) -> dict:
 def deserialize_preferences(db_data: dict) -> dict:
     """
     Convert database format to API response format.
-    No transformation needed - database fields match API response.
+    Converts Decimal and date objects to JSON-serializable types.
     """
     if not db_data:
         return db_data
     
     # Database structure matches API response structure
-    return {
+    result = {
         "user_id": db_data.get("user_id"),
+        # Hard Constraints
         "target_city": db_data.get("target_city"),
+        "target_state_province": db_data.get("target_state_province"),
         "budget_min": db_data.get("budget_min"),
         "budget_max": db_data.get("budget_max"),
+        "required_bedrooms": db_data.get("required_bedrooms"),
         "move_in_date": db_data.get("move_in_date"),
+        "target_lease_type": db_data.get("target_lease_type"),
+        "target_lease_duration_months": db_data.get("target_lease_duration_months"),
+        # Soft Preferences
+        "target_bathrooms": db_data.get("target_bathrooms"),
+        "target_furnished": db_data.get("target_furnished"),
+        "target_utilities_included": db_data.get("target_utilities_included"),
+        "target_deposit_amount": db_data.get("target_deposit_amount"),
+        "target_house_rules": db_data.get("target_house_rules"),
+        # Generic fields
         "lifestyle_preferences": db_data.get("lifestyle_preferences"),
         "preferred_neighborhoods": db_data.get("preferred_neighborhoods"),
         "updated_at": db_data.get("updated_at")
     }
+    
+    # Convert all non-JSON-serializable types (Decimal, datetime, etc.)
+    return make_json_serializable(result)
 
 
 @router.get("/{user_id}")
@@ -94,26 +145,42 @@ async def get_user_preferences(
     
     if not prefs:
         # Return empty preferences if not set yet
-        return {
+        response_data = {
             "status": "success",
             "data": {
                 "user_id": user_id,
+                # Hard Constraints
                 "target_city": None,
+                "target_state_province": None,
                 "budget_min": None,
                 "budget_max": None,
+                "required_bedrooms": None,
                 "move_in_date": None,
+                "target_lease_type": None,
+                "target_lease_duration_months": None,
+                # Soft Preferences
+                "target_bathrooms": None,
+                "target_furnished": None,
+                "target_utilities_included": None,
+                "target_deposit_amount": None,
+                "target_house_rules": None,
+                # Generic fields
                 "lifestyle_preferences": None,
                 "preferred_neighborhoods": None
             }
         }
+        return JSONResponse(content=make_json_serializable(response_data))
     
     # Convert DB format to API format
     formatted_prefs = deserialize_preferences(prefs)
     
-    return {
+    response_data = {
         "status": "success",
         "data": formatted_prefs
     }
+    
+    # Use JSONResponse with custom encoder to handle Decimal and other types
+    return JSONResponse(content=make_json_serializable(response_data))
 
 
 @router.put("/{user_id}")
@@ -130,89 +197,109 @@ async def update_user_preferences(
     
     Also automatically triggers stable matching for the city.
     """
-    client = SupabaseHTTPClient(token=token)
-    
-    # Convert Pydantic model to dict
-    prefs_data = preferences.model_dump(exclude_none=True)
-    
-    if not prefs_data:
-        raise HTTPException(status_code=400, detail="No data provided for update")
-    
-    # Convert to DB format
-    db_data = serialize_preferences(prefs_data)
-    
-    # Check if preferences exist
-    existing = await client.select_one(
-        table="personal_preferences",
-        id_value=user_id,
-        id_column="user_id"
-    )
-    
-    if existing:
-        # Update existing preferences
-        updated = await client.update(
+    try:
+        client = SupabaseHTTPClient(token=token)
+        
+        # Convert Pydantic model to dict
+        prefs_data = preferences.model_dump(exclude_none=True)
+        
+        if not prefs_data:
+            raise HTTPException(status_code=400, detail="No data provided for update")
+        
+        # Convert to DB format
+        db_data = serialize_preferences(prefs_data)
+        
+        # Check if preferences exist
+        existing = await client.select_one(
             table="personal_preferences",
             id_value=user_id,
-            data=db_data,
             id_column="user_id"
         )
-    else:
-        # Create new preferences
-        db_data["user_id"] = user_id
-        updated = await client.insert(
-            table="personal_preferences",
-            data=db_data
-        )
-    
-    # 🔥 AUTO-TRIGGER STABLE MATCHING after preferences saved
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-    
-    matching_result = {"status": "skipped", "message": "No city specified"}
-    
-    # Get the target city from preferences
-    target_city = db_data.get("target_city")
-    
-    if target_city:
-        try:
-            # Run stable matching for the entire city
-            matching_request = RunMatchingRequest(
-                city=target_city,
-                date_flexibility_days=30
+        
+        if existing:
+            # Update existing preferences
+            updated = await client.update(
+                table="personal_preferences",
+                id_value=user_id,
+                data=db_data,
+                id_column="user_id"
             )
-            
-            matching_response = await run_matching(matching_request)
-            
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "execution_time_seconds": matching_response.execution_time_seconds,
-                "message": matching_response.message
-            }
-        except HTTPException as e:
-            # Don't fail if matching fails (e.g., no listings available)
-            matching_result = {
-                "status": "no_matches",
-                "city": target_city,
-                "message": str(e.detail)
-            }
-        except Exception as e:
-            # Don't fail the whole request if matching fails
-            matching_result = {
-                "status": "error",
-                "city": target_city,
-                "message": f"Matching failed: {str(e)}"
-            }
+        else:
+            # Create new preferences
+            db_data["user_id"] = user_id
+            updated = await client.insert(
+                table="personal_preferences",
+                data=db_data
+            )
+        
+        # 🔥 AUTO-TRIGGER STABLE MATCHING after preferences saved
+        from app.routes.stable_matching import run_matching, RunMatchingRequest
+        
+        matching_result = {"status": "skipped", "message": "No city specified"}
+        
+        # Get the target city from preferences
+        target_city = db_data.get("target_city")
+        
+        if target_city:
+            try:
+                # Run stable matching for the entire city
+                matching_request = RunMatchingRequest(
+                    city=target_city,
+                    date_flexibility_days=30
+                )
+                
+                matching_response = await run_matching(matching_request)
+                
+                matching_result = {
+                    "status": "success",
+                    "city": target_city,
+                    "total_matches": len(matching_response.matches),
+                    "execution_time_seconds": matching_response.execution_time_seconds,
+                    "message": matching_response.message
+                }
+            except HTTPException as e:
+                # Don't fail if matching fails (e.g., no listings available)
+                matching_result = {
+                    "status": "no_matches",
+                    "city": target_city,
+                    "message": str(e.detail)
+                }
+            except Exception as e:
+                # Don't fail the whole request if matching fails
+                matching_result = {
+                    "status": "error",
+                    "city": target_city,
+                    "message": f"Matching failed: {str(e)}"
+                }
+        
+        # Convert back to API format
+        formatted_prefs = deserialize_preferences(updated)
+        
+        response_data = {
+            "status": "success",
+            "message": "Preferences updated successfully",
+            "data": formatted_prefs,
+            "matching": matching_result  # Include matching results
+        }
+        
+        return JSONResponse(content=make_json_serializable(response_data))
     
-    # Convert back to API format
-    formatted_prefs = deserialize_preferences(updated)
-    
-    return {
-        "status": "success",
-        "message": "Preferences updated successfully",
-        "data": formatted_prefs,
-        "matching": matching_result  # Include matching results
-    }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log the actual error for debugging
+        import traceback
+        print(f"\n❌ ERROR in update_user_preferences:")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        traceback.print_exc()
+        print()
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update preferences: {str(e)}"
+        )
 
 
 @router.get("/me")
