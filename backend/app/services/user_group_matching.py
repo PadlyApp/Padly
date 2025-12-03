@@ -20,12 +20,15 @@ from decimal import Decimal
 # =============================================================================
 
 # Scoring weights (total: 100 points)
+# Updated to include new preference fields from personal_preferences
 SCORING_WEIGHTS = {
-    'budget_fit': 25,
-    'date_fit': 20,
-    'company_school_match': 15,
-    'verification': 15,
-    'lifestyle': 25
+    'budget_fit': 20,           # How close are budget midpoints
+    'date_fit': 15,             # How close are move-in dates
+    'lease_preferences': 15,    # NEW: Lease type & duration match
+    'amenity_preferences': 10,  # NEW: Furnished, utilities included
+    'company_school_match': 10, # Same company/school bonus
+    'verification': 10,         # User verification status
+    'lifestyle': 20             # Lifestyle compatibility (smoking, pets, etc.)
 }
 
 # Date flexibility for hard constraint (days)
@@ -132,9 +135,10 @@ def calculate_user_group_compatibility(
     
     # =========================================================================
     # SOFT PREFERENCES (Scoring 0-100)
+    # Using new personal_preferences fields from PR #7
     # =========================================================================
     
-    # 1. Budget Fit (25 points)
+    # 1. Budget Fit (20 points)
     # Handle infinity for max budgets
     user_max_for_calc = user_budget_max if user_budget_max != float('inf') else user_budget_min + 2000
     group_max_for_calc = group_budget_max if group_budget_max != float('inf') else group_budget_min + 2000
@@ -143,89 +147,157 @@ def calculate_user_group_compatibility(
     budget_diff = abs(user_budget_mid - group_budget_mid)
     
     if budget_diff <= 100:
-        budget_score = 25
+        budget_score = 20
         reasons.append('Budget perfectly aligned')
     elif budget_diff <= 300:
-        budget_score = 20
+        budget_score = 16
         reasons.append('Budget well aligned')
     elif budget_diff <= 500:
-        budget_score = 15
+        budget_score = 12
         reasons.append('Budget reasonably aligned')
     else:
-        budget_score = 10
+        budget_score = 8
         reasons.append('Budget somewhat aligned')
     
     score += budget_score
     
-    # 2. Move-in Date Fit (20 points)
+    # 2. Move-in Date Fit (15 points)
     if user_date and group_date:
         if date_diff <= 7:
-            date_score = 20
+            date_score = 15
             reasons.append('Move-in dates very close (within 1 week)')
         elif date_diff <= 14:
-            date_score = 16
+            date_score = 12
             reasons.append('Move-in dates close (within 2 weeks)')
         elif date_diff <= 30:
-            date_score = 12
+            date_score = 9
             reasons.append('Move-in dates aligned (within 1 month)')
         else:
-            date_score = 8
+            date_score = 6
     else:
         # No date data, give neutral score
-        date_score = 10
+        date_score = 8
     
     score += date_score
     
-    # 3. Company/School Match (15 points)
+    # 3. Lease Preferences Match (15 points) - NEW from personal_preferences
+    lease_score = 0
+    
+    # Lease type match (e.g., "month-to-month", "fixed", "sublet")
+    user_lease_type = user_prefs.get('target_lease_type')
+    group_lease_type = group.get('target_lease_type')
+    
+    if user_lease_type and group_lease_type:
+        if user_lease_type.lower() == group_lease_type.lower():
+            lease_score += 8
+            reasons.append(f'Lease type match: {user_lease_type}')
+        else:
+            lease_score += 3
+    else:
+        lease_score += 4  # Neutral if not specified
+    
+    # Lease duration match
+    user_lease_duration = user_prefs.get('target_lease_duration_months')
+    group_lease_duration = group.get('target_lease_duration_months')
+    
+    if user_lease_duration and group_lease_duration:
+        duration_diff = abs(int(user_lease_duration) - int(group_lease_duration))
+        if duration_diff == 0:
+            lease_score += 7
+            reasons.append(f'Lease duration match: {user_lease_duration} months')
+        elif duration_diff <= 3:
+            lease_score += 5
+            reasons.append('Lease duration close')
+        else:
+            lease_score += 2
+    else:
+        lease_score += 3  # Neutral if not specified
+    
+    score += lease_score
+    
+    # 4. Amenity Preferences Match (10 points) - NEW from personal_preferences
+    amenity_score = 0
+    
+    # Furnished preference
+    user_furnished = user_prefs.get('target_furnished')
+    group_furnished = group.get('target_furnished')
+    
+    if user_furnished is not None and group_furnished is not None:
+        if user_furnished == group_furnished:
+            amenity_score += 5
+            if user_furnished:
+                reasons.append('Both prefer furnished')
+            else:
+                reasons.append('Both prefer unfurnished')
+        else:
+            amenity_score += 1  # Mismatch
+    else:
+        amenity_score += 2  # Neutral if not specified
+    
+    # Utilities included preference
+    user_utilities = user_prefs.get('target_utilities_included')
+    group_utilities = group.get('target_utilities_included')
+    
+    if user_utilities is not None and group_utilities is not None:
+        if user_utilities == group_utilities:
+            amenity_score += 5
+            if user_utilities:
+                reasons.append('Both prefer utilities included')
+        else:
+            amenity_score += 1  # Mismatch
+    else:
+        amenity_score += 2  # Neutral if not specified
+    
+    score += amenity_score
+    
+    # 5. Company/School Match (10 points)
     user_company = (user.get('company_name') or '').lower().strip()
     user_school = (user.get('school_name') or '').lower().strip()
     
-    # Get group members' companies/schools (would need to fetch from DB)
-    # For now, we'll check if user has any affiliation
     company_school_score = 0
     
     if user_company:
-        company_school_score = 10
+        company_school_score = 7
         reasons.append(f'Professional affiliation: {user.get("company_name")}')
     elif user_school:
-        company_school_score = 10
+        company_school_score = 7
         reasons.append(f'Academic affiliation: {user.get("school_name")}')
     else:
-        company_school_score = 5
+        company_school_score = 3
     
     # TODO: Bonus points if same company/school as group members
-    # This requires fetching group_members data
     
     score += company_school_score
     
-    # 4. Verification Status (15 points)
+    # 6. Verification Status (10 points)
     verification_status = user.get('verification_status') or 'unverified'
     
     if verification_status == 'admin_verified':
-        verification_score = 15
+        verification_score = 10
         reasons.append('Admin verified user')
     elif verification_status == 'email_verified':
-        verification_score = 10
+        verification_score = 7
         reasons.append('Email verified user')
     else:
-        verification_score = 5
+        verification_score = 3
     
     score += verification_score
     
-    # 5. Lifestyle Compatibility (25 points)
+    # 7. Lifestyle Compatibility (20 points)
     user_lifestyle = user_prefs.get('lifestyle_preferences') or {}
     # Group lifestyle would need to be aggregated from members
-    # For now, use group-level data if available
-    group_lifestyle = {}  # TODO: Aggregate from members
+    group_lifestyle = group.get('lifestyle_preferences') or {}
     
     lifestyle_score = calculate_lifestyle_compatibility(user_lifestyle, group_lifestyle)
+    # Scale from 0-25 to 0-20
+    lifestyle_score = int(lifestyle_score * 0.8)
     score += lifestyle_score
     
-    if lifestyle_score >= 20:
+    if lifestyle_score >= 16:
         reasons.append('Excellent lifestyle match')
-    elif lifestyle_score >= 15:
+    elif lifestyle_score >= 12:
         reasons.append('Good lifestyle match')
-    elif lifestyle_score >= 10:
+    elif lifestyle_score >= 8:
         reasons.append('Moderate lifestyle match')
     
     # =========================================================================
