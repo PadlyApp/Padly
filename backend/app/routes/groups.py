@@ -880,6 +880,43 @@ async def join_group(
         .eq('id', member['id'])\
         .execute()
     
+    # 🔥 AGGREGATE MEMBER PREFERENCES into group preferences
+    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
+    
+    aggregation_result = {'status': 'skipped'}
+    try:
+        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
+        
+        # Update group with aggregated preferences
+        update_data = {}
+        
+        if aggregate_prefs.get('budget_per_person_min') is not None:
+            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
+        if aggregate_prefs.get('budget_per_person_max') is not None:
+            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
+        if aggregate_prefs.get('target_move_in_date'):
+            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
+        if aggregate_prefs.get('target_bedrooms'):
+            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
+        if aggregate_prefs.get('target_bathrooms'):
+            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        
+        if update_data:
+            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
+            aggregation_result = {
+                'status': 'success',
+                'updated_fields': list(update_data.keys()),
+                'aggregate_prefs': {
+                    'budget_min': update_data.get('budget_per_person_min'),
+                    'budget_max': update_data.get('budget_per_person_max'),
+                    'move_in_date': update_data.get('target_move_in_date'),
+                    'bedrooms': update_data.get('target_bedrooms'),
+                    'bathrooms': update_data.get('target_bathrooms')
+                }
+            }
+    except Exception as e:
+        aggregation_result = {'status': 'error', 'message': str(e)}
+    
     # 🔥 TRIGGER STABLE MATCHING
     from app.routes.stable_matching import run_matching, RunMatchingRequest
     
@@ -916,6 +953,7 @@ async def join_group(
             "group_name": group['group_name'],
             "current_member_count": updated_group.get('current_member_count', 1)
         },
+        "preference_aggregation": aggregation_result,
         "matching": matching_result
     }
 
@@ -1092,7 +1130,44 @@ async def leave_group(
         .eq('id', member['id'])\
         .execute()
     
-    # 🔥 TRIGGER STABLE MATCHING
+    # 🔄 AGGREGATE PREFERENCES after member leaves
+    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
+    
+    aggregation_result = {'status': 'skipped'}
+    try:
+        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
+        
+        # Update group with aggregated preferences
+        update_data = {}
+        
+        if aggregate_prefs.get('budget_per_person_min') is not None:
+            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
+        if aggregate_prefs.get('budget_per_person_max') is not None:
+            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
+        if aggregate_prefs.get('target_move_in_date'):
+            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
+        if aggregate_prefs.get('target_bedrooms'):
+            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
+        if aggregate_prefs.get('target_bathrooms'):
+            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        
+        if update_data:
+            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
+            aggregation_result = {
+                'status': 'success',
+                'updated_fields': list(update_data.keys()),
+                'aggregate_prefs': {
+                    'budget_min': update_data.get('budget_per_person_min'),
+                    'budget_max': update_data.get('budget_per_person_max'),
+                    'move_in_date': update_data.get('target_move_in_date'),
+                    'bedrooms': update_data.get('target_bedrooms'),
+                    'bathrooms': update_data.get('target_bathrooms')
+                }
+            }
+    except Exception as e:
+        aggregation_result = {'status': 'error', 'message': str(e)}
+    
+    # 🔥 TRIGGER STABLE MATCHING after member leaves
     from app.routes.stable_matching import run_matching, RunMatchingRequest
     
     target_city = group.get('target_city')
@@ -1118,6 +1193,7 @@ async def leave_group(
             "group_id": group_id,
             "group_name": group['group_name']
         },
+        "aggregation": aggregation_result,
         "matching": matching_result
     }
 
@@ -1178,6 +1254,43 @@ async def remove_member(
         .eq('id', member['id'])\
         .execute()
     
+    # 🔥 RE-AGGREGATE MEMBER PREFERENCES (now with one less member)
+    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
+    
+    aggregation_result = {'status': 'skipped'}
+    try:
+        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
+        
+        # Update group with aggregated preferences
+        update_data = {}
+        
+        if aggregate_prefs.get('budget_per_person_min') is not None:
+            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
+        if aggregate_prefs.get('budget_per_person_max') is not None:
+            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
+        if aggregate_prefs.get('target_move_in_date'):
+            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
+        if aggregate_prefs.get('target_bedrooms'):
+            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
+        if aggregate_prefs.get('target_bathrooms'):
+            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        
+        if update_data:
+            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
+            aggregation_result = {
+                'status': 'success',
+                'updated_fields': list(update_data.keys()),
+                'aggregate_prefs': {
+                    'budget_min': update_data.get('budget_per_person_min'),
+                    'budget_max': update_data.get('budget_per_person_max'),
+                    'move_in_date': update_data.get('target_move_in_date'),
+                    'bedrooms': update_data.get('target_bedrooms'),
+                    'bathrooms': update_data.get('target_bathrooms')
+                }
+            }
+    except Exception as e:
+        aggregation_result = {'status': 'error', 'message': str(e)}
+    
     # 🔥 TRIGGER STABLE MATCHING
     from app.routes.stable_matching import run_matching, RunMatchingRequest
     
@@ -1200,6 +1313,7 @@ async def remove_member(
     return {
         "status": "success",
         "message": "Member removed successfully",
+        "aggregation": aggregation_result,
         "matching": matching_result
     }
 
