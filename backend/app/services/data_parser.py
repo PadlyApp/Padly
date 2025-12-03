@@ -1,6 +1,6 @@
 """
 Data Parser Service
-Fetches and parses listings and groups from Supabase for use in matching algorithms.
+Fetches and parses listings/groups from Supabase for matching algorithms.
 """
 
 from typing import List, Dict, Any, Optional
@@ -10,15 +10,7 @@ from app.services.supabase_client import SupabaseHTTPClient
 
 
 def serialize_value(value: Any) -> Any:
-    """
-    Serialize values for JSON compatibility.
-    
-    Args:
-        value: The value to serialize
-        
-    Returns:
-        JSON-compatible value
-    """
+    """Serialize values for JSON compatibility."""
     if isinstance(value, Decimal):
         return float(value)
     elif isinstance(value, (datetime, date)):
@@ -27,83 +19,62 @@ def serialize_value(value: Any) -> Any:
         return {k: serialize_value(v) for k, v in value.items()}
     elif isinstance(value, list):
         return [serialize_value(item) for item in value]
-    else:
-        return value
+    return value
 
 
-def parse_listing(raw_listing: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse a raw listing from Supabase into a clean format for algorithms.
-    
-    Args:
-        raw_listing: Raw listing data from Supabase
-        
-    Returns:
-        Parsed listing dictionary with serialized values
-    """
-    parsed = {
-        'id': raw_listing.get('id'),
-        'host_user_id': raw_listing.get('host_user_id'),
-        'status': raw_listing.get('status'),
-        'title': raw_listing.get('title'),
-        'description': raw_listing.get('description'),
-        'property_type': raw_listing.get('property_type'),
-        'lease_type': raw_listing.get('lease_type'),
-        'lease_duration_months': raw_listing.get('lease_duration_months'),
-        'number_of_bedrooms': raw_listing.get('number_of_bedrooms'),
-        'number_of_bathrooms': serialize_value(raw_listing.get('number_of_bathrooms')),
-        'area_sqft': raw_listing.get('area_sqft'),
-        'furnished': raw_listing.get('furnished', False),
-        'price_per_month': serialize_value(raw_listing.get('price_per_month')),
-        'utilities_included': raw_listing.get('utilities_included', False),
-        'deposit_amount': serialize_value(raw_listing.get('deposit_amount')),
-        'address_line_1': raw_listing.get('address_line_1'),
-        'address_line_2': raw_listing.get('address_line_2'),
-        'city': raw_listing.get('city'),
-        'state_province': raw_listing.get('state_province'),
-        'postal_code': raw_listing.get('postal_code'),
-        'country': raw_listing.get('country', 'USA'),
-        'latitude': serialize_value(raw_listing.get('latitude')),
-        'longitude': serialize_value(raw_listing.get('longitude')),
-        'available_from': serialize_value(raw_listing.get('available_from')),
-        'available_to': serialize_value(raw_listing.get('available_to')),
-        'amenities': raw_listing.get('amenities', {}),
-        'house_rules': raw_listing.get('house_rules'),
-        'shared_spaces': raw_listing.get('shared_spaces', []),
-        'view_count': raw_listing.get('view_count', 0),
-        'created_at': serialize_value(raw_listing.get('created_at')),
-        'updated_at': serialize_value(raw_listing.get('updated_at'))
+def parse_listing(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse raw listing into clean format for algorithms."""
+    return {
+        'id': raw.get('id'),
+        'host_user_id': raw.get('host_user_id'),
+        'status': raw.get('status'),
+        'title': raw.get('title'),
+        'description': raw.get('description'),
+        'property_type': raw.get('property_type'),
+        'lease_type': raw.get('lease_type'),
+        'lease_duration_months': raw.get('lease_duration_months'),
+        'number_of_bedrooms': raw.get('number_of_bedrooms'),
+        'number_of_bathrooms': serialize_value(raw.get('number_of_bathrooms')),
+        'area_sqft': raw.get('area_sqft'),
+        'furnished': raw.get('furnished', False),
+        'price_per_month': serialize_value(raw.get('price_per_month')),
+        'utilities_included': raw.get('utilities_included', False),
+        'deposit_amount': serialize_value(raw.get('deposit_amount')),
+        'address_line_1': raw.get('address_line_1'),
+        'address_line_2': raw.get('address_line_2'),
+        'city': raw.get('city'),
+        'state_province': raw.get('state_province'),
+        'postal_code': raw.get('postal_code'),
+        'country': raw.get('country', 'USA'),
+        'latitude': serialize_value(raw.get('latitude')),
+        'longitude': serialize_value(raw.get('longitude')),
+        'available_from': serialize_value(raw.get('available_from')),
+        'available_to': serialize_value(raw.get('available_to')),
+        'amenities': raw.get('amenities', {}),
+        'house_rules': raw.get('house_rules'),
+        'shared_spaces': raw.get('shared_spaces', []),
+        'view_count': raw.get('view_count', 0),
+        'created_at': serialize_value(raw.get('created_at')),
+        'updated_at': serialize_value(raw.get('updated_at'))
     }
-    
-    return parsed
 
 
-def parse_group(raw_group: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse a raw roommate group from Supabase into a clean format for algorithms.
-    
-    Args:
-        raw_group: Raw group data from Supabase
-        
-    Returns:
-        Parsed group dictionary with serialized values
-    """
-    parsed = {
-        'id': raw_group.get('id'),
-        'creator_user_id': raw_group.get('creator_user_id'),
-        'status': raw_group.get('status'),
-        'group_name': raw_group.get('group_name'),
-        'description': raw_group.get('description'),
-        'target_city': raw_group.get('target_city'),
-        'budget_per_person_min': serialize_value(raw_group.get('budget_per_person_min')),
-        'budget_per_person_max': serialize_value(raw_group.get('budget_per_person_max')),
-        'target_move_in_date': serialize_value(raw_group.get('target_move_in_date')),
-        'target_group_size': raw_group.get('target_group_size', 2),
-        'created_at': serialize_value(raw_group.get('created_at')),
-        'updated_at': serialize_value(raw_group.get('updated_at'))
+def parse_group(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse raw group into clean format for algorithms."""
+    return {
+        'id': raw.get('id'),
+        'creator_user_id': raw.get('creator_user_id'),
+        'status': raw.get('status'),
+        'group_name': raw.get('group_name'),
+        'description': raw.get('description'),
+        'target_city': raw.get('target_city'),
+        'budget_per_person_min': serialize_value(raw.get('budget_per_person_min')),
+        'budget_per_person_max': serialize_value(raw.get('budget_per_person_max')),
+        'target_move_in_date': serialize_value(raw.get('target_move_in_date')),
+        'target_group_size': raw.get('target_group_size', 2),
+        'created_at': serialize_value(raw.get('created_at')),
+        'updated_at': serialize_value(raw.get('updated_at'))
     }
-    
-    return parsed
 
 
 async def fetch_and_parse_listings(
@@ -111,27 +82,12 @@ async def fetch_and_parse_listings(
     status_filter: str = "active",
     limit: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch and parse all listings from Supabase.
-    
-    Args:
-        client: Optional SupabaseHTTPClient instance (creates admin client if not provided)
-        status_filter: Filter by listing status (default: "active")
-        limit: Optional limit on number of results
-        
-    Returns:
-        List of parsed listing dictionaries ready for algorithm processing
-    """
-    # Create admin client if not provided
+    """Fetch and parse listings from Supabase."""
     if client is None:
         client = SupabaseHTTPClient(is_admin=True)
     
-    # Build filters
-    filters = {}
-    if status_filter:
-        filters["status"] = f"eq.{status_filter}"
+    filters = {"status": f"eq.{status_filter}"} if status_filter else {}
     
-    # Fetch listings from Supabase
     raw_listings = await client.select(
         table="listings",
         columns="*",
@@ -140,9 +96,7 @@ async def fetch_and_parse_listings(
         limit=limit
     )
     
-    # Parse and return
-    parsed_listings = [parse_listing(listing) for listing in raw_listings]
-    return parsed_listings
+    return [parse_listing(listing) for listing in raw_listings]
 
 
 async def fetch_and_parse_groups(
@@ -151,28 +105,12 @@ async def fetch_and_parse_groups(
     limit: Optional[int] = None,
     include_members: bool = False
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch and parse all roommate groups from Supabase.
-    
-    Args:
-        client: Optional SupabaseHTTPClient instance (creates admin client if not provided)
-        status_filter: Filter by group status (default: "active")
-        limit: Optional limit on number of results
-        include_members: Whether to include group members data
-        
-    Returns:
-        List of parsed group dictionaries ready for algorithm processing
-    """
-    # Create admin client if not provided
+    """Fetch and parse groups from Supabase."""
     if client is None:
         client = SupabaseHTTPClient(is_admin=True)
     
-    # Build filters
-    filters = {}
-    if status_filter:
-        filters["status"] = f"eq.{status_filter}"
+    filters = {"status": f"eq.{status_filter}"} if status_filter else {}
     
-    # Fetch groups from Supabase
     raw_groups = await client.select(
         table="roommate_groups",
         columns="*",
@@ -181,10 +119,8 @@ async def fetch_and_parse_groups(
         limit=limit
     )
     
-    # Parse groups
     parsed_groups = [parse_group(group) for group in raw_groups]
     
-    # Optionally fetch members for each group
     if include_members:
         for group in parsed_groups:
             members = await client.select(
@@ -206,49 +142,21 @@ async def fetch_and_parse_groups(
 
 
 async def fetch_parsed_data_for_algorithms() -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Fetch and parse all necessary data for matching algorithms.
-    
-    Returns:
-        Dictionary containing:
-            - 'listings': List of parsed active listings
-            - 'groups': List of parsed active groups with member info
-    """
-    # Create admin client
+    """Fetch all data needed for matching algorithms."""
     client = SupabaseHTTPClient(is_admin=True)
     
-    # Fetch both datasets in parallel would be ideal, but we'll do sequentially for simplicity
     listings = await fetch_and_parse_listings(client=client, status_filter="active")
     groups = await fetch_and_parse_groups(client=client, status_filter="active", include_members=True)
     
-    return {
-        'listings': listings,
-        'groups': groups
-    }
+    return {'listings': listings, 'groups': groups}
 
 
-async def fetch_user_preferences(
-    user_id: str,
-    client: Optional[SupabaseHTTPClient] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Fetch and parse user preferences for matching.
-    
-    Args:
-        user_id: User ID to fetch preferences for
-        client: Optional SupabaseHTTPClient instance
-        
-    Returns:
-        Parsed user preferences or None if not found
-    """
+async def fetch_user_preferences(user_id: str, client: Optional[SupabaseHTTPClient] = None) -> Optional[Dict[str, Any]]:
+    """Fetch user preferences for matching."""
     if client is None:
         client = SupabaseHTTPClient(is_admin=True)
     
-    prefs = await client.select_one(
-        table="personal_preferences",
-        id_value=user_id,
-        id_column="user_id"
-    )
+    prefs = await client.select_one(table="personal_preferences", id_value=user_id, id_column="user_id")
     
     if not prefs:
         return None
@@ -265,30 +173,15 @@ async def fetch_user_preferences(
     }
 
 
-async def fetch_roommate_post(
-    user_id: str,
-    client: Optional[SupabaseHTTPClient] = None
-) -> Optional[Dict[str, Any]]:
-    """
-    Fetch user's active roommate post for matching.
-    
-    Args:
-        user_id: User ID to fetch post for
-        client: Optional SupabaseHTTPClient instance
-        
-    Returns:
-        Parsed roommate post or None if not found
-    """
+async def fetch_roommate_post(user_id: str, client: Optional[SupabaseHTTPClient] = None) -> Optional[Dict[str, Any]]:
+    """Fetch user's active roommate post."""
     if client is None:
         client = SupabaseHTTPClient(is_admin=True)
     
     posts = await client.select(
         table="roommate_posts",
         columns="*",
-        filters={
-            "user_id": f"eq.{user_id}",
-            "status": "eq.active"
-        },
+        filters={"user_id": f"eq.{user_id}", "status": "eq.active"},
         limit=1
     )
     
@@ -296,7 +189,6 @@ async def fetch_roommate_post(
         return None
     
     post = posts[0]
-    
     return {
         'id': post.get('id'),
         'user_id': post.get('user_id'),
