@@ -40,9 +40,9 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
         }
     """
     
-    from app.services.supabase_client import get_supabase_admin_client
+    from app.dependencies.supabase import get_admin_client
     
-    supabase = get_supabase_admin_client()
+    supabase = get_admin_client()
     
     # Get all accepted members
     members_response = supabase.table('group_members')\
@@ -145,9 +145,9 @@ def get_group_level_preferences(group_id: str) -> Dict[str, Any]:
     Used when members don't have individual preferences set.
     """
     
-    from app.services.supabase_client import get_supabase_admin_client
+    from app.dependencies.supabase import get_admin_client
     
-    supabase = get_supabase_admin_client()
+    supabase = get_admin_client()
     
     group_response = supabase.table('roommate_groups')\
         .select('*')\

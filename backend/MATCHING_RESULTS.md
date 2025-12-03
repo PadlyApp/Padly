@@ -143,10 +143,79 @@ Iteration 12:
 
 ---
 
+## When Does Matching Run?
+
+The matching algorithm uses **Option 3: Hybrid Re-matching** which:
+- **Preserves** confirmed matches (both group AND listing confirmed)
+- **Re-calculates** only unconfirmed matches
+- Runs automatically on key events
+
+### Automatic Triggers
+
+| Event | Endpoint | What Happens |
+|-------|----------|--------------|
+| **Group Created** | `POST /api/roommate-groups` | New group gets included in matching pool |
+| **Group Updated** | `PUT /api/roommate-groups/{id}` | If preferences changed, re-match |
+| **Member Joins** | `POST /api/roommate-groups/{id}/join` | Group size changed → re-match |
+| **Member Removed** | `DELETE /api/roommate-groups/{id}/members/{user_id}` | Group size changed → re-match |
+| **Match Rejected (Group)** | `DELETE /api/roommate-groups/{id}/reject-match` | Find new match for group |
+| **Match Rejected (Listing)** | `DELETE /api/listings/{id}/reject-match` | Find new match for listing |
+
+### What Gets Matched
+
+Each trigger runs matching for **one city** (the group's `target_city`):
+
+1. **Exclude** confirmed matches (groups & listings already paired and confirmed)
+2. **Delete** unconfirmed matches in that city
+3. **Run** Gale-Shapley + LNS for remaining groups/listings
+4. **Save** new matches (status = `active`, confirmations = `NULL`)
+
+### Confirmation Flow
+
+```
+Group Created → Match Assigned (unconfirmed)
+                      ↓
+         Group confirms: POST /groups/{id}/confirm-match
+                      ↓
+       Listing confirms: POST /listings/{id}/confirm-match
+                      ↓
+         Match is LOCKED (preserved during re-matching)
+```
+
+A match is **confirmed** when:
+- `group_confirmed_at IS NOT NULL` AND
+- `listing_confirmed_at IS NOT NULL`
+
+### Example Scenario
+
+```
+Initial State:
+  - 24 groups in Oakland
+  - 23 listings in Oakland
+  - 1 match fully confirmed (Group A ↔ Listing X)
+
+New group "Group B" created with target_city = "Oakland"
+  → Trigger: run_matching("Oakland")
+  
+Matching Process:
+  1. Find confirmed matches: 1 (Group A ↔ Listing X)
+  2. Exclude: Group A and Listing X from pool
+  3. Delete: 22 unconfirmed matches
+  4. Match: 23 groups (including new Group B) with 22 listings
+  5. Save: 22 new matches + 1 preserved = 23 total
+
+Result:
+  - Group A ↔ Listing X: STILL CONFIRMED ✓
+  - Group B: Got a new match assignment
+  - Other groups: May have different matches than before
+```
+
+---
+
 ## API Endpoints
 
 ```bash
-# Run matching for a city
+# Run matching for a city (manual trigger)
 POST /api/stable-matches/run
 {"city": "Oakland", "date_flexibility_days": 30}
 
@@ -155,4 +224,22 @@ GET /api/stable-matches/active?city=Oakland
 
 # Get statistics
 GET /api/stable-matches/stats
+
+# Get a group's match
+GET /api/roommate-groups/{group_id}/matches
+
+# Confirm match (group side)
+POST /api/roommate-groups/{group_id}/confirm-match
+
+# Reject match (group side) - triggers re-matching
+DELETE /api/roommate-groups/{group_id}/reject-match
+
+# Get listing's matched groups (listing owner only)
+GET /api/listings/{listing_id}/matches
+
+# Confirm match (listing side)
+POST /api/listings/{listing_id}/confirm-match
+
+# Reject match (listing side) - triggers re-matching
+DELETE /api/listings/{listing_id}/reject-match
 ```
