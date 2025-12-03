@@ -1,11 +1,13 @@
 'use client';
 
-import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, Loader, Alert } from '@mantine/core';
+import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, Loader, Alert, Tabs } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
+import { useState } from 'react';
+import { IconHome, IconUsers } from '@tabler/icons-react';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { api } from '../../../lib/api';
 
@@ -21,16 +23,17 @@ function MatchesPageContent() {
   const router = useRouter();
   const { user, authState } = useAuth();
   const userId = user?.profile?.id;
-  
-  // Fetch matches from the new matches API
-  const { data: matchesData, isLoading, error } = useQuery({
-    queryKey: ['matches', userId],
+  const [viewMode, setViewMode] = useState("LNS"); //Can be LNS or Hard  
+
+  // Fetch user's roommate group
+  const { data: groupData } = useQuery({
+    queryKey: ['userGroup', userId],
     queryFn: async () => {
       if (!userId || !authState?.accessToken) {
         throw new Error('User not authenticated');
       }
       
-      const response = await fetch(`http://localhost:8000/api/matches/${userId}?limit=20`, {
+      const response = await fetch(`http://localhost:8000/api/roommate-groups?creator_id=${userId}`, {
         headers: {
           'Authorization': `Bearer ${authState.accessToken}`,
           'Content-Type': 'application/json',
@@ -38,18 +41,50 @@ function MatchesPageContent() {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to fetch matches');
+        throw new Error('Failed to fetch group');
       }
       
       return response.json();
     },
     enabled: !!userId && !!authState?.accessToken,
     retry: false,
+  });
+
+  const groupId = groupData?.data?.[0]?.id; // Get first group ID
+  
+  // Fetch matches based on view mode
+  const { data: matchesData, isLoading, error } = useQuery({
+    queryKey: ['matches', groupId, viewMode], // Add viewMode to trigger refetch
+    queryFn: async () => {
+      if (!groupId || !authState?.accessToken) {
+        throw new Error('No group found');
+      }
+      
+      // Choose endpoint based on viewMode
+      const endpoint = viewMode === "LNS" 
+        ? `http://localhost:8000/api/roommate-groups/${groupId}/matches`
+        : `http://localhost:8000/api/roommate-groups/${groupId}/eligible-listings`;
+      
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch listings');
+      }
+      
+      return response.json();
+    },
+    enabled: !!groupId && !!authState?.accessToken,
+    retry: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Extract matches from API response
-  const matches = matchesData?.data?.matches || [];
+  // Extract matches from API response - handle both response structures
+  const matches = matchesData?.data?.matches || matchesData?.data || [];
   
   // Sample fallback data if API fails
   const sampleListings = [
@@ -147,6 +182,22 @@ function MatchesPageContent() {
           >
             Here are your top matches based on your preferences
           </Text>
+          
+          {/* Toggle between Good Matches and Hard Constraints */}
+          <Group gap="md" justify="center">
+            <Button
+              variant={viewMode === "LNS" ? "filled" : "light"}
+              onClick={() => setViewMode("LNS")}
+            >
+              Good Matches
+            </Button>
+            <Button
+              variant={viewMode === "Hard" ? "filled" : "light"}
+              onClick={() => setViewMode("Hard")}
+            >
+              Hard Constraints Only
+            </Button>
+          </Group>
         </Stack>
 
         {/* Loading State */}
