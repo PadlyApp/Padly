@@ -1,0 +1,341 @@
+'use client';
+
+import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, Loader, Alert, Tabs } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
+import { useState } from 'react';
+import { IconHome, IconUsers } from '@tabler/icons-react';
+import { ImageWithFallback } from '../components/ImageWithFallback';
+import { api } from '../../../lib/api';
+
+export default function MatchesPage() {
+  return (
+    <ProtectedRoute>
+      <MatchesPageContent />
+    </ProtectedRoute>
+  );
+}
+
+function MatchesPageContent() {
+  const router = useRouter();
+  const { user, authState } = useAuth();
+  const userId = user?.profile?.id;
+  const [viewMode, setViewMode] = useState("LNS"); //Can be LNS or Hard  
+
+  // Fetch user's roommate group
+  const { data: groupData, isLoading: isGroupLoading } = useQuery({
+    queryKey: ['userGroup', userId],
+    queryFn: async () => {
+      if (!userId || !authState?.accessToken) {
+        throw new Error('User not authenticated');
+      }
+      
+      const response = await fetch(`http://localhost:8000/api/roommate-groups?my_groups=true`, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch group');
+      }
+      
+      return response.json();
+    },
+    enabled: !!userId && !!authState?.accessToken,
+    retry: false,
+  });
+
+  const groupId = groupData?.data?.[0]?.id; // Get first group ID
+  
+  // Fetch matches based on view mode
+  const { data: matchesData, isLoading, error } = useQuery({
+    queryKey: ['matches', groupId, viewMode], // Add viewMode to trigger refetch
+    queryFn: async () => {
+      if (!groupId || !authState?.accessToken) {
+        throw new Error('No group found');
+      }
+      
+      // Choose endpoint based on viewMode
+      const endpoint = viewMode === "LNS" 
+        ? `http://localhost:8000/api/roommate-groups/${groupId}/matches`
+        : `http://localhost:8000/api/roommate-groups/${groupId}/eligible-listings`;
+      
+      const response = await fetch(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch listings');
+      }
+      
+      return response.json();
+    },
+    enabled: !!groupId && !!authState?.accessToken,
+    retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Extract listings from API response - handle both response structures
+  // LNS /matches returns { data: [{listing: {...}, group_score, listing_score}, ...] } - matches with nested listing
+  // /eligible-listings returns { listings: [...] } - direct listing objects
+  const extractListings = () => {
+    if (!matchesData) return [];
+    
+    // For eligible-listings endpoint - no scores available
+    if (matchesData.listings) {
+      return matchesData.listings;
+    }
+    
+    // For matches endpoint - extract nested listing and attach scores from match
+    if (matchesData.data && Array.isArray(matchesData.data)) {
+      return matchesData.data.map(match => {
+        if (!match.listing) return null;
+        return {
+          ...match.listing,
+          // Attach scores from the match object to the listing
+          group_score: match.group_score,
+          listing_score: match.listing_score,
+          // Calculate combined match score (average of both scores)
+          match_score: Math.round((match.group_score + match.listing_score) / 2)
+        };
+      }).filter(Boolean);
+    }
+    
+    return [];
+  };
+  
+  const matches = extractListings();
+  
+  // Check if user has no group - only show after group query has finished loading
+  const hasNoGroup = !groupId && !isGroupLoading;
+
+  // Use API matches directly (no fallback)
+  const listings = matches;
+
+  return (
+    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
+      <Navigation />
+      
+      <Container size="xl" style={{ padding: '4rem 3rem' }}>
+        {/* No Group State */}
+        {hasNoGroup && (
+          <Stack align="center" gap="lg" mt={64}>
+            <Title order={2} style={{ color: '#111' }}>No Group Found</Title>
+            <Text size="lg" c="dimmed" ta="center" maw={500}>
+              You need to join or create a roommate group before you can see matches.
+            </Text>
+            <Button 
+              size="lg" 
+              style={{ backgroundColor: '#20c997' }}
+              onClick={() => router.push('/groups')}
+            >
+              Find or Create a Group
+            </Button>
+          </Stack>
+        )}
+
+        {/* Show content only if user has a group */}
+        {groupId && (
+          <>
+        {/* Header Section */}
+        <Stack align="center" gap="lg" mb={64}>
+          <Title 
+            order={1} 
+            style={{ 
+              fontSize: '2.5rem', 
+              fontWeight: 500,
+              color: '#111',
+              textAlign: 'center'
+            }}
+          >
+            Your perfect place awaits
+          </Title>
+          <Text 
+            size="lg" 
+            c="dimmed" 
+            style={{ 
+              maxWidth: '42rem', 
+              textAlign: 'center',
+              color: '#666'
+            }}
+          >
+            Here are your top matches based on your preferences
+          </Text>
+          
+          {/* Toggle between Good Matches and Hard Constraints */}
+          <Group gap="md" justify="center">
+            <Button
+              variant={viewMode === "LNS" ? "filled" : "light"}
+              onClick={() => setViewMode("LNS")}
+            >
+              Good Matches
+            </Button>
+            <Button
+              variant={viewMode === "Hard" ? "filled" : "light"}
+              onClick={() => setViewMode("Hard")}
+            >
+              Hard Constraints Only
+            </Button>
+          </Group>
+        </Stack>
+
+        {/* Loading State */}
+        {isLoading && (
+          <Stack align="center" gap="md">
+            <Loader size="lg" />
+            <Text ta="center" size="lg" c="dimmed">
+              Finding your perfect matches...
+            </Text>
+          </Stack>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <Alert color="orange" title="Using Sample Data" mb="xl">
+            {error.message || 'Unable to load personalized matches. Showing sample listings.'}
+          </Alert>
+        )}
+        
+        {/* Success State
+        {!isLoading && !error && matches.length > 0 && (
+          <Alert color="green" title="Matches Found!" mb="xl">
+            We found {matches.length} listings that match your preferences!
+          </Alert>
+        )} */}
+
+        {/* Listings Grid */}
+        {!isLoading && (
+          <Grid gutter="xl">
+            {listings.map((listing) => {
+              const image = listing.images?.[0] || listing.image || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+            
+            return (
+              <Grid.Col key={listing.id} span={{ base: 12, sm: 6, lg: 4 }}>
+                <Card
+                  shadow="sm"
+                  radius="lg"
+                  style={{
+                    overflow: 'hidden',
+                    border: '1px solid #f1f1f1',
+                    transition: 'all 0.3s ease',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)';
+                  }}
+                >
+                  {/* Image Section */}
+                  <Card.Section style={{ position: 'relative' }}>
+                    <Box style={{ position: 'relative', paddingBottom: '75%', overflow: 'hidden', backgroundColor: '#f5f5f5' }}>
+                      <ImageWithFallback
+                        src={image}
+                        alt={listing.title}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          transition: 'transform 0.5s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                      />
+                    </Box>
+                    
+
+                  </Card.Section>
+
+                  {/* Content Section */}
+                  <Stack gap="md" style={{ padding: '1.5rem', minHeight: '220px', display: 'flex', flexDirection: 'column' }}>
+                    {/* Title - Fixed height with ellipsis */}
+                    <Text 
+                      fw={500} 
+                      size="lg"
+                      style={{ 
+                        color: '#111',
+                        lineHeight: 1.4,
+                        minHeight: '56px',
+                        maxHeight: '56px',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                      title={listing.title}
+                    >
+                      {listing.title}
+                    </Text>
+
+                    {/* Details - Single line */}
+                    <Text 
+                      size="md" 
+                      c="dimmed"
+                      style={{ color: '#666', minHeight: '24px' }}
+                    >
+                      {listing.number_of_bedrooms || listing.beds} Bed • {listing.number_of_bathrooms || listing.baths} Bath • {listing.area_sqft || listing.sqft} sq ft
+                    </Text>
+
+                    {/* Price - Fixed height */}
+                    {listing.price_per_month && (
+                      <Text 
+                        fw={600} 
+                        size="xl"
+                        style={{ color: '#20c997', minHeight: '32px' }}
+                      >
+                        ${listing.price_per_month.toLocaleString()}/mo
+                      </Text>
+                    )}
+
+                    {/* Spacer to push button to bottom */}
+                    <Box style={{ flex: 1 }} />
+
+                    {/* View Details Button */}
+                    <Button
+                      fullWidth
+                      radius="md"
+                      size="md"
+                      style={{
+                        backgroundColor: '#20c997',
+                        transition: 'background-color 0.2s ease',
+                      }}
+                      onClick={() => router.push(`/listings/${listing.id}`)}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#12b886';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#20c997';
+                      }}
+                    >
+                      View Details
+                    </Button>
+                  </Stack>
+                </Card>
+              </Grid.Col>
+              );
+            })}
+          </Grid>
+        )}
+        </>
+        )}
+      </Container>
+    </Box>
+  );
+}
+

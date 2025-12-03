@@ -1,0 +1,321 @@
+{
+  "timestamp": "2025-11-12T01:03:47.469190",
+  "date_flexibility_days": 60,
+  "cities": {
+    "Fresno": {
+      "status": "success",
+      "groups": 3,
+      "listings": 6,
+      "feasible_pairs": 1,
+      "matches": [
+        {
+          "group_id": "4069730d-35d4-47dd-a47e-810c06d41b6b",
+          "listing_id": "20a462eb-58e8-4524-af78-4a1cf5516aea",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 75.0,
+          "listing_score": 50.0,
+          "is_stable": true,
+          "city": "Fresno"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 1,
+        "matched_groups": 1,
+        "unmatched_groups": 0,
+        "matched_listings": 1,
+        "unmatched_listings": 0,
+        "proposals_sent": 1,
+        "proposals_rejected": 0,
+        "avg_group_rank": 75.0,
+        "avg_listing_rank": 50.0,
+        "match_quality_score": -3025.0,
+        "is_stable": true
+      }
+    },
+    "San Jose": {
+      "status": "success",
+      "groups": 1,
+      "listings": 10,
+      "feasible_pairs": 4,
+      "matches": [
+        {
+          "group_id": "205d5f05-5e46-4d68-92f0-a76d2ea1d26f",
+          "listing_id": "7486f383-bab3-4691-937d-4f476ab43132",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 80.0,
+          "listing_score": 50.0,
+          "is_stable": true,
+          "city": "San Jose"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 1,
+        "matched_groups": 1,
+        "unmatched_groups": 0,
+        "matched_listings": 1,
+        "unmatched_listings": 3,
+        "proposals_sent": 1,
+        "proposals_rejected": 0,
+        "avg_group_rank": 80.0,
+        "avg_listing_rank": 50.0,
+        "match_quality_score": -712.5,
+        "is_stable": true
+      }
+    },
+    "Los Angeles": {
+      "status": "success",
+      "groups": 2,
+      "listings": 7,
+      "feasible_pairs": 2,
+      "matches": [
+        {
+          "group_id": "0cf6de58-9803-45c3-992c-bc600d60bc3f",
+          "listing_id": "3a8d9592-d579-48db-ba2e-de3ff26f9ff8",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 75.0,
+          "listing_score": 70.0,
+          "is_stable": true,
+          "city": "Los Angeles"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 3,
+        "matched_groups": 1,
+        "unmatched_groups": 1,
+        "matched_listings": 1,
+        "unmatched_listings": 0,
+        "proposals_sent": 2,
+        "proposals_rejected": 1,
+        "avg_group_rank": 75.0,
+        "avg_listing_rank": 70.0,
+        "match_quality_score": -1737.5,
+        "is_stable": true
+      }
+    },
+    "Anaheim": {
+      "status": "success",
+      "groups": 1,
+      "listings": 9,
+      "feasible_pairs": 1,
+      "matches": [
+        {
+          "group_id": "026a7755-9001-43f3-87b3-21e781f99881",
+          "listing_id": "abc6882c-622b-4ce4-9cc7-2410a6910760",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 75.0,
+          "listing_score": 45.0,
+          "is_stable": true,
+          "city": "Anaheim"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 1,
+        "matched_groups": 1,
+        "unmatched_groups": 0,
+        "matched_listings": 1,
+        "unmatched_listings": 0,
+        "proposals_sent": 1,
+        "proposals_rejected": 0,
+        "avg_group_rank": 75.0,
+        "avg_listing_rank": 45.0,
+        "match_quality_score": -2900.0,
+        "is_stable": true
+      }
+    },
+    "Sacramento": {
+      "status": "success",
+      "groups": 1,
+      "listings": 7,
+      "feasible_pairs": 1,
+      "matches": [
+        {
+          "group_id": "427cc61f-51c5-40f7-b835-2bbd8146b407",
+          "listing_id": "f83304ac-0113-487c-9249-0f6882bb0580",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 75.0,
+          "listing_score": 55.0,
+          "is_stable": true,
+          "city": "Sacramento"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 1,
+        "matched_groups": 1,
+        "unmatched_groups": 0,
+        "matched_listings": 1,
+        "unmatched_listings": 0,
+        "proposals_sent": 1,
+        "proposals_rejected": 0,
+        "avg_group_rank": 75.0,
+        "avg_listing_rank": 55.0,
+        "match_quality_score": -3150.0,
+        "is_stable": true
+      }
+    },
+    "Oakland": {
+      "status": "success",
+      "groups": 4,
+      "listings": 12,
+      "feasible_pairs": 12,
+      "matches": [
+        {
+          "group_id": "de9e4ad2-6132-4d0d-ab24-1c6a9c3747dd",
+          "listing_id": "4e254c4f-4f93-49e0-864d-8fe1cd083300",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 80.0,
+          "listing_score": 65.0,
+          "is_stable": true,
+          "city": "Oakland"
+        },
+        {
+          "group_id": "5eb21df2-19e5-426a-b865-5d8a9130d720",
+          "listing_id": "04e44bc8-1c10-4aa2-95a3-eb6bf7cc08fa",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 90.0,
+          "listing_score": 70.0,
+          "is_stable": true,
+          "city": "Oakland"
+        },
+        {
+          "group_id": "b191e636-8327-4d5e-b8a0-a3c9fa3b02ef",
+          "listing_id": "4ac37032-129d-4ada-8231-8f5bcd0aaa8d",
+          "group_rank": 2,
+          "listing_rank": 2,
+          "group_score": 55.0,
+          "listing_score": 35.0,
+          "is_stable": true,
+          "city": "Oakland"
+        },
+        {
+          "group_id": "c4235ee7-4e77-4d0f-bc93-ab2276999ea6",
+          "listing_id": "3daef699-1783-4055-a41c-7545cd26f9db",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 80.0,
+          "listing_score": 65.0,
+          "is_stable": true,
+          "city": "Oakland"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 5,
+        "matched_groups": 4,
+        "unmatched_groups": 0,
+        "matched_listings": 4,
+        "unmatched_listings": 5,
+        "proposals_sent": 5,
+        "proposals_rejected": 1,
+        "avg_group_rank": 76.25,
+        "avg_listing_rank": 58.75,
+        "match_quality_score": -275.0,
+        "is_stable": true
+      }
+    },
+    "San Diego": {
+      "status": "success",
+      "groups": 2,
+      "listings": 7,
+      "feasible_pairs": 1,
+      "matches": [
+        {
+          "group_id": "b4c2e8dd-ad2a-4b9b-91e2-8164bff09d43",
+          "listing_id": "f4a59a61-4f46-484f-8199-5663f8da1fbf",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 70.0,
+          "listing_score": 50.0,
+          "is_stable": true,
+          "city": "San Diego"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 1,
+        "matched_groups": 1,
+        "unmatched_groups": 0,
+        "matched_listings": 1,
+        "unmatched_listings": 0,
+        "proposals_sent": 1,
+        "proposals_rejected": 0,
+        "avg_group_rank": 70.0,
+        "avg_listing_rank": 50.0,
+        "match_quality_score": -2900.0,
+        "is_stable": true
+      }
+    },
+    "San Francisco": {
+      "status": "success",
+      "groups": 4,
+      "listings": 9,
+      "feasible_pairs": 7,
+      "matches": [
+        {
+          "group_id": "71b9ec28-e4b5-482a-8a7e-6c406531024a",
+          "listing_id": "e116fb5f-4829-45b5-a476-8d479bf2da48",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 80.0,
+          "listing_score": 55.0,
+          "is_stable": true,
+          "city": "San Francisco"
+        },
+        {
+          "group_id": "6bc13c3d-36d5-4698-99f8-db7bbea8f62c",
+          "listing_id": "712f486b-f62a-4b98-9bc1-c669994f6bf1",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 75.0,
+          "listing_score": 60.0,
+          "is_stable": true,
+          "city": "San Francisco"
+        },
+        {
+          "group_id": "519c937e-94ec-403b-8ca9-463e7baa295b",
+          "listing_id": "9e66d754-5bc3-40a2-be8e-40bd6fb6e5ae",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 80.0,
+          "listing_score": 75.0,
+          "is_stable": true,
+          "city": "San Francisco"
+        },
+        {
+          "group_id": "fd57fdfb-fb82-42ce-a7a6-c72a292f00d2",
+          "listing_id": "560eb43b-3a9b-4dea-b1b0-8df2b493cfe7",
+          "group_rank": 1,
+          "listing_rank": 1,
+          "group_score": 90.0,
+          "listing_score": 60.0,
+          "is_stable": true,
+          "city": "San Francisco"
+        }
+      ],
+      "diagnostics": {
+        "iterations": 4,
+        "matched_groups": 4,
+        "unmatched_groups": 0,
+        "matched_listings": 4,
+        "unmatched_listings": 1,
+        "proposals_sent": 4,
+        "proposals_rejected": 0,
+        "avg_group_rank": 81.25,
+        "avg_listing_rank": 62.5,
+        "match_quality_score": -618.75,
+        "is_stable": true
+      }
+    }
+  },
+  "summary": {
+    "total_matches": 14,
+    "total_groups": 18,
+    "total_listings": 67,
+    "cities_processed": 8,
+    "cities_with_matches": 8
+  }
+}
