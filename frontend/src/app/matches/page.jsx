@@ -26,14 +26,14 @@ function MatchesPageContent() {
   const [viewMode, setViewMode] = useState("LNS"); //Can be LNS or Hard  
 
   // Fetch user's roommate group
-  const { data: groupData } = useQuery({
+  const { data: groupData, isLoading: isGroupLoading } = useQuery({
     queryKey: ['userGroup', userId],
     queryFn: async () => {
       if (!userId || !authState?.accessToken) {
         throw new Error('User not authenticated');
       }
       
-      const response = await fetch(`http://localhost:8000/api/roommate-groups?creator_id=${userId}`, {
+      const response = await fetch(`http://localhost:8000/api/roommate-groups?my_groups=true`, {
         headers: {
           'Authorization': `Bearer ${authState.accessToken}`,
           'Content-Type': 'application/json',
@@ -83,81 +83,68 @@ function MatchesPageContent() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Extract matches from API response - handle both response structures
-  const matches = matchesData?.data?.matches || matchesData?.data || [];
+  // Extract listings from API response - handle both response structures
+  // LNS /matches returns { data: [{listing: {...}, group_score, listing_score}, ...] } - matches with nested listing
+  // /eligible-listings returns { listings: [...] } - direct listing objects
+  const extractListings = () => {
+    if (!matchesData) return [];
+    
+    // For eligible-listings endpoint - no scores available
+    if (matchesData.listings) {
+      return matchesData.listings;
+    }
+    
+    // For matches endpoint - extract nested listing and attach scores from match
+    if (matchesData.data && Array.isArray(matchesData.data)) {
+      return matchesData.data.map(match => {
+        if (!match.listing) return null;
+        return {
+          ...match.listing,
+          // Attach scores from the match object to the listing
+          group_score: match.group_score,
+          listing_score: match.listing_score,
+          // Calculate combined match score (average of both scores)
+          match_score: Math.round((match.group_score + match.listing_score) / 2)
+        };
+      }).filter(Boolean);
+    }
+    
+    return [];
+  };
   
-  // Sample fallback data if API fails
-  const sampleListings = [
-    {
-      id: '1',
-      title: 'Cozy Studio in Downtown',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 750,
-      price_per_month: 1200,
-      city: 'San Francisco',
-      images: ['https://images.unsplash.com/photo-1610123172763-1f587473048f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '2',
-      title: 'Modern Loft with City Views',
-      number_of_bedrooms: 2,
-      number_of_bathrooms: 2,
-      area_sqft: 1200,
-      price_per_month: 2400,
-      city: 'Seattle',
-      images: ['https://images.unsplash.com/photo-1603072388139-565853396b38?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '3',
-      title: 'Bright Corner Unit',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 850,
-      price_per_month: 1500,
-      city: 'Austin',
-      images: ['https://images.unsplash.com/photo-1632077209523-e9dede9b6b31?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '4',
-      title: 'Minimalist Suite',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 680,
-      price_per_month: 1100,
-      city: 'Portland',
-      images: ['https://images.unsplash.com/photo-1614622350812-96b09c78af77?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '5',
-      title: 'Urban Living Space',
-      number_of_bedrooms: 2,
-      number_of_bathrooms: 1,
-      area_sqft: 950,
-      price_per_month: 1800,
-      city: 'Denver',
-      images: ['https://images.unsplash.com/photo-1552189864-e05b02af1697?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '6',
-      title: 'Spacious Industrial Loft',
-      number_of_bedrooms: 3,
-      number_of_bathrooms: 2,
-      area_sqft: 1500,
-      price_per_month: 2800,
-      city: 'Boston',
-      images: ['https://images.unsplash.com/photo-1681684565407-01d2933ed16f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-  ];
+  const matches = extractListings();
+  
+  // Check if user has no group - only show after group query has finished loading
+  const hasNoGroup = !groupId && !isGroupLoading;
 
-  // Use API matches if available, otherwise use sample data
-  const listings = (matches.length > 0) ? matches : sampleListings;
+  // Use API matches directly (no fallback)
+  const listings = matches;
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
       
       <Container size="xl" style={{ padding: '4rem 3rem' }}>
+        {/* No Group State */}
+        {hasNoGroup && (
+          <Stack align="center" gap="lg" mt={64}>
+            <Title order={2} style={{ color: '#111' }}>No Group Found</Title>
+            <Text size="lg" c="dimmed" ta="center" maw={500}>
+              You need to join or create a roommate group before you can see matches.
+            </Text>
+            <Button 
+              size="lg" 
+              style={{ backgroundColor: '#20c997' }}
+              onClick={() => router.push('/groups')}
+            >
+              Find or Create a Group
+            </Button>
+          </Stack>
+        )}
+
+        {/* Show content only if user has a group */}
+        {groupId && (
+          <>
         {/* Header Section */}
         <Stack align="center" gap="lg" mb={64}>
           <Title 
@@ -228,10 +215,6 @@ function MatchesPageContent() {
         {!isLoading && (
           <Grid gutter="xl">
             {listings.map((listing) => {
-              // Use match_score from API or calculate for sample data
-              const matchScore = listing.match_score || (listing.id ? 
-                85 + (listing.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 15) : 
-                85);
               const image = listing.images?.[0] || listing.image || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
             
             return (
@@ -276,23 +259,7 @@ function MatchesPageContent() {
                       />
                     </Box>
                     
-                    {/* Match Score Badge */}
-                    <Badge
-                      size="lg"
-                      radius="md"
-                      style={{
-                        position: 'absolute',
-                        top: '1rem',
-                        right: '1rem',
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        color: '#20c997',
-                        backdropFilter: 'blur(8px)',
-                        border: 'none',
-                        boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)',
-                      }}
-                    >
-                      Match: {matchScore}%
-                    </Badge>
+
                   </Card.Section>
 
                   {/* Content Section */}
@@ -364,6 +331,8 @@ function MatchesPageContent() {
               );
             })}
           </Grid>
+        )}
+        </>
         )}
       </Container>
     </Box>
