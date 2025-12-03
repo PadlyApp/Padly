@@ -1,8 +1,36 @@
 'use client';
 
-import { Container, Title, Text, Stack, Box } from '@mantine/core';
+import { useState, useEffect } from 'react';
+import { 
+  Container, 
+  Title, 
+  Text, 
+  Stack, 
+  Box, 
+  TextInput, 
+  Textarea, 
+  Button, 
+  Card,
+  Group,
+  Avatar,
+  Loader,
+  Alert,
+  Divider,
+  Badge
+} from '@mantine/core';
+import { 
+  IconUser, 
+  IconBuilding, 
+  IconSchool, 
+  IconBriefcase, 
+  IconCheck, 
+  IconAlertCircle,
+  IconMail,
+  IconShield
+} from '@tabler/icons-react';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AccountPage() {
   return (
@@ -13,53 +41,277 @@ export default function AccountPage() {
 }
 
 function AccountPageContent() {
+  const { authState, getValidToken } = useAuth();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  
+  // User profile data
+  const [userData, setUserData] = useState({
+    id: '',
+    email: '',
+    full_name: '',
+    bio: '',
+    company_name: '',
+    school_name: '',
+    role_title: '',
+    verification_status: 'unverified',
+    profile_picture_url: ''
+  });
+
+  // Fetch user data on mount
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!authState?.accessToken) return;
+      
+      try {
+        const token = await getValidToken();
+        const response = await fetch('http://localhost:8000/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.user) {
+          // Profile data is in data.user.profile, email is in data.user.email
+          const profile = data.user.profile || {};
+          setUserData({
+            id: profile.id ?? '',
+            email: data.user.email ?? profile.email ?? '',
+            full_name: profile.full_name ?? '',
+            bio: profile.bio ?? '',
+            company_name: profile.company_name ?? '',
+            school_name: profile.school_name ?? '',
+            role_title: profile.role_title ?? '',
+            verification_status: profile.verification_status ?? 'unverified',
+            profile_picture_url: profile.profile_picture_url ?? ''
+          });
+        } else {
+          setError('Failed to load account data');
+        }
+      } catch (err) {
+        console.error('Error fetching user data:', err);
+        setError('Failed to load account data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchUserData();
+  }, [authState, getValidToken]);
+
+  // Handle form field changes
+  const handleChange = (field, value) => {
+    setUserData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    // Clear messages when user starts editing
+    setError(null);
+    setSuccess(null);
+  };
+
+  // Save changes
+  const handleSave = async () => {
+    if (!userData.id) {
+      setError('User ID not found');
+      return;
+    }
+    
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const token = await getValidToken();
+      
+      // Prepare update data (only send editable fields)
+      const updateData = {
+        full_name: userData.full_name,
+        bio: userData.bio || null,
+        company_name: userData.company_name || null,
+        school_name: userData.school_name || null,
+        role_title: userData.role_title || null
+      };
+      
+      const response = await fetch(`http://localhost:8000/api/users/${userData.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(updateData)
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.status === 'success') {
+        setSuccess('Profile updated successfully!');
+        // Update local state with response data (ensure no nulls)
+        if (data.data) {
+          const updated = data.data;
+          setUserData(prev => ({
+            ...prev,
+            full_name: updated.full_name ?? prev.full_name,
+            bio: updated.bio ?? '',
+            company_name: updated.company_name ?? '',
+            school_name: updated.school_name ?? '',
+            role_title: updated.role_title ?? ''
+          }));
+        }
+      } else {
+        setError(data.detail || 'Failed to update profile');
+      }
+    } catch (err) {
+      console.error('Error saving profile:', err);
+      setError('Failed to save changes. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const getVerificationBadge = () => {
+    switch (userData.verification_status) {
+      case 'admin_verified':
+        return <Badge color="green" leftSection={<IconShield size={12} />}>Admin Verified</Badge>;
+      case 'email_verified':
+        return <Badge color="blue" leftSection={<IconMail size={12} />}>Email Verified</Badge>;
+      default:
+        return <Badge color="gray">Unverified</Badge>;
+    }
+  };
+
+  if (loading) {
+    return (
+      <Box style={{ minHeight: '100vh', backgroundColor: '#fafafa' }}>
+        <Navigation />
+        <Container size="md" py="xl">
+          <Stack align="center" gap="md" style={{ minHeight: '400px', justifyContent: 'center' }}>
+            <Loader size="lg" />
+            <Text>Loading your account...</Text>
+          </Stack>
+        </Container>
+      </Box>
+    );
+  }
+
   return (
-    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#fafafa' }}>
       <Navigation />
       
-      <Container size="md" style={{ padding: '4rem 2rem' }}>
+      <Container size="md" py="xl">
         <Stack gap="xl">
-          <Stack align="center" gap="lg">
-            <Title 
-              order={1} 
-              style={{ 
-                fontSize: '2.5rem', 
-                fontWeight: 500,
-                color: '#111',
-                textAlign: 'center'
-              }}
+          {/* Header */}
+          <Stack align="center" gap="md">
+            <Avatar 
+              src={userData.profile_picture_url} 
+              size={100} 
+              radius="50%"
+              color="blue"
             >
-              Your Account
-            </Title>
-            <Text 
-              size="lg" 
-              c="dimmed" 
-              style={{ 
-                maxWidth: '42rem', 
-                textAlign: 'center',
-                color: '#666'
-              }}
-            >
-              Manage your profile and settings
-            </Text>
+              {userData.full_name?.charAt(0)?.toUpperCase() || 'U'}
+            </Avatar>
+            <Title order={1}>Your Account</Title>
+            <Group gap="xs">
+              {getVerificationBadge()}
+            </Group>
           </Stack>
 
-          {/* Placeholder for account details */}
-          <Box 
-            style={{ 
-              padding: '3rem', 
-              borderRadius: '1rem', 
-              border: '1px solid #f1f1f1',
-              textAlign: 'center'
-            }}
-          >
-            <Text size="lg" c="dimmed">
-              Account management coming soon...
-            </Text>
-          </Box>
+          {/* Messages */}
+          {error && (
+            <Alert icon={<IconAlertCircle size={16} />} color="red" title="Error">
+              {error}
+            </Alert>
+          )}
+          
+          {success && (
+            <Alert icon={<IconCheck size={16} />} color="green" title="Success">
+              {success}
+            </Alert>
+          )}
+
+          {/* Profile Card */}
+          <Card withBorder padding="xl" radius="md">
+            <Stack gap="lg">
+              <Title order={3}>Profile Information</Title>
+              
+              {/* Email (read-only) */}
+              <TextInput
+                label="Email"
+                value={userData.email}
+                disabled
+                leftSection={<IconMail size={16} />}
+                description="Email cannot be changed"
+              />
+              
+              {/* Full Name */}
+              <TextInput
+                label="Full Name"
+                placeholder="Your full name"
+                value={userData.full_name}
+                onChange={(e) => handleChange('full_name', e.target.value)}
+                leftSection={<IconUser size={16} />}
+                required
+              />
+              
+              {/* Bio */}
+              <Textarea
+                label="Bio"
+                placeholder="Tell others about yourself..."
+                value={userData.bio}
+                onChange={(e) => handleChange('bio', e.target.value)}
+                minRows={3}
+                maxRows={5}
+              />
+              
+              <Divider label="Work & Education" labelPosition="center" />
+              
+              {/* Company */}
+              <TextInput
+                label="Company"
+                placeholder="Where do you work?"
+                value={userData.company_name}
+                onChange={(e) => handleChange('company_name', e.target.value)}
+                leftSection={<IconBuilding size={16} />}
+              />
+              
+              {/* School */}
+              <TextInput
+                label="School"
+                placeholder="Where do you study?"
+                value={userData.school_name}
+                onChange={(e) => handleChange('school_name', e.target.value)}
+                leftSection={<IconSchool size={16} />}
+              />
+              
+              {/* Role/Title */}
+              <TextInput
+                label="Job Title / Role"
+                placeholder="e.g., Software Engineer, Student"
+                value={userData.role_title}
+                onChange={(e) => handleChange('role_title', e.target.value)}
+                leftSection={<IconBriefcase size={16} />}
+              />
+            </Stack>
+          </Card>
+
+          {/* Save Button */}
+          <Group justify="center">
+            <Button 
+              size="lg" 
+              onClick={handleSave}
+              loading={saving}
+              leftSection={<IconCheck size={18} />}
+            >
+              Save Changes
+            </Button>
+          </Group>
         </Stack>
       </Container>
     </Box>
   );
 }
-
