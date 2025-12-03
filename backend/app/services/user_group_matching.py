@@ -65,8 +65,8 @@ def calculate_user_group_compatibility(
     # =========================================================================
     
     # 1. City Match (REQUIRED)
-    user_city = str(user_prefs.get('target_city', '')).lower().strip()
-    group_city = str(group.get('target_city', '')).lower().strip()
+    user_city = str(user_prefs.get('target_city') or '').lower().strip()
+    group_city = str(group.get('target_city') or '').lower().strip()
     
     if not user_city or not group_city or user_city != group_city:
         return {
@@ -77,10 +77,10 @@ def calculate_user_group_compatibility(
         }
     
     # 2. Budget Overlap (REQUIRED)
-    user_budget_min = float(user_prefs.get('budget_min', 0))
-    user_budget_max = float(user_prefs.get('budget_max', float('inf')))
-    group_budget_min = float(group.get('budget_per_person_min', 0))
-    group_budget_max = float(group.get('budget_per_person_max', float('inf')))
+    user_budget_min = float(user_prefs.get('budget_min') or 0)
+    user_budget_max = float(user_prefs.get('budget_max') or float('inf'))
+    group_budget_min = float(group.get('budget_per_person_min') or 0)
+    group_budget_max = float(group.get('budget_per_person_max') or float('inf'))
     
     # Check if ranges overlap
     overlaps = user_budget_max >= group_budget_min and user_budget_min <= group_budget_max
@@ -115,7 +115,7 @@ def calculate_user_group_compatibility(
             }
     
     # 4. Group has space (REQUIRED)
-    current_count = int(group.get('current_member_count', 0))
+    current_count = int(group.get('current_member_count') or 0)
     target_size = group.get('target_group_size')
     
     if target_size is not None:
@@ -135,8 +135,11 @@ def calculate_user_group_compatibility(
     # =========================================================================
     
     # 1. Budget Fit (25 points)
-    user_budget_mid = (user_budget_min + user_budget_max) / 2
-    group_budget_mid = (group_budget_min + group_budget_max) / 2
+    # Handle infinity for max budgets
+    user_max_for_calc = user_budget_max if user_budget_max != float('inf') else user_budget_min + 2000
+    group_max_for_calc = group_budget_max if group_budget_max != float('inf') else group_budget_min + 2000
+    user_budget_mid = (user_budget_min + user_max_for_calc) / 2
+    group_budget_mid = (group_budget_min + group_max_for_calc) / 2
     budget_diff = abs(user_budget_mid - group_budget_mid)
     
     if budget_diff <= 100:
@@ -174,8 +177,8 @@ def calculate_user_group_compatibility(
     score += date_score
     
     # 3. Company/School Match (15 points)
-    user_company = user.get('company_name', '').lower().strip()
-    user_school = user.get('school_name', '').lower().strip()
+    user_company = (user.get('company_name') or '').lower().strip()
+    user_school = (user.get('school_name') or '').lower().strip()
     
     # Get group members' companies/schools (would need to fetch from DB)
     # For now, we'll check if user has any affiliation
@@ -196,7 +199,7 @@ def calculate_user_group_compatibility(
     score += company_school_score
     
     # 4. Verification Status (15 points)
-    verification_status = user.get('verification_status', 'unverified')
+    verification_status = user.get('verification_status') or 'unverified'
     
     if verification_status == 'admin_verified':
         verification_score = 15
@@ -210,7 +213,7 @@ def calculate_user_group_compatibility(
     score += verification_score
     
     # 5. Lifestyle Compatibility (25 points)
-    user_lifestyle = user_prefs.get('lifestyle_preferences', {})
+    user_lifestyle = user_prefs.get('lifestyle_preferences') or {}
     # Group lifestyle would need to be aggregated from members
     # For now, use group-level data if available
     group_lifestyle = {}  # TODO: Aggregate from members
@@ -457,13 +460,16 @@ async def find_compatible_groups(
         return []
     
     # 2. Get open groups in target city (exclude solo groups)
-    # Open = status='active' AND is_solo=false AND (target_group_size IS NULL OR current < target)
+    # Open = status='active' AND (is_solo IS NULL OR is_solo=false)
     groups_response = supabase.table("roommate_groups")\
         .select("*, group_members(user_id, status)")\
         .eq("status", "active")\
         .ilike("target_city", target_city)\
-        .eq("is_solo", False)\
         .execute()
+    
+    # Filter out solo groups (is_solo = True)
+    if groups_response.data:
+        groups_response.data = [g for g in groups_response.data if g.get('is_solo') != True]
     
     if not groups_response.data:
         return []
