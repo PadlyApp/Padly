@@ -1,121 +1,173 @@
 """
 Matches routes
-Get personalized listing matches for users based on preferences
+
+This module provides endpoints for users to discover:
+1. Compatible roommate groups (User-to-Group matching)
+2. Listings for their group (via stable matching)
+
+Note: Individual user→listing matching is deprecated. 
+Users should join/create a group first, then get group→listing matches.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from app.dependencies.auth import get_user_token, require_user_token
-from app.services.supabase_client import SupabaseHTTPClient
-from app.services.matching_algorithm import get_user_matches
+from app.dependencies.supabase import get_admin_client
+from app.services.user_group_matching import find_compatible_groups, calculate_user_group_compatibility
 
 router = APIRouter(prefix="/api/matches", tags=["matches"])
 
 
-@router.get("/{user_id}")
-async def get_matches_for_user(
-    user_id: str,
-    limit: int = Query(default=20, ge=1, le=100),
-    token: Optional[str] = Depends(get_user_token)
-):
-    """
-    Get personalized listing matches for a user.
-    
-    Currently uses random matching algorithm.
-    Future: Will use preferences-based matching.
-    
-    Args:
-        user_id: The user's database ID (not auth_id)
-        limit: Maximum number of matches to return (1-100)
-        token: JWT authentication token (optional)
-    
-    Returns:
-        List of matched listings with match scores
-    """
-    client = SupabaseHTTPClient(token=token)
-    
-    try:
-        # Get user's preferences (optional - for future use)
-        try:
-            preferences = await client.select_one(
-                table="personal_preferences",
-                id_value=user_id,
-                id_column="user_id"
-            )
-        except:
-            preferences = None  # User might not have set preferences yet
-        
-        # Get all active listings
-        # Note: PostgREST filter format is "column=eq.value"
-        try:
-            listings_response = await client.select(
-                table="listings",
-                filters={"status": "eq.active"},
-                limit=100  # Limit initial fetch
-            )
-            all_listings = listings_response if isinstance(listings_response, list) else []
-        except:
-            # If filtering fails, get all listings
-            all_listings_response = await client.select(
-                table="listings",
-                limit=100
-            )
-            all_listings = all_listings_response if isinstance(all_listings_response, list) else []
-        
-        # If no listings in database, return empty matches
-        if not all_listings:
-            return {
-                "status": "success",
-                "data": {
-                    "user_id": user_id,
-                    "total_matches": 0,
-                    "matches": [],
-                    "message": "No listings available at this time"
-                }
-            }
-        
-        # Get matches using the algorithm
-        matches_data = get_user_matches(
-            user_id=user_id,
-            all_listings=all_listings,
-            user_preferences=preferences,
-            limit=limit
-        )
-        
-        return {
-            "status": "success",
-            "data": matches_data
-        }
-        
-    except HTTPException:
-        raise  # Re-raise HTTPExceptions as-is
-    except Exception as e:
-        # Return friendly error with details
-        import traceback
-        error_detail = {
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get matches: {str(e)}"
-        )
-
-
-@router.get("/me/recommendations")
-async def get_my_matches(
-    limit: int = Query(default=20, ge=1, le=100),
+@router.get("/groups")
+async def discover_compatible_groups(
+    city: str = Query(..., description="Target city to search in"),
+    budget_min: Optional[float] = Query(None, description="Minimum budget per person"),
+    budget_max: Optional[float] = Query(None, description="Maximum budget per person"),
+    move_in_date: Optional[str] = Query(None, description="Target move-in date (ISO format)"),
+    min_score: int = Query(50, ge=0, le=100, description="Minimum compatibility score"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
     token: str = Depends(require_user_token)
 ):
     """
-    Get matches for the currently authenticated user.
+    Discover compatible roommate groups based on user preferences.
     
-    Requires authentication. Extracts user_id from JWT token.
+    This uses the User-to-Group matching algorithm which scores groups based on:
+    - Hard Constraints: City match, budget overlap, date proximity (±60 days), open spots
+    - Soft Preferences: Budget fit (25pts), Date fit (20pts), Company/School (15pts), 
+      Verification (15pts), Lifestyle (25pts)
+    
+    Returns groups ranked by compatibility score with detailed reasons.
     """
-    # TODO: Extract user_id from JWT token
-    # For now, this is a placeholder endpoint
-    raise HTTPException(
-        status_code=501,
-        detail="This endpoint requires JWT parsing to extract user_id. Use GET /{user_id} for now."
-    )
+    supabase = get_admin_client()
+    
+    # Get current user from token
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up user in users table
+    user_record = supabase.table('users').select('*').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user = user_record.data[0]
+    user_id = user['id']
+    
+    # Build user preferences from query params or stored preferences
+    prefs_response = supabase.table("personal_preferences").select("*").eq("user_id", user_id).execute()
+    user_prefs = prefs_response.data[0] if prefs_response.data else {}
+    
+    # Override with query params if provided
+    user_prefs['target_city'] = city
+    if budget_min is not None:
+        user_prefs['budget_min'] = budget_min
+    if budget_max is not None:
+        user_prefs['budget_max'] = budget_max
+    if move_in_date is not None:
+        user_prefs['move_in_date'] = move_in_date
+    
+    # Find compatible groups
+    try:
+        compatible_groups = await find_compatible_groups(
+            user_id=user_id,
+            user_prefs=user_prefs,
+            min_score=min_score,
+            limit=limit
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "search_criteria": {
+            "city": city,
+            "budget_min": user_prefs.get('budget_min'),
+            "budget_max": user_prefs.get('budget_max'),
+            "move_in_date": user_prefs.get('move_in_date'),
+            "min_score": min_score
+        },
+        "count": len(compatible_groups),
+        "groups": compatible_groups
+    }
+
+
+@router.get("/{user_id}")
+async def get_user_group_status(
+    user_id: str,
+    token: Optional[str] = Depends(get_user_token)
+):
+    """
+    Get the user's current group and their group's listing matches.
+    
+    This endpoint helps users understand:
+    1. Which group(s) they belong to
+    2. What stable matches their group has (from LNS algorithm)
+    
+    For individual user→listing matches, users should:
+    1. Create or join a roommate group
+    2. Use /api/roommate-groups/{group_id}/matches for stable matches
+    3. Use /api/roommate-groups/{group_id}/eligible-listings for browsing
+    """
+    supabase = get_admin_client()
+    
+    # Get user's groups
+    member_response = supabase.table('group_members')\
+        .select('*, roommate_groups(*)')\
+        .eq('user_id', user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if not member_response.data:
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "message": "User is not a member of any group. Create or join a group to get listing matches.",
+            "groups": [],
+            "next_steps": [
+                "POST /api/roommate-groups - Create a new group",
+                "GET /api/matches/groups?city=Boston - Discover compatible groups to join",
+                "POST /api/roommate-groups/{group_id}/request-join - Request to join a group"
+            ]
+        }
+    
+    # Get matches for each group
+    groups_with_matches = []
+    for membership in member_response.data:
+        group = membership.get('roommate_groups', {})
+        group_id = group.get('id')
+        
+        if not group_id:
+            continue
+        
+        # Get stable matches for this group
+        matches_response = supabase.table('stable_matches')\
+            .select('*, listings(*)')\
+            .eq('group_id', group_id)\
+            .eq('status', 'active')\
+            .order('group_rank')\
+            .limit(10)\
+            .execute()
+        
+        groups_with_matches.append({
+            "group_id": group_id,
+            "group_name": group.get('group_name'),
+            "target_city": group.get('target_city'),
+            "is_creator": membership.get('is_creator', False),
+            "match_count": len(matches_response.data) if matches_response.data else 0,
+            "top_matches": matches_response.data[:5] if matches_response.data else []
+        })
+    
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "groups": groups_with_matches,
+        "endpoints": {
+            "group_matches": "/api/roommate-groups/{group_id}/matches",
+            "eligible_listings": "/api/roommate-groups/{group_id}/eligible-listings",
+            "discover_groups": "/api/matches/groups?city={city}"
+        }
+    }
 
