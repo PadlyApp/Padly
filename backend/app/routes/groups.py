@@ -1127,6 +1127,126 @@ async def get_group_matches(
     }
 
 
+@router.get("/{group_id}/eligible-listings", response_model=dict)
+async def get_eligible_listings_for_group(
+    group_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max listings to return"),
+    token: Optional[str] = Depends(get_user_token)
+):
+    """
+    Get listings that match the group's HARD CONSTRAINTS only.
+    
+    This endpoint returns all listings that are feasible for the group based on:
+    - Location match (same city)
+    - Budget compatibility (per-person price within group's budget range)
+    - Move-in date compatibility (within ±30 days of target date)
+    - Required attributes (furnished, utilities, pets, parking, etc.)
+    
+    Unlike /matches (which returns LNS-optimized stable matches), this returns
+    ALL listings that pass hard constraints - useful for browsing/exploration.
+    
+    Returns listings sorted by price (lowest first).
+    """
+    from app.services.stable_matching import (
+        build_feasible_pairs,
+        get_feasibility_statistics
+    )
+    
+    supabase = get_admin_client()
+    
+    # Get group details
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
+    target_city = group.get('target_city')
+    
+    if not target_city:
+        raise HTTPException(
+            status_code=400, 
+            detail="Group must have a target city to find eligible listings"
+        )
+    
+    # Get active listings in the same city
+    listings_response = supabase.table('listings')\
+        .select('*')\
+        .eq('city', target_city)\
+        .eq('status', 'active')\
+        .execute()
+    
+    all_listings = listings_response.data if listings_response.data else []
+    
+    if not all_listings:
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "group_constraints": {
+                "target_city": target_city,
+                "budget_min": group.get('budget_per_person_min'),
+                "budget_max": group.get('budget_per_person_max'),
+                "target_move_in_date": str(group.get('target_move_in_date')) if group.get('target_move_in_date') else None
+            },
+            "count": 0,
+            "listings": [],
+            "message": f"No active listings found in {target_city}"
+        }
+    
+    # Build feasible pairs (hard constraint filtering)
+    feasible_pairs, rejection_reasons = build_feasible_pairs(
+        groups=[group],
+        listings=all_listings,
+        date_delta_days=30,
+        include_rejection_reasons=True
+    )
+    
+    # Extract listing IDs that passed hard constraints
+    eligible_listing_ids = set(listing_id for _, listing_id in feasible_pairs)
+    
+    # Filter and enrich listings
+    eligible_listings = []
+    for listing in all_listings:
+        if listing['id'] in eligible_listing_ids:
+            # Calculate per-person price
+            price = float(listing.get('price_per_month', 0))
+            listing['price_per_person'] = round(price / 2, 2)  # 2-person groups
+            eligible_listings.append(listing)
+    
+    # Sort by price (lowest first)
+    eligible_listings.sort(key=lambda x: x.get('price_per_month', float('inf')))
+    
+    # Apply limit
+    eligible_listings = eligible_listings[:limit]
+    
+    # Get statistics
+    stats = get_feasibility_statistics([group], all_listings, feasible_pairs)
+    
+    return {
+        "status": "success",
+        "group_id": group_id,
+        "group_constraints": {
+            "target_city": target_city,
+            "budget_min": group.get('budget_per_person_min'),
+            "budget_max": group.get('budget_per_person_max'),
+            "target_move_in_date": str(group.get('target_move_in_date')) if group.get('target_move_in_date') else None,
+            "target_furnished": group.get('target_furnished'),
+            "target_utilities_included": group.get('target_utilities_included')
+        },
+        "stats": {
+            "total_listings_in_city": stats['total_listings'],
+            "eligible_count": stats['total_feasible_pairs'],
+            "rejected_count": stats['listings_with_no_options']
+        },
+        "count": len(eligible_listings),
+        "listings": eligible_listings
+    }
+
+
 @router.get("/{group_id}/compatible-users", response_model=dict)
 async def get_compatible_users(
     group_id: str,
