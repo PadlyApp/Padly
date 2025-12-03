@@ -467,7 +467,7 @@ async def update_group(
         .eq('id', group_id)\
         .execute()
     
-    # 🔥 TRIGGER STABLE MATCHING if preference fields changed
+    # TRIGGER STABLE MATCHING if preference fields changed
     preference_fields = [
         'budget_per_person_min', 'budget_per_person_max', 
         'target_move_in_date', 'target_city'
@@ -972,7 +972,9 @@ async def leave_group(
     """
     Leave a group.
     Requires authentication.
-    Creator cannot leave (must delete group or transfer ownership).
+    If creator leaves:
+      - If other members exist, ownership transfers to the longest-standing member
+      - If no other members, the group is deleted
     """
     supabase = get_admin_client()
     
@@ -981,7 +983,27 @@ async def leave_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user_id = user_record.data[0]['id']
+    
+    # Check if group exists and get group info
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
     
     # Check if user is member
     member_response = supabase.table('group_members')\
@@ -995,21 +1017,108 @@ async def leave_group(
     
     member = member_response.data[0]
     
+    # Handle creator leaving
     if member['is_creator']:
-        raise HTTPException(
-            status_code=400, 
-            detail="Creator cannot leave the group. Please delete the group or transfer ownership."
-        )
+        # Get all other accepted members ordered by join date
+        other_members = supabase.table('group_members')\
+            .select('*')\
+            .eq('group_id', group_id)\
+            .eq('status', 'accepted')\
+            .neq('user_id', user_id)\
+            .order('joined_at', desc=False)\
+            .execute()
+        
+        if other_members.data and len(other_members.data) > 0:
+            # Transfer ownership to the longest-standing member
+            new_creator = other_members.data[0]
+            
+            # Update new creator
+            supabase.table('group_members')\
+                .update({'is_creator': True})\
+                .eq('id', new_creator['id'])\
+                .execute()
+            
+            # Update group's creator_user_id
+            supabase.table('roommate_groups')\
+                .update({'creator_user_id': new_creator['user_id']})\
+                .eq('id', group_id)\
+                .execute()
+            
+            # Remove the old creator from members
+            supabase.table('group_members')\
+                .delete()\
+                .eq('id', member['id'])\
+                .execute()
+            
+            # Get new creator's name for response
+            new_creator_user = supabase.table('users')\
+                .select('full_name, email')\
+                .eq('id', new_creator['user_id'])\
+                .single()\
+                .execute()
+            
+            new_creator_name = new_creator_user.data.get('full_name') or new_creator_user.data.get('email') if new_creator_user.data else 'another member'
+            
+            return {
+                "status": "success",
+                "message": f"Successfully left the group. Ownership transferred to {new_creator_name}.",
+                "data": {
+                    "group_id": group_id,
+                    "group_name": group['group_name'],
+                    "ownership_transferred": True,
+                    "new_creator_id": new_creator['user_id']
+                }
+            }
+        else:
+            # No other members - delete the group
+            supabase.table('roommate_groups')\
+                .delete()\
+                .eq('id', group_id)\
+                .execute()
+            
+            return {
+                "status": "success",
+                "message": "Successfully left the group. The group was deleted as you were the only member.",
+                "data": {
+                    "group_id": group_id,
+                    "group_name": group['group_name'],
+                    "group_deleted": True
+                }
+            }
     
-    # Remove member
+    # Regular member leaving
     supabase.table('group_members')\
         .delete()\
         .eq('id', member['id'])\
         .execute()
     
+    # 🔥 TRIGGER STABLE MATCHING
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+    
+    target_city = group.get('target_city')
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if target_city:
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": matching_response.message
+            }
+        except Exception as e:
+            matching_result = {"status": "error", "message": str(e)}
+    
     return {
         "status": "success",
-        "message": "Successfully left the group"
+        "message": "Successfully left the group",
+        "data": {
+            "group_id": group_id,
+            "group_name": group['group_name']
+        },
+        "matching": matching_result
     }
 
 

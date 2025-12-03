@@ -61,7 +61,8 @@ import { Navigation } from '../../components/Navigation';
 export default function GroupDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { user, token, getValidToken } = useAuth();
+  const { user, authState, getValidToken } = useAuth();
+  const token = authState?.accessToken;
   const groupId = params.id;
 
   const [group, setGroup] = useState(null);
@@ -257,15 +258,32 @@ export default function GroupDetailPage() {
   }, [inviteModalOpen, inviteTab]);
 
   const handleLeaveGroup = async () => {
-    if (!confirm('Are you sure you want to leave this group?')) return;
+    const acceptedMembers = members.filter(m => m.status === 'accepted');
+    const otherMembers = acceptedMembers.filter(m => m.user_email !== user?.email);
+    
+    let confirmMessage = 'Are you sure you want to leave this group?';
+    if (isCreator) {
+      if (otherMembers.length > 0) {
+        confirmMessage = 'Are you sure you want to leave this group? Ownership will be transferred to another member.';
+      } else {
+        confirmMessage = 'Are you sure you want to leave this group? Since you are the only member, the group will be deleted.';
+      }
+    }
+    
+    if (!confirm(confirmMessage)) return;
 
     try {
+      const validToken = await getValidToken();
+      if (!validToken) {
+        throw new Error('Please log in to leave the group');
+      }
+      
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/leave`,
         {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${validToken}`
           }
         }
       );
@@ -275,7 +293,7 @@ export default function GroupDetailPage() {
       if (response.ok && data.status === 'success') {
         notifications.show({
           title: 'Left Group',
-          message: 'You have left the group',
+          message: data.message || 'You have left the group',
           color: 'green',
         });
         router.push('/groups');
@@ -391,9 +409,9 @@ export default function GroupDetailPage() {
     );
   }
 
-  const isCreator = user && group.created_by === user.id;
+  const isCreator = user && (group.creator_user_id === user.id || members.some(m => m.user_email === user.email && m.is_creator));
   // Compare by email since user.id is auth_id but members have app's user_id
-  const isMember = user && members.some(m => m.user_email === user.email);
+  const isMember = user && members.some(m => m.user_email === user.email && m.status === 'accepted');
   const statusColor = {
     active: 'blue',
     matched: 'green',
@@ -426,31 +444,20 @@ export default function GroupDetailPage() {
               </Menu.Target>
               <Menu.Dropdown>
                 {isCreator && (
-                  <>
-                    <Menu.Item
-                      leftSection={<IconEdit size={16} />}
-                      onClick={() => router.push(`/groups/${groupId}/edit`)}
-                    >
-                      Edit Group
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconTrash size={16} />}
-                      color="red"
-                      onClick={handleDeleteGroup}
-                    >
-                      Delete Group
-                    </Menu.Item>
-                  </>
-                )}
-                {!isCreator && (
                   <Menu.Item
-                    leftSection={<IconDoorExit size={16} />}
-                    color="red"
-                    onClick={handleLeaveGroup}
+                    leftSection={<IconEdit size={16} />}
+                    onClick={() => router.push(`/groups/${groupId}/edit`)}
                   >
-                    Leave Group
+                    Edit Group
                   </Menu.Item>
                 )}
+                <Menu.Item
+                  leftSection={<IconDoorExit size={16} />}
+                  color="red"
+                  onClick={handleLeaveGroup}
+                >
+                  Leave Group
+                </Menu.Item>
               </Menu.Dropdown>
             </Menu>
           )}
