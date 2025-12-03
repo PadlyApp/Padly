@@ -108,10 +108,11 @@ async def list_groups(
             if user_record.data:
                 user_id = user_record.data[0]['id']
                 
-                # Get groups where user is a member
+                # Get groups where user is an ACCEPTED member (not pending or rejected)
                 member_response = supabase.table('group_members')\
                     .select('group_id')\
                     .eq('user_id', user_id)\
+                    .eq('status', 'accepted')\
                     .execute()
                 
                 member_group_ids = [m['group_id'] for m in member_response.data]
@@ -120,11 +121,84 @@ async def list_groups(
                 # User not found in users table, return empty
                 groups = []
     
+    # Calculate actual accepted member count for each group
+    if groups:
+        group_ids = [g['id'] for g in groups]
+        
+        # Get all accepted members for these groups
+        members_response = supabase.table('group_members')\
+            .select('group_id')\
+            .in_('group_id', group_ids)\
+            .eq('status', 'accepted')\
+            .execute()
+        
+        # Count members per group
+        member_counts = {}
+        for member in members_response.data:
+            gid = member['group_id']
+            member_counts[gid] = member_counts.get(gid, 0) + 1
+        
+        # Update each group with the accurate count
+        for group in groups:
+            group['current_member_count'] = member_counts.get(group['id'], 0)
+    
     return {
         "status": "success",
         "count": len(groups),
         "data": groups
     }
+
+# =============================================================================
+# User's Pending Join Requests
+# =============================================================================
+
+@router.get("/my-pending-requests", response_model=dict)
+async def get_my_pending_requests(token: str = Depends(require_user_token)):
+    """
+    Get all pending join requests for the current user.
+    
+    Returns list of groups where the user has a pending join request.
+    """
+    supabase = get_admin_client()
+    
+    # Get current user
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user_id = user_record.data[0]['id']
+    
+    # Get all pending memberships for this user
+    pending_response = supabase.table('group_members')\
+        .select('group_id, joined_at, roommate_groups(id, group_name, target_city, status)')\
+        .eq('user_id', user_id)\
+        .eq('status', 'pending')\
+        .execute()
+    
+    pending_requests = []
+    for membership in pending_response.data:
+        group_data = membership.get('roommate_groups', {}) if membership.get('roommate_groups') else {}
+        pending_requests.append({
+            'group_id': membership['group_id'],
+            'group_name': group_data.get('group_name'),
+            'target_city': group_data.get('target_city'),
+            'group_status': group_data.get('status'),
+            'requested_at': membership.get('joined_at')
+        })
+    
+    return {
+        "status": "success",
+        "count": len(pending_requests),
+        "data": pending_requests
+    }
+
 
 # Group Discovery & User-to-Group Matching
 # =============================================================================
@@ -223,7 +297,14 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    current_user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
     
     # Verify user is group creator
     group_response = supabase.table("roommate_groups").select("*").eq("id", group_id).single().execute()
@@ -418,7 +499,7 @@ async def update_group(
     """
     Update a roommate group.
     Requires authentication.
-    Only the creator or group members can update.
+    Only the creator can update the group.
     """
     supabase = get_admin_client()
     
@@ -427,9 +508,30 @@ async def update_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
     
-    # Check if user is creator or member
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user_id = user_record.data[0]['id']
+    
+    # Check if user is creator (only creator can update)
+    member_response = supabase.table('group_members')\
+        .select('is_creator')\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if not member_response.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+    
+    if not member_response.data[0].get('is_creator'):
+        raise HTTPException(status_code=403, detail="Only the group creator can edit the group")
+    
+    # Get the group
     group_response = supabase.table('roommate_groups')\
         .select('*')\
         .eq('id', group_id)\
@@ -440,21 +542,6 @@ async def update_group(
         raise HTTPException(status_code=404, detail="Group not found")
     
     group = group_response.data
-    
-    # Check authorization (creator or member)
-    is_creator = group['creator_user_id'] == user_id
-    
-    if not is_creator:
-        # Check if user is a member
-        member_response = supabase.table('group_members')\
-            .select('*')\
-            .eq('group_id', group_id)\
-            .eq('user_id', user_id)\
-            .eq('status', 'accepted')\
-            .execute()
-        
-        if not member_response.data:
-            raise HTTPException(status_code=403, detail="Only group members can update this group")
     
     # Update group
     update_dict = group_data.model_dump(exclude_none=True)
@@ -517,7 +604,14 @@ async def delete_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user_id = user_record.data[0]['id']
     
     # Check if user is creator
     group_response = supabase.table('roommate_groups')\
@@ -534,7 +628,13 @@ async def delete_group(
     if group['creator_user_id'] != user_id:
         raise HTTPException(status_code=403, detail="Only the group creator can delete this group")
     
-    # Delete group (cascade will delete members)
+    # Delete group members first (in case cascade doesn't work)
+    supabase.table('group_members')\
+        .delete()\
+        .eq('group_id', group_id)\
+        .execute()
+    
+    # Delete group
     supabase.table('roommate_groups')\
         .delete()\
         .eq('id', group_id)\
@@ -736,7 +836,40 @@ async def request_join_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found. Please complete your profile first.")
+    
+    user_id = user_record.data[0]['id']
+    
+    # Check if user is already an accepted member of ANY group (including solo groups)
+    # Users must leave their current group (even solo) before joining another
+    existing_group_membership = supabase.table('group_members')\
+        .select('group_id, roommate_groups(group_name, is_solo)')\
+        .eq('user_id', user_id)\
+        .eq('status', 'accepted')\
+        .execute()
+    
+    if existing_group_membership.data and len(existing_group_membership.data) > 0:
+        existing_group = existing_group_membership.data[0]
+        group_info = existing_group.get('roommate_groups', {})
+        is_solo = group_info.get('is_solo', False)
+        group_name = group_info.get('group_name', 'a group')
+        
+        if is_solo:
+            raise HTTPException(
+                status_code=400, 
+                detail="You are currently in a solo group. Please leave your solo group first before requesting to join another group."
+            )
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"You are already a member of '{group_name}'. You can only be in one group at a time. Please leave your current group first."
+            )
     
     # Check if group exists
     group_response = supabase.table('roommate_groups')\
@@ -750,7 +883,7 @@ async def request_join_group(
     
     group = group_response.data
     
-    # Check if user is already a member or has pending request
+    # Check if user already has a pending request for THIS group
     existing_member = supabase.table('group_members')\
         .select('*')\
         .eq('group_id', group_id)\
@@ -782,7 +915,7 @@ async def request_join_group(
     
     # Check if group is full
     current_members = supabase.table('group_members')\
-        .select('id')\
+        .select('user_id')\
         .eq('group_id', group_id)\
         .eq('status', 'accepted')\
         .execute()
@@ -866,7 +999,7 @@ async def join_group(
     target_size = group.get('target_group_size')
     if target_size is not None:
         current_members = supabase.table('group_members')\
-            .select('id')\
+            .select('user_id')\
             .eq('group_id', group_id)\
             .eq('status', 'accepted')\
             .execute()
@@ -877,7 +1010,8 @@ async def join_group(
     # Accept invitation
     supabase.table('group_members')\
         .update({'status': 'accepted'})\
-        .eq('id', member['id'])\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
         .execute()
     
     # 🔥 AGGREGATE MEMBER PREFERENCES into group preferences
@@ -975,7 +1109,14 @@ async def reject_invitation(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    user_id = user_record.data[0]['id']
     
     # Check if user has pending invitation
     member_response = supabase.table('group_members')\
@@ -988,17 +1129,220 @@ async def reject_invitation(
     if not member_response.data:
         raise HTTPException(status_code=400, detail="No pending invitation found")
     
-    member = member_response.data[0]
-    
     # Reject invitation
     supabase.table('group_members')\
         .update({'status': 'rejected'})\
-        .eq('id', member['id'])\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
         .execute()
     
     return {
         "status": "success",
         "message": "Invitation rejected"
+    }
+
+
+@router.post("/{group_id}/accept-request/{user_id}", response_model=dict)
+async def accept_join_request(
+    group_id: str,
+    user_id: str,
+    token: str = Depends(require_user_token)
+):
+    """
+    Accept a user's request to join the group (creator only).
+    
+    This allows group creators to approve solo users who want to join their group.
+    """
+    supabase = get_admin_client()
+    
+    # Get current user (group creator)
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
+    
+    # Check if group exists and current user is creator
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
+    
+    if group['creator_user_id'] != current_user_id:
+        raise HTTPException(status_code=403, detail="Only the group creator can accept join requests")
+    
+    # Check if target user has a pending request
+    member_response = supabase.table('group_members')\
+        .select('*')\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
+        .eq('status', 'pending')\
+        .execute()
+    
+    if not member_response.data:
+        raise HTTPException(status_code=400, detail="No pending join request found for this user")
+    
+    # Check if group is full
+    target_size = group.get('target_group_size')
+    if target_size is not None:
+        current_members = supabase.table('group_members')\
+            .select('user_id')\
+            .eq('group_id', group_id)\
+            .eq('status', 'accepted')\
+            .execute()
+        
+        if len(current_members.data) >= target_size:
+            raise HTTPException(status_code=400, detail="Group is already full")
+    
+    # Accept the request
+    supabase.table('group_members')\
+        .update({'status': 'accepted'})\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
+        .execute()
+    
+    # Cancel all OTHER pending requests for this user (they can only be in one group)
+    supabase.table('group_members')\
+        .delete()\
+        .eq('user_id', user_id)\
+        .eq('status', 'pending')\
+        .neq('group_id', group_id)\
+        .execute()
+    
+    # Get user info for response
+    user_info_response = supabase.table('users')\
+        .select('email, full_name')\
+        .eq('id', user_id)\
+        .single()\
+        .execute()
+    
+    user_info = user_info_response.data if user_info_response.data else {}
+    
+    # 🔥 TRIGGER STABLE MATCHING
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+    
+    target_city = group.get('target_city')
+    matching_result = {'status': 'skipped', 'message': 'No city specified'}
+    
+    if target_city:
+        try:
+            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+            matching_response = await run_matching(matching_request)
+            matching_result = {
+                "status": "success",
+                "city": target_city,
+                "total_matches": len(matching_response.matches),
+                "message": matching_response.message
+            }
+        except Exception as e:
+            matching_result = {"status": "error", "message": str(e)}
+    
+    return {
+        "status": "success",
+        "message": f"Join request accepted. {user_info.get('full_name', 'User')} is now a member.",
+        "data": {
+            "group_id": group_id,
+            "user_id": user_id,
+            "user_name": user_info.get('full_name'),
+            "user_email": user_info.get('email'),
+            "status": "accepted"
+        },
+        "matching": matching_result
+    }
+
+
+@router.post("/{group_id}/reject-request/{user_id}", response_model=dict)
+async def reject_join_request(
+    group_id: str,
+    user_id: str,
+    token: str = Depends(require_user_token)
+):
+    """
+    Reject a user's request to join the group (creator only).
+    
+    This allows group creators to decline solo users who want to join their group.
+    """
+    supabase = get_admin_client()
+    
+    # Get current user (group creator)
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
+    auth_user_id = user_response.user.id
+    
+    # Look up the user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
+    
+    # Check if group exists and current user is creator
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .single()\
+        .execute()
+    
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group = group_response.data
+    
+    if group['creator_user_id'] != current_user_id:
+        raise HTTPException(status_code=403, detail="Only the group creator can reject join requests")
+    
+    # Check if target user has a pending request
+    member_response = supabase.table('group_members')\
+        .select('*')\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
+        .eq('status', 'pending')\
+        .execute()
+    
+    if not member_response.data:
+        raise HTTPException(status_code=400, detail="No pending join request found for this user")
+    
+    # Get user info for response
+    user_info_response = supabase.table('users')\
+        .select('email, full_name')\
+        .eq('id', user_id)\
+        .single()\
+        .execute()
+    
+    user_info = user_info_response.data if user_info_response.data else {}
+    
+    # Reject the request (set status to rejected)
+    supabase.table('group_members')\
+        .update({'status': 'rejected'})\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
+        .execute()
+    
+    return {
+        "status": "success",
+        "message": f"Join request from {user_info.get('full_name', 'user')} has been rejected.",
+        "data": {
+            "group_id": group_id,
+            "user_id": user_id,
+            "user_name": user_info.get('full_name'),
+            "user_email": user_info.get('email'),
+            "status": "rejected"
+        }
     }
 
 
@@ -1011,9 +1355,11 @@ async def leave_group(
     Leave a group.
     Requires authentication.
     If creator leaves:
-      - If other members exist, ownership transfers to the longest-standing member
+      - If other members exist, ownership transfers to another member
       - If no other members, the group is deleted
     """
+    import random
+    
     supabase = get_admin_client()
     
     # Get current user
@@ -1057,58 +1403,25 @@ async def leave_group(
     
     # Handle creator leaving
     if member['is_creator']:
-        # Get all other accepted members ordered by join date
-        other_members = supabase.table('group_members')\
-            .select('*')\
+        # Get all other accepted members
+        other_members_response = supabase.table('group_members')\
+            .select('user_id')\
             .eq('group_id', group_id)\
             .eq('status', 'accepted')\
             .neq('user_id', user_id)\
-            .order('joined_at', desc=False)\
             .execute()
         
-        if other_members.data and len(other_members.data) > 0:
-            # Transfer ownership to the longest-standing member
-            new_creator = other_members.data[0]
-            
-            # Update new creator
-            supabase.table('group_members')\
-                .update({'is_creator': True})\
-                .eq('id', new_creator['id'])\
-                .execute()
-            
-            # Update group's creator_user_id
-            supabase.table('roommate_groups')\
-                .update({'creator_user_id': new_creator['user_id']})\
-                .eq('id', group_id)\
-                .execute()
-            
-            # Remove the old creator from members
+        other_members = other_members_response.data or []
+        
+        if len(other_members) == 0:
+            # Creator is the only member - delete the group
+            # First delete all group_members entries (including pending requests)
             supabase.table('group_members')\
                 .delete()\
-                .eq('id', member['id'])\
+                .eq('group_id', group_id)\
                 .execute()
             
-            # Get new creator's name for response
-            new_creator_user = supabase.table('users')\
-                .select('full_name, email')\
-                .eq('id', new_creator['user_id'])\
-                .single()\
-                .execute()
-            
-            new_creator_name = new_creator_user.data.get('full_name') or new_creator_user.data.get('email') if new_creator_user.data else 'another member'
-            
-            return {
-                "status": "success",
-                "message": f"Successfully left the group. Ownership transferred to {new_creator_name}.",
-                "data": {
-                    "group_id": group_id,
-                    "group_name": group['group_name'],
-                    "ownership_transferred": True,
-                    "new_creator_id": new_creator['user_id']
-                }
-            }
-        else:
-            # No other members - delete the group
+            # Then delete the group itself
             supabase.table('roommate_groups')\
                 .delete()\
                 .eq('id', group_id)\
@@ -1123,11 +1436,56 @@ async def leave_group(
                     "group_deleted": True
                 }
             }
+        else:
+            # Transfer ownership to a random remaining member
+            new_creator = random.choice(other_members)
+            new_creator_id = new_creator['user_id']
+            
+            # Update the new creator's is_creator flag
+            supabase.table('group_members')\
+                .update({'is_creator': True})\
+                .eq('group_id', group_id)\
+                .eq('user_id', new_creator_id)\
+                .execute()
+            
+            # Update group's creator_user_id
+            supabase.table('roommate_groups')\
+                .update({'creator_user_id': new_creator_id})\
+                .eq('id', group_id)\
+                .execute()
+            
+            # Remove the old creator from the group
+            supabase.table('group_members')\
+                .delete()\
+                .eq('group_id', group_id)\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            # Get new creator's name for response
+            new_creator_user = supabase.table('users')\
+                .select('full_name, email')\
+                .eq('id', new_creator_id)\
+                .single()\
+                .execute()
+            
+            new_creator_name = new_creator_user.data.get('full_name') or new_creator_user.data.get('email') if new_creator_user.data else 'another member'
+            
+            return {
+                "status": "success",
+                "message": f"Successfully left the group. Ownership transferred to {new_creator_name}.",
+                "data": {
+                    "group_id": group_id,
+                    "group_name": group['group_name'],
+                    "ownership_transferred": True,
+                    "new_creator_id": new_creator_id
+                }
+            }
     
-    # Regular member leaving
+    # Regular member leaving - just remove them
     supabase.table('group_members')\
         .delete()\
-        .eq('id', member['id'])\
+        .eq('group_id', group_id)\
+        .eq('user_id', user_id)\
         .execute()
     
     # 🔄 AGGREGATE PREFERENCES after member leaves
@@ -1198,10 +1556,10 @@ async def leave_group(
     }
 
 
-@router.delete("/{group_id}/members/{user_id}", response_model=dict)
+@router.delete("/{group_id}/members/{member_user_id}", response_model=dict)
 async def remove_member(
     group_id: str,
-    user_id: str,
+    member_user_id: str,
     token: str = Depends(require_user_token)
 ):
     """
@@ -1216,7 +1574,14 @@ async def remove_member(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    current_user_id = user_response.user.id
+    auth_user_id = user_response.user.id
+    
+    # Look up the current user in the users table by auth_id
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    current_user_id = user_record.data[0]['id']
     
     # Check if current user is creator
     group_response = supabase.table('roommate_groups')\
@@ -1237,7 +1602,7 @@ async def remove_member(
     member_response = supabase.table('group_members')\
         .select('*')\
         .eq('group_id', group_id)\
-        .eq('user_id', user_id)\
+        .eq('user_id', member_user_id)\
         .execute()
     
     if not member_response.data:
@@ -1248,10 +1613,11 @@ async def remove_member(
     if member['is_creator']:
         raise HTTPException(status_code=400, detail="Cannot remove the group creator")
     
-    # Remove member
+    # Remove member using composite key
     supabase.table('group_members')\
         .delete()\
-        .eq('id', member['id'])\
+        .eq('group_id', group_id)\
+        .eq('user_id', member_user_id)\
         .execute()
     
     # 🔥 RE-AGGREGATE MEMBER PREFERENCES (now with one less member)

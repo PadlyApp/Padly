@@ -33,7 +33,7 @@ function MatchesPageContent() {
         throw new Error('User not authenticated');
       }
       
-      const response = await fetch(`http://localhost:8000/api/roommate-groups?creator_id=${userId}`, {
+      const response = await fetch(`http://localhost:8000/api/roommate-groups?my_groups=true`, {
         headers: {
           'Authorization': `Bearer ${authState.accessToken}`,
           'Content-Type': 'application/json',
@@ -86,78 +86,37 @@ function MatchesPageContent() {
   // Extract matches from API response - handle both response structures
   const matches = matchesData?.data?.matches || matchesData?.data || [];
   
-  // Sample fallback data if API fails
-  const sampleListings = [
-    {
-      id: '1',
-      title: 'Cozy Studio in Downtown',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 750,
-      price_per_month: 1200,
-      city: 'San Francisco',
-      images: ['https://images.unsplash.com/photo-1610123172763-1f587473048f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '2',
-      title: 'Modern Loft with City Views',
-      number_of_bedrooms: 2,
-      number_of_bathrooms: 2,
-      area_sqft: 1200,
-      price_per_month: 2400,
-      city: 'Seattle',
-      images: ['https://images.unsplash.com/photo-1603072388139-565853396b38?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '3',
-      title: 'Bright Corner Unit',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 850,
-      price_per_month: 1500,
-      city: 'Austin',
-      images: ['https://images.unsplash.com/photo-1632077209523-e9dede9b6b31?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '4',
-      title: 'Minimalist Suite',
-      number_of_bedrooms: 1,
-      number_of_bathrooms: 1,
-      area_sqft: 680,
-      price_per_month: 1100,
-      city: 'Portland',
-      images: ['https://images.unsplash.com/photo-1614622350812-96b09c78af77?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '5',
-      title: 'Urban Living Space',
-      number_of_bedrooms: 2,
-      number_of_bathrooms: 1,
-      area_sqft: 950,
-      price_per_month: 1800,
-      city: 'Denver',
-      images: ['https://images.unsplash.com/photo-1552189864-e05b02af1697?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-    {
-      id: '6',
-      title: 'Spacious Industrial Loft',
-      number_of_bedrooms: 3,
-      number_of_bathrooms: 2,
-      area_sqft: 1500,
-      price_per_month: 2800,
-      city: 'Boston',
-      images: ['https://images.unsplash.com/photo-1681684565407-01d2933ed16f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
-    },
-  ];
+  // Check if user has no group
+  const hasNoGroup = !groupId && !isLoading;
 
-  // Use API matches if available, otherwise use sample data
-  const listings = (matches.length > 0) ? matches : sampleListings;
+  // Use API matches directly (no fallback)
+  const listings = matches;
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
       
       <Container size="xl" style={{ padding: '4rem 3rem' }}>
+        {/* No Group State */}
+        {hasNoGroup && (
+          <Stack align="center" gap="lg" mt={64}>
+            <Title order={2} style={{ color: '#111' }}>No Group Found</Title>
+            <Text size="lg" c="dimmed" ta="center" maw={500}>
+              You need to join or create a roommate group before you can see matches.
+            </Text>
+            <Button 
+              size="lg" 
+              style={{ backgroundColor: '#20c997' }}
+              onClick={() => router.push('/groups')}
+            >
+              Find or Create a Group
+            </Button>
+          </Stack>
+        )}
+
+        {/* Show content only if user has a group */}
+        {groupId && (
+          <>
         {/* Header Section */}
         <Stack align="center" gap="lg" mb={64}>
           <Title 
@@ -364,6 +323,8 @@ function MatchesPageContent() {
               );
             })}
           </Grid>
+        )}
+        </>
         )}
       </Container>
     </Box>
