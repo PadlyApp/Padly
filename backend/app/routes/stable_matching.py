@@ -64,8 +64,8 @@ class RunMatchingRequest(BaseModel):
         }
 
 
-class MatchResult(BaseModel):
-    """Individual match result"""
+class MatchResultResponse(BaseModel):
+    """Individual match result for API response"""
     group_id: str
     listing_id: str
     group_score: float
@@ -103,7 +103,7 @@ class RunMatchingResponse(BaseModel):
     status: str
     message: str
     diagnostics_id: Optional[str] = None
-    matches: List[MatchResult]
+    matches: List[MatchResultResponse]
     diagnostics: DiagnosticsResult
     execution_time_seconds: float
 
@@ -145,12 +145,20 @@ async def run_matching(request: RunMatchingRequest):
     """
     Execute the stable matching algorithm for a city
     
-    This endpoint:
-    1. Filters eligible groups and listings in the city
-    2. Builds feasible pairs based on hard constraints
-    3. Scores all pairs and builds preference lists
-    4. Runs Deferred Acceptance algorithm
-    5. Saves results to database
+    This endpoint implements Option 3: Hybrid Re-matching
+    - Confirmed matches (both parties confirmed) are PRESERVED
+    - Only unconfirmed matches are recalculated
+    - Confirmed groups/listings are excluded from matching pool
+    
+    Flow:
+    1. Get confirmed matches and exclude those groups/listings
+    2. Delete only UNCONFIRMED matches
+    3. Filter eligible groups and listings (excluding confirmed)
+    4. Build feasible pairs based on hard constraints
+    5. Score all pairs and build preference lists
+    6. Run Deferred Acceptance algorithm
+    7. Run LNS optimization
+    8. Save new matches to database
     
     Returns match results and diagnostics.
     """
@@ -159,6 +167,19 @@ async def run_matching(request: RunMatchingRequest):
         logger.info(f"Starting matching for city: {request.city}")
         
         supabase = get_admin_client()
+        
+        # 🔥 OPTION 3: Get confirmed matches to preserve
+        logger.info("Checking for confirmed matches to preserve...")
+        engine = MatchPersistenceEngine(supabase)
+        confirmed_matches, confirmed_group_ids, confirmed_listing_ids = await engine.get_confirmed_matches(request.city)
+        
+        if confirmed_matches:
+            logger.info(f"Preserving {len(confirmed_matches)} confirmed matches "
+                       f"({len(confirmed_group_ids)} groups, {len(confirmed_listing_ids)} listings)")
+        
+        # Delete only UNCONFIRMED matches before re-matching
+        deleted_count = await engine.delete_unconfirmed_matches(request.city)
+        logger.info(f"Deleted {deleted_count} unconfirmed matches")
         
         # Fetch all data from database
         logger.info("Fetching data from database...")
@@ -182,16 +203,50 @@ async def run_matching(request: RunMatchingRequest):
                 return obj
         
         # Parse with Pydantic for validation, then convert Decimals to floats
-        all_listings = [
+        all_listings_raw = [
             convert_decimals_to_float(ListingResponse(**listing).model_dump())
             for listing in listings_response.data
         ]
-        all_groups = [
+        all_groups_raw = [
             convert_decimals_to_float(RoommateGroupResponse(**group).model_dump())
             for group in groups_response.data
         ]
         
-        logger.info(f"✅ Validated and parsed {len(all_listings)} listings and {len(all_groups)} groups")
+        # 🔥 OPTION 3: Exclude confirmed groups and listings from matching pool
+        all_listings = [l for l in all_listings_raw if l['id'] not in confirmed_listing_ids]
+        all_groups = [g for g in all_groups_raw if g['id'] not in confirmed_group_ids]
+        
+        logger.info(f"✅ After excluding confirmed: {len(all_listings)} listings and {len(all_groups)} groups available for matching")
+        
+        # If all groups/listings are confirmed, return early with success
+        if not all_groups and not all_listings:
+            return RunMatchingResponse(
+                status="success",
+                message=f"All matches in {request.city} are already confirmed. No re-matching needed.",
+                diagnostics_id=None,
+                matches=[],
+                diagnostics=DiagnosticsResult(
+                    city=request.city,
+                    date_window_start=datetime.now().isoformat()[:10],
+                    date_window_end=datetime.now().isoformat()[:10],
+                    total_groups=len(confirmed_group_ids),
+                    total_listings=len(confirmed_listing_ids),
+                    feasible_pairs=0,
+                    matched_groups=len(confirmed_group_ids),
+                    matched_listings=len(confirmed_listing_ids),
+                    unmatched_groups=0,
+                    unmatched_listings=0,
+                    proposals_sent=0,
+                    proposals_rejected=0,
+                    iterations=0,
+                    avg_group_rank=0,
+                    avg_listing_rank=0,
+                    match_quality_score=100.0,
+                    is_stable=True,
+                    executed_at=datetime.now().isoformat()
+                ),
+                execution_time_seconds=0.0
+            )
         
         # Phase 1: Get eligible entities
         logger.info("Phase 1: Filtering eligible groups and listings...")
@@ -201,13 +256,13 @@ async def run_matching(request: RunMatchingRequest):
         if not eligible_listings:
             raise HTTPException(
                 status_code=404,
-                detail=f"No eligible listings found in {request.city}"
+                detail=f"No eligible listings found in {request.city} (excluding {len(confirmed_listing_ids)} confirmed)"
             )
         
         if not eligible_groups:
             raise HTTPException(
                 status_code=404,
-                detail=f"No eligible groups found in {request.city}"
+                detail=f"No eligible groups found in {request.city} (excluding {len(confirmed_group_ids)} confirmed)"
             )
         
         logger.info(f"Found {len(eligible_listings)} eligible listings, {len(eligible_groups)} eligible groups")
@@ -250,11 +305,13 @@ async def run_matching(request: RunMatchingRequest):
         
         # Phase 3: Build preference lists
         logger.info("Phase 3: Building preference lists...")
-        group_prefs, listing_prefs = build_preference_lists(
+        pref_result = build_preference_lists(
             feasible_pairs,
             date_window.groups,
             eligible_listings
         )
+        group_prefs = pref_result['group_preferences']
+        listing_prefs = pref_result['listing_preferences']
         
         # Create preference_lists structure
         preference_lists = {
@@ -269,7 +326,9 @@ async def run_matching(request: RunMatchingRequest):
             'date_window_end': date_window.end_date.isoformat(),
             'groups': list(preference_lists['group_preferences'].keys()),
             'listings': list(preference_lists['listing_preferences'].keys()),
-            'feasible_pairs': len(feasible_pairs)
+            'feasible_pairs': len(feasible_pairs),
+            'confirmed_groups_excluded': len(confirmed_group_ids),
+            'confirmed_listings_excluded': len(confirmed_listing_ids)
         }
         
         # Phase 4: Run Deferred Acceptance
@@ -306,12 +365,12 @@ async def run_matching(request: RunMatchingRequest):
         
         logger.info(f"LNS complete: {lns_stats['improvement_percentage']:.1f}% improvement in {lns_stats['execution_time_seconds']:.2f}s")
         
-        # Convert optimized matches back to Match objects
-        from app.services.stable_matching.persistence import Match as StableMatch
+        # Convert optimized matches back to MatchResult objects
+        from app.services.stable_matching.deferred_acceptance import MatchResult
         from datetime import datetime as dt
         
         optimized_matches = [
-            StableMatch(
+            MatchResult(
                 group_id=m['group_id'],
                 listing_id=m['listing_id'],
                 group_score=m['group_score'],
@@ -338,9 +397,11 @@ async def run_matching(request: RunMatchingRequest):
         execution_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Matching + LNS completed in {execution_time:.2f} seconds")
         
-        # Format response
+        # Format response with info about preserved matches
+        confirmed_msg = f" ({len(confirmed_matches)} confirmed matches preserved)" if confirmed_matches else ""
         response_message = (
-            f"Successfully matched {len(optimized_matches)} groups in {request.city} "
+            f"Successfully matched {len(optimized_matches)} groups in {request.city}"
+            f"{confirmed_msg} "
             f"(LNS improved quality by {lns_stats['improvement_percentage']:.1f}%)"
         )
         
@@ -349,7 +410,7 @@ async def run_matching(request: RunMatchingRequest):
             message=response_message,
             diagnostics_id=save_result.get('diagnostics_id'),
             matches=[
-                MatchResult(
+                MatchResultResponse(
                     group_id=m.group_id,
                     listing_id=m.listing_id,
                     group_score=m.group_score,

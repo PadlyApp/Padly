@@ -82,10 +82,10 @@ def check_hard_constraints(
     if group_city != listing_city:
         return False, f"city_mismatch_{group_city}_vs_{listing_city}"
     
-    # 2. State Match (case-insensitive)
+    # 2. State Match (case-insensitive) - only enforce if BOTH are specified
     group_state = (group.get('target_state_province') or '').strip().lower()
     listing_state = (listing.get('state_province') or '').strip().lower()
-    if group_state != listing_state:
+    if group_state and listing_state and group_state != listing_state:
         return False, f"state_mismatch_{group_state}_vs_{listing_state}"
     
     # 3. Budget Range
@@ -405,6 +405,7 @@ def calculate_listing_score(
     # 2. Security Deposit Score (30 points) - Prefer groups willing to pay higher deposits
     listing_deposit = listing.get('deposit_amount', 0)
     group_target_deposit = group.get('target_deposit_amount', 0)
+    deposit_ratio = 1.0  # Default ratio
     
     if listing_deposit and group_target_deposit:
         deposit_ratio = group_target_deposit / listing_deposit
@@ -421,6 +422,8 @@ def calculate_listing_score(
             score += 10
     elif not listing_deposit:  # Listing has no deposit requirement
         score += 20  # Neutral score
+    else:  # Group has no deposit target
+        score += 15  # Neutral-ish score
     
     # 3. Preference Match Score (30 points) - Groups that want what listing offers
     pref_score = 0.0
@@ -495,17 +498,24 @@ def rank_listings_for_group(
     for listing in feasible_listings:
         score = calculate_group_score(group, listing)
         if score > 0:  # Only include if score is positive
+            created_at = listing.get('created_at', '')
+            # Handle datetime objects
+            if hasattr(created_at, 'isoformat'):
+                created_at = created_at.isoformat()
             scored_listings.append({
                 'listing_id': listing['id'],
                 'score': score,
-                'created_at': listing.get('created_at', ''),
+                'created_at': created_at or '',
                 'price': listing.get('price_per_month', 0)
             })
     
     # Sort by: score (desc), created_at (desc), price (asc), id (alpha)
     scored_listings.sort(
-        key=lambda x: (-x['score'], -ord(x['created_at'][0]) if x['created_at'] else 0, x['price'], x['listing_id'])
+        key=lambda x: (-x['score'], x['created_at'] if x['created_at'] else '', x['price'], x['listing_id']),
+        reverse=False
     )
+    # Re-sort to get correct order (score desc, then created_at desc for same scores)
+    scored_listings.sort(key=lambda x: (-x['score'], -hash(x['created_at']) if x['created_at'] else 0, x['price']))
     
     # Assign ranks
     ranked_listings = []
@@ -536,15 +546,19 @@ def rank_groups_for_listing(
     for group in feasible_groups:
         score = calculate_listing_score(listing, group)
         if score > 0:  # Only include if score is positive
+            created_at = group.get('created_at', '')
+            # Handle datetime objects
+            if hasattr(created_at, 'isoformat'):
+                created_at = created_at.isoformat()
             scored_groups.append({
                 'group_id': group['id'],
                 'score': score,
-                'created_at': group.get('created_at', '')
+                'created_at': created_at or ''
             })
     
     # Sort by: score (desc), created_at (desc), id (alpha)
     scored_groups.sort(
-        key=lambda x: (-x['score'], -ord(x['created_at'][0]) if x['created_at'] else 0, x['group_id'])
+        key=lambda x: (-x['score'], -hash(x['created_at']) if x['created_at'] else 0, x['group_id'])
     )
     
     # Assign ranks
