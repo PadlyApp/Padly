@@ -53,7 +53,8 @@ import {
   IconVolume,
   IconSmokingNo,
   IconDog,
-  IconFriends
+  IconFriends,
+  IconInbox
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
@@ -61,12 +62,12 @@ import { Navigation } from '../../components/Navigation';
 export default function GroupDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { user, authState, getValidToken } = useAuth();
-  const token = authState?.accessToken;
+  const { user, getValidToken, authState } = useAuth();
   const groupId = params.id;
 
   const [group, setGroup] = useState(null);
   const [members, setMembers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -77,6 +78,9 @@ export default function GroupDetailPage() {
   const [compatibleUsers, setCompatibleUsers] = useState([]);
   const [loadingCompatible, setLoadingCompatible] = useState(false);
   const [invitingUserId, setInvitingUserId] = useState(null);
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [processingRequestId, setProcessingRequestId] = useState(null);
 
   useEffect(() => {
     if (groupId) {
@@ -84,15 +88,52 @@ export default function GroupDetailPage() {
     }
   }, [groupId]);
 
+  // Fetch current user info if not available from context
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      if (!currentUser && authState?.accessToken) {
+        try {
+          const response = await fetch('http://localhost:8000/api/auth/me', {
+            headers: {
+              'Authorization': `Bearer ${authState.accessToken}`
+            }
+          });
+          const data = await response.json();
+          if (response.ok && data.user) {
+            // Merge auth info with profile data
+            const profile = data.user.profile || {};
+            setCurrentUser({ 
+              ...profile, 
+              email: data.user.email, 
+              auth_id: data.user.id,
+              id: profile.id || data.user.id
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching current user:', error);
+        }
+      }
+    };
+    fetchCurrentUser();
+  }, [authState, currentUser]);
+
+  // Fetch join requests initially when group data is loaded (for badge count)
+  useEffect(() => {
+    if (group && (user || currentUser) && authState?.accessToken) {
+      fetchJoinRequests();
+    }
+  }, [group, user, currentUser, authState]);
+
   const fetchGroupData = async () => {
     setLoading(true);
     try {
+      const validToken = await getValidToken();
+      const headers = validToken ? { 'Authorization': `Bearer ${validToken}` } : {};
+      
       // Fetch group details with members
       const groupResponse = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}?include_members=true`,
-        {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        }
+        { headers }
       );
       const groupData = await groupResponse.json();
 
@@ -104,9 +145,7 @@ export default function GroupDetailPage() {
       // Fetch matches
       const matchesResponse = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/matches`,
-        {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        }
+        { headers }
       );
       const matchesData = await matchesResponse.json();
 
@@ -137,13 +176,14 @@ export default function GroupDetailPage() {
 
     setInviting(true);
     try {
+      const validToken = await getValidToken();
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/invite`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${validToken}`
           },
           body: JSON.stringify({ email: inviteEmail })
         }
@@ -211,13 +251,14 @@ export default function GroupDetailPage() {
   const handleInviteUser = async (userId, userEmail) => {
     setInvitingUserId(userId);
     try {
+      const validToken = await getValidToken();
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/invite`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${validToken}`
           },
           body: JSON.stringify({ email: userEmail })
         }
@@ -257,6 +298,123 @@ export default function GroupDetailPage() {
     }
   }, [inviteModalOpen, inviteTab]);
 
+  // Fetch join requests for group creators
+  const fetchJoinRequests = async () => {
+    setLoadingRequests(true);
+    try {
+      const validToken = await getValidToken();
+      if (!validToken) {
+        throw new Error('Please log in to view join requests');
+      }
+      const response = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/pending-requests`,
+        {
+          headers: { 'Authorization': `Bearer ${validToken}` }
+        }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        setJoinRequests(data.requests || []);
+      } else {
+        // Not an error if user is not creator - just no requests
+        if (response.status !== 403) {
+          throw new Error(data.detail || 'Failed to load join requests');
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching join requests:', error);
+      // Don't show error notification for 403 (not creator)
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  // Fetch join requests when viewing as creator
+  useEffect(() => {
+    if (group && user && activeTab === 'requests') {
+      fetchJoinRequests();
+    }
+  }, [group, user, activeTab]);
+
+  const handleAcceptRequest = async (userId, userName) => {
+    setProcessingRequestId(userId);
+    try {
+      const validToken = await getValidToken();
+      const response = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/accept-request/${userId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${validToken}`
+          }
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        notifications.show({
+          title: 'Request Accepted!',
+          message: `${userName || 'User'} is now a member of your group`,
+          color: 'green',
+          icon: <IconCheck />,
+        });
+        fetchJoinRequests();
+        fetchGroupData();
+      } else {
+        throw new Error(data.detail || 'Failed to accept request');
+      }
+    } catch (error) {
+      console.error('Error accepting request:', error);
+      notifications.show({
+        title: 'Error',
+        message: error.message || 'Failed to accept request',
+        color: 'red',
+      });
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleRejectRequest = async (userId, userName) => {
+    setProcessingRequestId(userId);
+    try {
+      const validToken = await getValidToken();
+      const response = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/reject-request/${userId}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${validToken}`
+          }
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.status === 'success') {
+        notifications.show({
+          title: 'Request Rejected',
+          message: `Join request from ${userName || 'user'} has been declined`,
+          color: 'orange',
+        });
+        fetchJoinRequests();
+      } else {
+        throw new Error(data.detail || 'Failed to reject request');
+      }
+    } catch (error) {
+      console.error('Error rejecting request:', error);
+      notifications.show({
+        title: 'Error',
+        message: error.message || 'Failed to reject request',
+        color: 'red',
+      });
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
   const handleLeaveGroup = async () => {
     const acceptedMembers = members.filter(m => m.status === 'accepted');
     const otherMembers = acceptedMembers.filter(m => m.user_email !== user?.email);
@@ -274,10 +432,6 @@ export default function GroupDetailPage() {
 
     try {
       const validToken = await getValidToken();
-      if (!validToken) {
-        throw new Error('Please log in to leave the group');
-      }
-      
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/leave`,
         {
@@ -314,12 +468,13 @@ export default function GroupDetailPage() {
     if (!confirm('Are you sure you want to delete this group? This action cannot be undone.')) return;
 
     try {
+      const validToken = await getValidToken();
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}`,
         {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${validToken}`
           }
         }
       );
@@ -350,12 +505,13 @@ export default function GroupDetailPage() {
     if (!confirm('Are you sure you want to remove this member?')) return;
 
     try {
+      const validToken = await getValidToken();
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/members/${memberId}`,
         {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${validToken}`
           }
         }
       );
@@ -409,9 +565,36 @@ export default function GroupDetailPage() {
     );
   }
 
-  const isCreator = user && (group.creator_user_id === user.id || members.some(m => m.user_email === user.email && m.is_creator));
+  // Use currentUser if user from context is null
+  const activeUser = user || currentUser;
+  
   // Compare by email since user.id is auth_id but members have app's user_id
-  const isMember = user && members.some(m => m.user_email === user.email && m.status === 'accepted');
+  // Check if current user is creator by finding the creator member
+  const creatorMember = members.find(m => m.is_creator);
+  const isCreator = activeUser && creatorMember && creatorMember.user_email === activeUser.email;
+  
+  // Check membership by email or user_id (auth_id)
+  const isMember = activeUser && members.some(m => 
+    (m.user_email === activeUser.email || m.user_id === activeUser.id) && m.status === 'accepted'
+  );
+  
+  // Debug logging
+  console.log('User check:', { 
+    fullUser: activeUser,
+    userEmail: activeUser?.email, 
+    userId: activeUser?.id,
+    members: members.map(m => ({ email: m.user_email, id: m.user_id, status: m.status })),
+    isMember,
+    isCreator 
+  });
+  
+  // Only count accepted members for display
+  const acceptedMembers = members.filter(m => m.status === 'accepted');
+  const acceptedMemberCount = acceptedMembers.length;
+  
+  // Check if group is full (only if we have a valid target size)
+  const isGroupFull = group.target_group_size > 0 && acceptedMemberCount >= group.target_group_size;
+
   const statusColor = {
     active: 'blue',
     matched: 'green',
@@ -462,6 +645,18 @@ export default function GroupDetailPage() {
             </Menu>
           )}
         </Group>
+
+        {/* Full Group Banner */}
+        {isGroupFull && (
+          <Alert 
+            icon={<IconAlertCircle size={18} />} 
+            title="This group is full" 
+            color="red"
+            variant="filled"
+          >
+            This group has reached its maximum capacity of {group.target_group_size} members and is no longer accepting new members.
+          </Alert>
+        )}
 
         {/* Group Header */}
         <Card withBorder p="xl">
@@ -538,7 +733,7 @@ export default function GroupDetailPage() {
                   <div>
                     <Text size="xs" c="dimmed">Group Size</Text>
                     <Text fw={500}>
-                      {members.length}/{group.target_group_size || '?'}
+                      {acceptedMemberCount}/{group.target_group_size || '?'}
                     </Text>
                   </div>
                 </Group>
@@ -556,6 +751,21 @@ export default function GroupDetailPage() {
             <Tabs.Tab value="matches" leftSection={<IconHome size={16} />}>
               Matches ({matches.length})
             </Tabs.Tab>
+            {isCreator && (
+              <Tabs.Tab 
+                value="requests" 
+                leftSection={<IconUserPlus size={16} />}
+                rightSection={
+                  joinRequests.length > 0 ? (
+                    <Badge size="xs" color="red" variant="filled" circle>
+                      {joinRequests.length}
+                    </Badge>
+                  ) : null
+                }
+              >
+                Join Requests
+              </Tabs.Tab>
+            )}
           </Tabs.List>
 
           <Tabs.Panel value="overview" pt="xl">
@@ -563,18 +773,18 @@ export default function GroupDetailPage() {
               <Stack gap="md">
                 <Group justify="space-between">
                   <Title order={3}>Group Members</Title>
-                  <Badge size="lg">{members.length} members</Badge>
+                  <Badge size="lg">{acceptedMemberCount} members</Badge>
                 </Group>
 
                 <Divider />
 
-                {members.length === 0 ? (
+                {acceptedMemberCount === 0 ? (
                   <Text c="dimmed" ta="center" py="xl">
                     No members yet
                   </Text>
                 ) : (
                   <Stack gap="sm">
-                    {members.map((member) => (
+                    {acceptedMembers.map((member) => (
                       <Paper key={member.user_id} p="md" withBorder>
                         <Group justify="space-between">
                           <Group>
@@ -701,6 +911,169 @@ export default function GroupDetailPage() {
               </Stack>
             )}
           </Tabs.Panel>
+
+          {/* Join Requests Tab (Creator Only) */}
+          {isCreator && (
+            <Tabs.Panel value="requests" pt="xl">
+              <Card withBorder>
+                <Stack gap="md">
+                  <Group justify="space-between">
+                    <div>
+                      <Title order={3}>Join Requests</Title>
+                      <Text size="sm" c="dimmed">
+                        People who want to join your group
+                      </Text>
+                    </div>
+                    <Button 
+                      variant="light" 
+                      size="sm"
+                      leftSection={<IconSearch size={16} />}
+                      onClick={fetchJoinRequests}
+                      loading={loadingRequests}
+                    >
+                      Refresh
+                    </Button>
+                  </Group>
+
+                  <Divider />
+
+                  {loadingRequests ? (
+                    <Stack gap="sm">
+                      {[1, 2, 3].map(i => (
+                        <Skeleton key={i} height={100} radius="md" />
+                      ))}
+                    </Stack>
+                  ) : joinRequests.length === 0 ? (
+                    <Stack align="center" py="xl">
+                      <ThemeIcon size="xl" variant="light" color="gray">
+                        <IconInbox size={24} />
+                      </ThemeIcon>
+                      <Text c="dimmed" ta="center">
+                        No pending join requests
+                      </Text>
+                      <Text size="sm" c="dimmed" ta="center">
+                        When someone requests to join your group, they'll appear here.
+                      </Text>
+                    </Stack>
+                  ) : (
+                    <Stack gap="md">
+                      {joinRequests.map((request) => (
+                        <Paper key={request.user_id} p="md" withBorder>
+                          <Stack gap="md">
+                            <Group justify="space-between" wrap="nowrap">
+                              <Group wrap="nowrap">
+                                <Avatar size="lg" radius="xl" color="blue">
+                                  {request.full_name?.charAt(0) || request.email?.charAt(0) || 'U'}
+                                </Avatar>
+                                <div>
+                                  <Group gap="xs">
+                                    <Text fw={600}>{request.full_name || 'Unknown User'}</Text>
+                                    {request.verification_status === 'admin_verified' && (
+                                      <Badge size="sm" color="green" variant="light">Verified</Badge>
+                                    )}
+                                    {request.verification_status === 'email_verified' && (
+                                      <Badge size="sm" color="blue" variant="light">Email Verified</Badge>
+                                    )}
+                                  </Group>
+                                  <Text size="sm" c="dimmed">{request.email}</Text>
+                                  {request.company_name && (
+                                    <Text size="xs" c="dimmed">Works at {request.company_name}</Text>
+                                  )}
+                                  {request.school_name && (
+                                    <Text size="xs" c="dimmed">Studies at {request.school_name}</Text>
+                                  )}
+                                </div>
+                              </Group>
+
+                              <Badge 
+                                size="lg"
+                                color={
+                                  request.compatibility?.score >= 80 ? 'green' : 
+                                  request.compatibility?.score >= 60 ? 'teal' :
+                                  request.compatibility?.score >= 40 ? 'yellow' : 'orange'
+                                }
+                                variant="light"
+                              >
+                                {Math.round(request.compatibility?.score || 0)}% Match
+                              </Badge>
+                            </Group>
+
+                            {/* User Preferences */}
+                            {request.user_preferences && (
+                              <Paper p="sm" withBorder bg="gray.0">
+                                <Group gap="lg" wrap="wrap">
+                                  {request.user_preferences.target_city && (
+                                    <Group gap="xs">
+                                      <IconMapPin size={14} />
+                                      <Text size="sm">{request.user_preferences.target_city}</Text>
+                                    </Group>
+                                  )}
+                                  {(request.user_preferences.budget_min || request.user_preferences.budget_max) && (
+                                    <Group gap="xs">
+                                      <IconCurrencyDollar size={14} />
+                                      <Text size="sm">
+                                        ${request.user_preferences.budget_min || 0} - ${request.user_preferences.budget_max || '∞'}
+                                      </Text>
+                                    </Group>
+                                  )}
+                                  {request.user_preferences.move_in_date && (
+                                    <Group gap="xs">
+                                      <IconCalendar size={14} />
+                                      <Text size="sm">
+                                        {new Date(request.user_preferences.move_in_date).toLocaleDateString()}
+                                      </Text>
+                                    </Group>
+                                  )}
+                                </Group>
+                              </Paper>
+                            )}
+
+                            {/* Compatibility Reasons */}
+                            {request.compatibility?.reasons && request.compatibility.reasons.length > 0 && (
+                              <Group gap="xs" wrap="wrap">
+                                {request.compatibility.reasons.slice(0, 4).map((reason, idx) => (
+                                  <Badge key={idx} size="sm" variant="outline" color="gray">
+                                    {reason}
+                                  </Badge>
+                                ))}
+                              </Group>
+                            )}
+
+                            <Text size="xs" c="dimmed">
+                              Requested {request.requested_at ? new Date(request.requested_at).toLocaleDateString() : 'recently'}
+                            </Text>
+
+                            {/* Action Buttons */}
+                            <Group gap="sm">
+                              <Button
+                                leftSection={<IconCheck size={16} />}
+                                color="green"
+                                flex={1}
+                                onClick={() => handleAcceptRequest(request.user_id, request.full_name)}
+                                loading={processingRequestId === request.user_id}
+                              >
+                                Accept
+                              </Button>
+                              <Button
+                                leftSection={<IconX size={16} />}
+                                variant="outline"
+                                color="red"
+                                flex={1}
+                                onClick={() => handleRejectRequest(request.user_id, request.full_name)}
+                                loading={processingRequestId === request.user_id}
+                              >
+                                Decline
+                              </Button>
+                            </Group>
+                          </Stack>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  )}
+                </Stack>
+              </Card>
+            </Tabs.Panel>
+          )}
         </Tabs>
       </Stack>
 
