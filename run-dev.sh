@@ -55,6 +55,12 @@ trap cleanup SIGINT
 # Start backend in background
 echo -e "${BLUE}[BACKEND]${NC} Starting FastAPI server on http://localhost:8000..."
 cd "$PROJECT_ROOT/backend"
+
+# Load environment variables from .env file
+if [ -f "app/.env" ]; then
+  export $(cat app/.env | grep -v '^#' | xargs)
+fi
+
 uvicorn app.main:app --reload &
 BACKEND_PID=$!
 

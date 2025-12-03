@@ -8,10 +8,10 @@ Tables:
 - match_diagnostics: Stores aggregate metrics per matching round
 
 Author: Padly Matching Team
-Version: 0.5.0
+Version: 0.6.0
 """
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from datetime import datetime
 import logging
 from supabase import Client
@@ -31,6 +31,7 @@ class MatchPersistenceEngine:
     - Handle batch insertions
     - Manage transactions
     - Expire old matches
+    - Preserve confirmed matches (Option 3: Hybrid Re-matching)
     """
     
     def __init__(self, supabase_client: Client):
@@ -42,6 +43,114 @@ class MatchPersistenceEngine:
         """
         self.supabase = supabase_client
         logger.info("MatchPersistenceEngine initialized")
+    
+    async def get_confirmed_matches(self, city: Optional[str] = None) -> Tuple[List[Dict], Set[str], Set[str]]:
+        """
+        Get matches that have been confirmed by BOTH group and listing owner.
+        
+        A match is considered "confirmed" when both group_confirmed_at AND 
+        listing_confirmed_at are NOT NULL.
+        
+        Args:
+            city: Optional city filter
+        
+        Returns:
+            Tuple of:
+            - List of confirmed match records
+            - Set of confirmed group IDs (to exclude from matching)
+            - Set of confirmed listing IDs (to exclude from matching)
+        """
+        try:
+            # Get confirmed matches (both confirmations present)
+            query = self.supabase.table('stable_matches')\
+                .select('*')\
+                .eq('status', 'active')\
+                .not_.is_('group_confirmed_at', 'null')\
+                .not_.is_('listing_confirmed_at', 'null')
+            
+            response = query.execute()
+            all_confirmed = response.data if response.data else []
+            
+            # If city filter, we need to get the group's city
+            if city and all_confirmed:
+                # Get group IDs and filter by city
+                group_ids = [m['group_id'] for m in all_confirmed]
+                groups_response = self.supabase.table('roommate_groups')\
+                    .select('id, target_city')\
+                    .in_('id', group_ids)\
+                    .eq('target_city', city)\
+                    .execute()
+                
+                city_group_ids = {g['id'] for g in (groups_response.data or [])}
+                confirmed_matches = [m for m in all_confirmed if m['group_id'] in city_group_ids]
+            else:
+                confirmed_matches = all_confirmed
+            
+            confirmed_group_ids = {m['group_id'] for m in confirmed_matches}
+            confirmed_listing_ids = {m['listing_id'] for m in confirmed_matches}
+            
+            logger.info(f"Found {len(confirmed_matches)} confirmed matches "
+                       f"({len(confirmed_group_ids)} groups, {len(confirmed_listing_ids)} listings)")
+            
+            return confirmed_matches, confirmed_group_ids, confirmed_listing_ids
+            
+        except Exception as e:
+            logger.error(f"Failed to get confirmed matches: {str(e)}")
+            return [], set(), set()
+    
+    async def delete_unconfirmed_matches(self, city: str) -> int:
+        """
+        Delete only UNCONFIRMED matches for a city before re-matching.
+        
+        Confirmed matches (where both group_confirmed_at AND listing_confirmed_at 
+        are NOT NULL) are preserved.
+        
+        Args:
+            city: City to clear unconfirmed matches for
+        
+        Returns:
+            Number of matches deleted
+        """
+        try:
+            # Get group IDs in this city first
+            groups_response = self.supabase.table('roommate_groups')\
+                .select('id')\
+                .eq('target_city', city)\
+                .execute()
+            
+            if not groups_response.data:
+                return 0
+            
+            group_ids = [g['id'] for g in groups_response.data]
+            
+            # Delete all unconfirmed matches for these groups in a single query
+            # Unconfirmed = group_confirmed_at IS NULL OR listing_confirmed_at IS NULL
+            # We delete where group_confirmed_at IS NULL (covers partial and no confirmation)
+            response = self.supabase.table('stable_matches')\
+                .delete()\
+                .in_('group_id', group_ids)\
+                .eq('status', 'active')\
+                .is_('group_confirmed_at', 'null')\
+                .execute()
+            
+            deleted_count = len(response.data) if response.data else 0
+            
+            # Also delete where listing didn't confirm (but group did)
+            response2 = self.supabase.table('stable_matches')\
+                .delete()\
+                .in_('group_id', group_ids)\
+                .eq('status', 'active')\
+                .is_('listing_confirmed_at', 'null')\
+                .execute()
+            
+            deleted_count += len(response2.data) if response2.data else 0
+            
+            logger.info(f"Deleted {deleted_count} unconfirmed matches in {city}")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Failed to delete unconfirmed matches: {str(e)}")
+            return 0
     
     async def save_matches(
         self,
