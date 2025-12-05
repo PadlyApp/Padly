@@ -282,7 +282,3 @@ Padly/
 - Check Supabase project is active
 - Ensure database schema is applied
 
----
-
-**Built with ❤️ for students and professionals finding their next home**
-
