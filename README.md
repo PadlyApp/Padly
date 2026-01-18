@@ -4,21 +4,21 @@ A trusted platform for students, interns, and early-career professionals to find
 
 ---
 
-## 🎯 Project Vision
+## Project Vision
 
 The mission of Padly is to eliminate the stress and fragmentation of finding housing during pivotal career and life transitions. We are building a centralized, secure, and user-centric platform that connects a community of peers, landlords, and subletters, enabling them to transact with confidence and ease.
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 🔐 Authentication & Profiles
+### Authentication & Profiles
 - Secure sign-up and login with Supabase Auth (JWT-based)
 - User profiles with professional context (company, school, role)
 - Email verification system for trust building
 - Account management with editable profile information
 
-### 👥 Roommate Groups
+### Roommate Groups
 - Create and manage roommate groups
 - Request to join existing groups
 - Group owner approval system for join requests
@@ -27,7 +27,7 @@ The mission of Padly is to eliminate the stress and fragmentation of finding hou
 - Group recommendations based on compatibility scoring
 - Automatic ownership transfer when creators leave
 
-### 🏠 Housing Listings & Matching
+### Housing Listings & Matching
 - Browse and search housing listings
 - Intelligent matching using Gale-Shapley Stable Matching algorithm
 - Large Neighborhood Search (LNS) optimization for improved match quality
@@ -35,13 +35,13 @@ The mission of Padly is to eliminate the stress and fragmentation of finding hou
 - Soft preferences scoring (bathrooms, furnished, utilities, deposit, house rules)
 - Real-time match updates when preferences change
 
-### ⚙️ Preferences System
+### Preferences System
 - Hard constraints (non-negotiable requirements)
 - Soft preferences (nice-to-haves with scoring)
 - Lifestyle compatibility matching
 - Automatic stable matching trigger on preference updates
 
-### 📊 Matching Algorithms
+### Matching Algorithms
 - **Gale-Shapley Deferred Acceptance**: Guarantees stable matches with no blocking pairs
 - **Large Neighborhood Search (LNS)**: Optimizes match quality through iterative destroy-repair cycles
 - **Greedy Heuristics**: Regret-greedy and randomized greedy for repair operations
@@ -49,7 +49,7 @@ The mission of Padly is to eliminate the stress and fragmentation of finding hou
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend
 - **Next.js 15** - React framework with server-side rendering
@@ -76,7 +76,7 @@ The mission of Padly is to eliminate the stress and fragmentation of finding hou
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 Before you begin, ensure you have the following installed:
 
@@ -87,7 +87,7 @@ Before you begin, ensure you have the following installed:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone the Repository
 
@@ -142,7 +142,7 @@ npm install
 
 ---
 
-## 🏃 Running the Application
+## Running the Application
 
 ### Option 1: Run Both Services Together (Recommended)
 
@@ -183,7 +183,7 @@ npm run dev
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Padly/
@@ -225,7 +225,7 @@ Padly/
 
 ---
 
-## 🔌 API Endpoints
+## API Endpoints
 
 ### Authentication
 - `POST /api/auth/signup` - Register new user
@@ -256,7 +256,7 @@ Padly/
 - `GET /api/preferences/{user_id}` - Get user preferences
 - `PUT /api/preferences/{user_id}` - Update preferences
 
-## 🔗 Links
+## Links
 
 - [Supabase Documentation](https://supabase.com/docs)
 - [FastAPI Documentation](https://fastapi.tiangolo.com)
@@ -265,7 +265,7 @@ Padly/
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Backend won't start
 - Ensure virtual environment is activated
