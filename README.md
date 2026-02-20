@@ -183,6 +183,56 @@ npm run dev
 
 ---
 
+## Neural Net Branch: Two-Tower Baseline
+
+This branch includes a TensorFlow baseline you can use to choose loss functions and define model inputs.
+
+### Baseline Location
+
+- **Model script**: `backend/app/ai/two_tower_baseline.py`
+- **Architecture explanation**: `TWO_TOWER_EXPLAINER.md`
+- **Integration roadmap**: `ML_ROADMAP.md`
+
+### Run the Baseline
+
+```bash
+cd backend
+source venv/bin/activate
+pip install -r requirements.txt
+python -m app.ai.two_tower_baseline --epochs 5 --loss binary_crossentropy
+```
+
+### Change Loss Function
+
+```bash
+python -m app.ai.two_tower_baseline --loss softmax
+```
+
+Supported loss values:
+- `binary_crossentropy`
+- `softmax`
+
+### Use Your Own Input Data
+
+Provide an `.npz` file with:
+- `user_features`: shape `(N, user_dim)`
+- `item_features`: shape `(N, item_dim)`
+- `labels`: shape `(N,)` with 0/1 labels
+
+Run:
+
+```bash
+python -m app.ai.two_tower_baseline --npz-path path/to/train_data.npz --loss binary_crossentropy
+```
+
+### Output
+
+By default, the trained model is saved to:
+
+- `backend/app/ai/artifacts/two_tower_baseline.keras`
+
+---
+
 ## Project Structure
 
 ```
@@ -281,4 +331,3 @@ Padly/
 - Verify Supabase credentials in `.env`
 - Check Supabase project is active
 - Ensure database schema is applied
-
