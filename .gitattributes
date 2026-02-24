@@ -1,0 +1,2 @@
+backend/app/ai/dataset/*.csv filter=lfs diff=lfs merge=lfs -text
+backend/app/ai/dataset/housing_train.csv filter=lfs diff=lfs merge=lfs -text
