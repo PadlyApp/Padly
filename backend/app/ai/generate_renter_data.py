@@ -340,8 +340,25 @@ def _build_pairs(
 
 # ── feature encoding for the neural-net towers ──────────────────────────
 
+# Column names for the 6 feedback features from categorize_and_map.py
+FEEDBACK_COLS = [
+    "cat_0_Budget_Compact",
+    "cat_1_Spacious_Family",
+    "cat_2_Pet-Friendly",
+    "cat_3_Premium_Luxury",
+    "cat_4_Urban_Convenience",
+    "cat_5_Accessible_Modern",
+]
+
+NUM_LISTING_CATEGORIES = 6  # must match categorize_and_map.NUM_CATEGORIES
+
+
 def encode_renter_features(renters: pd.DataFrame) -> np.ndarray:
-    """Numeric matrix ready for the user tower."""
+    """Numeric matrix ready for the user tower.
+
+    If the DataFrame contains feedback columns (cat_0_* … cat_5_*) they are
+    appended as normalised features.  Otherwise encoding is unchanged.
+    """
     numeric_cols = [
         "age", "household_size", "income", "credit_score",
         "budget_min", "budget_max",
@@ -360,11 +377,24 @@ def encode_renter_features(renters: pd.DataFrame) -> np.ndarray:
         mu, sigma = mat[:, i].mean(), mat[:, i].std() + 1e-8
         mat[:, i] = (mat[:, i] - mu) / sigma
 
+    # ── append feedback array (normalised to [0,1]) if present ────────
+    has_feedback = all(c in renters.columns for c in FEEDBACK_COLS)
+    if has_feedback:
+        fb = renters[FEEDBACK_COLS].values.astype(np.float32)
+        row_sums = fb.sum(axis=1, keepdims=True)
+        row_sums = np.where(row_sums == 0, 1.0, row_sums)  # avoid /0
+        fb_norm = fb / row_sums  # each row sums to 1
+        mat = np.hstack([mat, fb_norm])
+
     return mat
 
 
 def encode_listing_features(listings: pd.DataFrame) -> np.ndarray:
-    """Numeric matrix ready for the item tower."""
+    """Numeric matrix ready for the item tower.
+
+    If the DataFrame contains a ``category_id`` column (from
+    categorize_and_map), it is one-hot encoded and appended.
+    """
     type_dummies = pd.get_dummies(listings["type"].fillna(""), prefix="type")
     laundry_dummies = pd.get_dummies(
         listings["laundry_options"].fillna(""), prefix="laundry"
@@ -385,13 +415,21 @@ def encode_listing_features(listings: pd.DataFrame) -> np.ndarray:
         mu, sigma = numeric[:, i].mean(), numeric[:, i].std() + 1e-8
         numeric[:, i] = (numeric[:, i] - mu) / sigma
 
-    cats = np.hstack([
+    parts = [
         numeric,
         type_dummies.values.astype(np.float32),
         laundry_dummies.values.astype(np.float32),
         parking_dummies.values.astype(np.float32),
-    ])
-    return cats
+    ]
+
+    # ── append listing category one-hot if present ────────────────────
+    if "category_id" in listings.columns:
+        cat_ids = listings["category_id"].fillna(0).astype(int).values
+        one_hot = np.zeros((len(listings), NUM_LISTING_CATEGORIES), dtype=np.float32)
+        one_hot[np.arange(len(listings)), cat_ids] = 1.0
+        parts.append(one_hot)
+
+    return np.hstack(parts)
 
 
 # ── main ─────────────────────────────────────────────────────────────────
@@ -411,6 +449,13 @@ def parse_args() -> argparse.Namespace:
                    default=Path("app/ai/dataset/renters_synthetic.csv"))
     p.add_argument("--out-npz", type=Path,
                    default=Path("app/ai/dataset/train_pairs.npz"))
+    # ── optional feedback / category files from categorize_and_map ────
+    p.add_argument("--feedback-csv", type=Path, default=None,
+                   help="user_feedback.csv from categorize_and_map.py "
+                        "(adds 6 feedback features to user tower)")
+    p.add_argument("--listing-cats-csv", type=Path, default=None,
+                   help="listing_categories.csv from categorize_and_map.py "
+                        "(adds category one-hot to item tower)")
     return p.parse_args()
 
 
@@ -437,6 +482,19 @@ def main() -> None:
     renters.to_csv(args.out_renters_csv, index=False)
     print(f"  saved renter profiles -> {args.out_renters_csv}")
 
+    # ── load optional feedback & listing-category data ────────────────
+    feedback_df: pd.DataFrame | None = None
+    if args.feedback_csv and args.feedback_csv.exists():
+        feedback_df = pd.read_csv(args.feedback_csv)
+        print(f"  loaded feedback array -> {args.feedback_csv}  "
+              f"({len(feedback_df):,} rows)")
+
+    listing_cats_df: pd.DataFrame | None = None
+    if args.listing_cats_csv and args.listing_cats_csv.exists():
+        listing_cats_df = pd.read_csv(args.listing_cats_csv)
+        print(f"  loaded listing categories -> {args.listing_cats_csv}  "
+              f"({len(listing_cats_df):,} rows)")
+
     print(f"Building pairs ({args.pairs_per_renter} per renter) ...")
     renter_rows, listing_rows, labels = _build_pairs(
         renters, listings, args.pairs_per_renter, rng, args.pos_threshold,
@@ -444,6 +502,27 @@ def main() -> None:
     print(f"  total pairs: {len(labels):,}  "
           f"(pos={labels.sum():,.0f}  neg={len(labels) - labels.sum():,.0f}  "
           f"ratio={labels.mean():.2%})")
+
+    # ── join feedback array onto renter pair rows ─────────────────────
+    if feedback_df is not None:
+        renter_rows = renter_rows.merge(
+            feedback_df[["renter_id"] + FEEDBACK_COLS],
+            on="renter_id", how="left",
+        )
+        # fill any renters without feedback with zeros
+        renter_rows[FEEDBACK_COLS] = renter_rows[FEEDBACK_COLS].fillna(0)
+        print(f"  joined feedback array -> renter pair rows "
+              f"(+{len(FEEDBACK_COLS)} columns)")
+
+    # ── join listing category onto listing pair rows ──────────────────
+    if listing_cats_df is not None:
+        listing_rows = listing_rows.merge(
+            listing_cats_df[["id", "category_id"]],
+            on="id", how="left",
+        )
+        listing_rows["category_id"] = listing_rows["category_id"].fillna(0).astype(int)
+        print(f"  joined listing categories -> listing pair rows "
+              f"(+1 column)")
 
     print("Encoding features ...")
     user_features = encode_renter_features(renter_rows)
