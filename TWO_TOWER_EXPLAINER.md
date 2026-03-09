@@ -1,18 +1,18 @@
 # The Two-Tower Model — Explained
 
-**Purpose:** This document explains how the Two-Tower Neural Network works in Padly, what it outputs, and how it determines the order of listings a user sees when swiping.
+**Purpose:** This document explains how the Two-Tower Neural Network works in Padly, what it outputs, and how it determines the order of listings a user sees.
+
+**Last updated:** 2026-03-09 — reflects the actual trained model, not a planned future state.
 
 ---
 
 ## 1. What Problem Does It Solve?
 
-When a user opens the Discover page, they see a **stack of listings to swipe through**. The question is:
+When a user opens the app, they see a list of listings. The question is:
 
 > **In what order should we show those listings?**
 
-A bad order means the user swipes left (pass) 20 times before finding something they like. They get frustrated and leave.
-
-A good order means the first 5 listings are all things they'd love. They engage more, swipe right, and the matching algorithm gets better data.
+A bad order means the user scrolls past 20 listings before finding something they like. A good order means the first few listings are things they'd love.
 
 **The Two-Tower model decides this order.**
 
@@ -24,12 +24,10 @@ Because there are **two completely different types of things** being compared:
 
 | Tower | What It Represents | Input Data |
 |---|---|---|
-| **User Tower** | A person looking for housing | Budget, bio, lifestyle, school, past swipes |
-| **Item Tower** | A listing being offered | Price, location, photos, description, amenities |
+| **User Tower** | A person looking for housing | Budget, lifestyle, preferences, past liked listings |
+| **Item Tower** | A listing being offered | Price, location, bedrooms, amenities |
 
-You can't feed a user profile and a listing into the **same** neural network — they have completely different structures and dimensions. So you build two separate networks that each compress their input into the **same-sized output** (a 64-dimensional vector). Then you compare those outputs.
-
-Think of it like this:
+Each tower compresses its input into a **64-dimensional vector** (an embedding). Then we compare those embeddings.
 
 > **User Tower** translates "who Sarah is" into a point in 64-dimensional space.
 > **Item Tower** translates "what this listing is" into a point in the same 64-dimensional space.
@@ -37,33 +35,38 @@ Think of it like this:
 
 ---
 
-## 3. Architecture Diagram
+## 3. Architecture — What's Actually Built
 
 ```
                 USER TOWER                              ITEM TOWER
         ┌──────────────────────┐              ┌──────────────────────┐
         │                      │              │                      │
         │  Raw User Features   │              │  Raw Listing Features│
-        │  (~480 numbers)      │              │  (~923 numbers)      │
+        │  (50 numbers)        │              │  (38 numbers)        │
         │                      │              │                      │
-        │  • Budget: $800-1200 │              │  • Price: $2,100/mo  │
-        │  • City: Toronto     │              │  • Bedrooms: 2       │
-        │  • Bio: [384-dim]    │              │  • Desc: [384-dim]   │
-        │  • Lifestyle: quiet  │              │  • Photos: [512-dim] │
-        │  • Past swipes: [64] │              │  • Furnished: yes    │
-        │                      │              │  • Amenities: gym,AC │
+        │  • Budget min/max    │              │  • Price             │
+        │  • Desired beds/baths│              │  • Beds / Baths      │
+        │  • Has cats/dogs     │              │  • Sqft              │
+        │  • Wants furnished   │              │  • Furnished         │
+        │  • Location (lat/lon)│              │  • Lat / Long        │
+        │  • Household size    │              │  • Cats/Dogs allowed │
+        │  • Avg liked price   │              │  • Smoking allowed   │
+        │  • Avg liked beds    │              │  • Wheelchair access │
+        │  • Avg liked sqft    │              │  • EV charging       │
+        │  • Liked type dist.  │              │  • Property type     │
+        │  • Type preferences  │              │  • Laundry / Parking │
+        │                      │              │                      │
         │         │            │              │         │            │
         │  ┌──────┴──────┐     │              │  ┌──────┴──────┐     │
-        │  │   480 → 256  │     │              │  │   923 → 256  │     │
+        │  │   50 → 256   │     │              │  │   38 → 256   │     │
         │  │   ReLU       │     │              │  │   ReLU       │     │
         │  │   Dropout 0.2│     │              │  │   Dropout 0.2│     │
         │  ├──────────────┤     │              │  ├──────────────┤     │
         │  │   256 → 128  │     │              │  │   256 → 128  │     │
         │  │   ReLU       │     │              │  │   ReLU       │     │
-        │  │   Dropout 0.1│     │              │  │   Dropout 0.1│     │
         │  ├──────────────┤     │              │  ├──────────────┤     │
         │  │   128 → 64   │     │              │  │   128 → 64   │     │
-        │  │   LayerNorm  │     │              │  │   LayerNorm  │     │
+        │  │   L2 Norm    │     │              │  │   L2 Norm    │     │
         │  └──────┬──────┘     │              │  └──────┬──────┘     │
         │         │            │              │         │            │
         │    u = [64 dims]     │              │    v = [64 dims]     │
@@ -75,7 +78,7 @@ Think of it like this:
                                   ▼   ▼
                             ┌────────────┐
                             │ Dot Product │
-                            │ u · v       │
+                            │  u · v      │
                             └──────┬─────┘
                                    │
                                    ▼
@@ -86,108 +89,182 @@ Think of it like this:
                                    │
                                    ▼
                               ┌─────────┐
-                              │  0.83   │  ← "83% chance Sarah likes this listing"
+                              │  0.83   │  ← "83% match"
                               └─────────┘
 ```
 
+### Parameter count
+
+Each Dense layer has `(input × output) + output` parameters (weights + biases):
+
+**User Tower (input = 50):**
+| Layer | Calculation | Params |
+|---|---|---|
+| Dense(256) | (50 × 256) + 256 | 13,056 |
+| Dense(128) | (256 × 128) + 128 | 32,896 |
+| Dense(64) | (128 × 64) + 64 | 8,256 |
+| **Total** | | **54,208** |
+
+**Item Tower (input = 38):**
+| Layer | Calculation | Params |
+|---|---|---|
+| Dense(256) | (38 × 256) + 256 | 9,984 |
+| Dense(128) | (256 × 128) + 128 | 32,896 |
+| Dense(64) | (128 × 64) + 64 | 8,256 |
+| **Total** | | **51,136** |
+
+**Output layer:** `Dense(1, use_bias=False)` → 1 param
+
+**Grand total: 105,345 parameters (411.50 KB)**
+
+The two towers differ only in their first layer because user input is 50-dimensional vs listing input is 38-dimensional. Everything after that is identical.
+
 ---
 
-## 4. Full Numerical Example
+## 4. What Goes Into Each Tower
+
+### User Tower (50 features)
+
+**Profile features (33):**
+```
+age, household_size, income, credit_score,
+budget_min, budget_max,
+desired_beds, desired_baths, desired_sqft_min,
+has_cats, has_dogs, is_smoker,
+needs_wheelchair, has_ev, wants_furnished,
+pref_lat, pref_lon, max_distance_km,
+laundry_pref, parking_pref, move_urgency,
+type_pref_apartment, type_pref_house, type_pref_condo ... (12 type flags)
+```
+
+**Averaged liked listing features (17) — behavioral signal:**
+```
+liked_mean_price       ← average price of listings this user liked
+liked_mean_beds        ← average beds
+liked_mean_sqfeet      ← average sqft
+liked_type_apartment   ← what fraction of liked listings were apartments
+liked_type_house       ← what fraction were houses
+... (one per listing type)
+```
+
+The liked listing features are the key behavioral signal. Instead of guessing what a user wants from their profile alone, we look at what they actually interacted with. A user who keeps liking $900 studio apartments tells the model something their stated budget alone might not.
+
+**Why no text embeddings or photo embeddings?**
+Those features (bio text, listing descriptions, photos) are planned for a future version once the app has real users. The current model is trained on structured data only.
+
+### Item Tower (38 features)
+
+**Numeric (12):**
+```
+price, sqfeet, beds, baths,
+cats_allowed, dogs_allowed, smoking_allowed,
+wheelchair_access, electric_vehicle_charge, comes_furnished,
+lat, long
+```
+
+**One-hot encoded categoricals (26):**
+```
+type_*      → 12 columns (apartment, house, condo, etc.)
+laundry_*   → 6 columns (w/d in unit, hookups, etc.)
+parking_*   → 8 columns (garage, street, etc.)
+```
+
+**No category labels.** The 6 listing categories (Budget Compact, Spacious Family, etc.) were used only to simulate realistic training data. The model itself never sees them — it learns preference patterns from raw features on its own.
+
+---
+
+## 5. Full Numerical Example
 
 ### Meet Sarah
 
-Sarah is a UTM grad student looking for housing. Here are her features:
+Sarah is a UTM grad student looking for housing:
 
 ```
-Budget:              $800 – $1,200/person
-Target city:         Toronto
-Move-in:             May 2026 → encoded as sin(5/12 × 2π) = 0.87, cos = 0.50
+Budget:              $800 – $1,200/month
+Desired beds:        2
 Wants furnished:     Yes → 1
-Cleanliness:         Very clean → one-hot [0, 0, 0, 1]
-Noise level:         Quiet → one-hot [0, 0, 1]
-Smoking:             No smoking → one-hot [0, 0, 1]
-Pets:                No pets → one-hot [0, 1]
-Guests:              Occasionally → one-hot [0, 1, 0]
-Bio:                 "Grad student at UTM, quiet, keeps to myself..."
-                     → Sentence transformer turns this into a 384-dimensional vector
-Past swipe history:  Average embedding of her 15 liked listings → 64-dim vector
-Verification:        Email verified → one-hot [0, 1, 0]
-Role:                Renter → one-hot [1, 0, 0]
+Has cats:            Yes → 1
+Location:            UTM area (lat: 43.549, lon: -79.663)
+Max distance:        20 km
+Household size:      2
 ```
 
-**Concatenated into a single input vector:**
-
+**Liked listing averages (from her past interactions):**
 ```
-[800, 1200, 0.87, 0.50, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0,
- 0.12, -0.34, 0.56, ...(384 bio numbers)...,
- 0.08, 0.22, -0.15, ...(64 swipe history numbers)...,
- 0, 1, 0, 1, 0, 0]
-
-Total: ~480 numbers
+liked_mean_price:    $1,050    ← she tends to like ~$1,050 listings
+liked_mean_beds:     2.0       ← consistently likes 2-bed places
+liked_mean_sqfeet:   820       ← prefers ~820 sqft
+liked_type_apartment: 0.80     ← 80% of her liked listings are apartments
+liked_type_house:    0.20      ← 20% are houses
 ```
 
-### Meet the Listings
-
-There are 8 active listings in Toronto that passed Sarah's hard constraints. We need to score all 8.
-
-Let's trace **Listing #3** in detail:
-
+**Concatenated into a 50-dimensional input vector** (after z-scoring continuous features):
 ```
-Listing #3: "Modern 2BR near UTM campus"
-─────────────────────────────────────────
-Price:              $2,100/mo ($1,050/person)
-Bedrooms:           2
-Bathrooms:          1
-Area:               780 sqft → normalized to 0.52
-Furnished:          Yes → 1
-Utilities included: No → 0
-Deposit:            $500 → normalized to 0.25
-Property type:      Entire place → one-hot [1, 0, 0]
-Lease type:         Fixed term → one-hot [1, 0]
-Description:        "Beautiful modern apartment, 5 min walk from UTM..."
-                    → Sentence transformer → 384-dimensional vector
-Photos:             3 photos of clean, well-lit rooms
-                    → CLIP model → averaged into a 512-dimensional vector
-Amenities:          {gym: true, ac: true, laundry: false, ...}
-                    → multi-hot [1, 1, 0, 0, 1, ...] (15 amenity flags)
+[-0.4, 2.0, -0.3, 0.7, -0.8, 0.2, 2.0, 0.5, 0.6,
+  1,   1,   0,   0,   0,   1,  43.5, -79.7,  20.0,
+  0,   0,   1,   1,   0,   0,   0,   0,   0,   0,
+  0,   0,   0,   0,   0,
+  -0.3, 0.8, -0.1, 0.80, 0.20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+Total: 50 numbers
 ```
 
-**Concatenated into a single input vector:**
+### The Listing
 
 ```
-[1050, 2, 1, 0.52, 1, 0, 0.25, 1, 0, 0, 1, 0,
- 0.45, -0.11, 0.78, ...(384 description numbers)...,
- 0.33, 0.67, -0.22, ...(512 photo numbers)...,
- 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0]
+"Modern 2BR near UTM campus"
+─────────────────────────────
+Price:          $2,100/mo ($1,050/person)
+Beds:           2
+Baths:          1
+Sqft:           780
+Furnished:      Yes → 1
+Cats allowed:   Yes → 1
+Dogs allowed:   No  → 0
+Smoking:        No  → 0
+Wheelchair:     No  → 0
+EV charging:    No  → 0
+Lat/Long:       43.551, -79.661
+Type:           apartment → type_apartment = 1, all others = 0
+Laundry:        w/d in unit → laundry_w/d in unit = 1, all others = 0
+Parking:        off-street → parking_off-street parking = 1, others = 0
+```
 
-Total: ~923 numbers
+**Concatenated into a 38-dimensional input vector** (after z-scoring price, sqft, beds, baths):
+```
+[-0.1, 0.4, 0.3, -0.2, 1, 0, 0, 0, 0, 1, 43.5, -79.7,
+  1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   ← type one-hot
+  0, 0, 0, 0, 0, 1,                       ← laundry one-hot
+  0, 0, 0, 0, 0, 1, 0, 0]                 ← parking one-hot
+
+Total: 38 numbers
 ```
 
 ### What Happens Inside the Towers
 
-**User Tower** processes Sarah's 480 numbers:
+**User Tower** processes Sarah's 50 numbers:
 
 ```
-Layer 1:  480 inputs × 256 weights + bias → 256 neurons → ReLU → Dropout
-Layer 2:  256 inputs × 128 weights + bias → 128 neurons → ReLU → Dropout
-Layer 3:  128 inputs × 64 weights + bias  → 64 neurons  → LayerNorm
+Layer 1:  50 inputs  → 256 neurons → ReLU → Dropout(0.2)
+Layer 2:  256 inputs → 128 neurons → ReLU
+Layer 3:  128 inputs → 64 neurons  → L2 Normalize
 
-Output: u = [0.82, -0.31, 0.47, 0.15, -0.63, ..., 0.38]  (64 numbers)
+Output: u = [0.82, -0.31, 0.47, 0.15, -0.63, ..., 0.38]  (64 numbers, unit length)
 ```
 
-**Item Tower** processes Listing #3's 923 numbers:
+**Item Tower** processes the listing's 38 numbers:
 
 ```
-Layer 1:  923 inputs × 256 weights + bias → 256 neurons → ReLU → Dropout
-Layer 2:  256 inputs × 128 weights + bias → 128 neurons → ReLU → Dropout
-Layer 3:  128 inputs × 64 weights + bias  → 64 neurons  → LayerNorm
+Layer 1:  38 inputs  → 256 neurons → ReLU → Dropout(0.2)
+Layer 2:  256 inputs → 128 neurons → ReLU
+Layer 3:  128 inputs → 64 neurons  → L2 Normalize
 
-Output: v = [0.74, -0.22, 0.59, -0.08, -0.55, ..., 0.29]  (64 numbers)
+Output: v = [0.74, -0.22, 0.59, -0.08, -0.55, ..., 0.29]  (64 numbers, unit length)
 ```
 
 ### The Dot Product
 
-Now we multiply each pair of corresponding numbers and sum them:
+Both embeddings are L2-normalized (unit length), so the dot product is equivalent to cosine similarity — it measures how closely the two vectors are aligned:
 
 ```
 u = [0.82, -0.31,  0.47,  0.15, -0.63, ..., 0.38]
@@ -195,196 +272,126 @@ v = [0.74, -0.22,  0.59, -0.08, -0.55, ..., 0.29]
      ────   ────   ────   ────   ────        ────
     0.607 + 0.068 + 0.277 - 0.012 + 0.347 + ... + 0.110
 
-dot(u, v) = 1.89  (raw score — sum of all 64 products)
+dot(u, v) = 1.89
 ```
 
-### Sigmoid Activation
+### Sigmoid → Match Score
 
-The raw dot product could be any number. We squash it into a probability:
+The dot product is passed through a single learned weight (Dense(1, use_bias=False)) then sigmoid:
 
 ```
-σ(1.89) = 1 / (1 + e^(-1.89))
-        = 1 / (1 + 0.151)
-        = 1 / 1.151
-        = 0.869
+σ(1.89 × w) = 1 / (1 + e^(-1.89 × w))
+             ≈ 0.87
 ```
 
 ### ✅ The Output
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Model output for Sarah × Listing #3:  0.869    │
+│  Model output for Sarah × this listing:  0.87   │
 │                                                  │
-│  Interpretation:                                 │
-│  "There is an 86.9% probability that Sarah       │
-│   would swipe right on this listing."            │
+│  Displayed to frontend as: "87% match"           │
 └─────────────────────────────────────────────────┘
 ```
 
-**That single number (0.869) is the only output.** The model doesn't say *why* — it doesn't say "because it's near campus" or "because it's furnished." It just learned from thousands of past swipes that users like Sarah tend to swipe right on listings like this.
+**That single number is the only output.** The model doesn't say *why* — it learned from training data that users with Sarah's profile tend to match with listings like this.
 
 ---
 
-## 5. Scoring All 8 Listings
+## 6. Loss Function — Binary Cross-Entropy
 
-We repeat this process for every listing that passed hard constraints. Sarah's 64-dim embedding stays the same — we only recompute the Item Tower for each listing:
+The model is trained with **Binary Cross-Entropy (BCE)**:
+
+```
+Loss = -[y × log(ŷ) + (1 - y) × log(1 - ŷ)]
+
+Where:
+  y  = true label (1 if good match, 0 if not)
+  ŷ  = model's predicted probability
+```
+
+BCE was chosen over softmax because:
+- The problem is binary (match or no match) — BCE is the natural fit
+- The output is a direct probability between 0 and 1, ready to display without post-processing
+- Softmax with 2 classes is redundant for a binary problem
+
+### Training results (10 epochs, 300k pairs)
+
+| Epoch | Train Acc | Val Acc |
+|---|---|---|
+| 1 | 73.19% | 81.02% |
+| 5 | 86.87% | 88.58% |
+| 10 | 90.05% | **91.47%** |
+
+Val accuracy consistently higher than train accuracy — no overfitting.
+
+---
+
+## 7. Scoring All Listings
+
+Sarah's user embedding is computed **once**. Then we score every listing that passed hard constraints by running each through the item tower and taking the dot product:
 
 ```
 Sarah's Embedding (computed once):
 u = [0.82, -0.31, 0.47, 0.15, -0.63, ..., 0.38]
 
-Listing #1: "Basement 1BR on Dundas"
-    v₁ = [...64 numbers...]
-    dot(u, v₁) → σ → 0.34
-
-Listing #2: "Shared room near Erindale"
-    v₂ = [...64 numbers...]
-    dot(u, v₂) → σ → 0.52
-
-Listing #3: "Modern 2BR near UTM campus"      ← our example
-    v₃ = [...64 numbers...]
-    dot(u, v₃) → σ → 0.87
-
-Listing #4: "Renovated studio, downtown"
-    v₄ = [...64 numbers...]
-    dot(u, v₄) → σ → 0.71
-
-Listing #5: "Cozy 2BR, 15 min from UTM"
-    v₅ = [...64 numbers...]
-    dot(u, v₅) → σ → 0.79
-
-Listing #6: "Large 3BR, Mississauga"
-    v₆ = [...64 numbers...]
-    dot(u, v₆) → σ → 0.45
-
-Listing #7: "Bright 2BR, en-suite laundry"
-    v₇ = [...64 numbers...]
-    dot(u, v₇) → σ → 0.83
-
-Listing #8: "Furnished 1BR near Square One"
-    v₈ = [...64 numbers...]
-    dot(u, v₈) → σ → 0.61
+Listing #1: "Basement 1BR on Dundas"        → 0.34
+Listing #2: "Shared room near Erindale"     → 0.52
+Listing #3: "Modern 2BR near UTM campus"    → 0.87  ← our example
+Listing #4: "Renovated studio, downtown"    → 0.71
+Listing #5: "Cozy 2BR, 15 min from UTM"    → 0.79
+Listing #6: "Large 3BR, Mississauga"        → 0.45
+Listing #7: "Bright 2BR, en-suite laundry" → 0.83
+Listing #8: "Furnished 1BR near Square One" → 0.61
 ```
+
+Sort by score descending → this is the order shown to Sarah.
 
 ---
 
-## 6. Building the Swipe Stack
+## 8. The API Endpoint
 
-Now we have 8 scores. We also have the **rule-based scores** from the existing `scoring.py`. We blend them:
-
-```
-                                AI       Rule    Blend
-Listing                        Score    Score    (60/40)     Rank
-──────────────────────────────────────────────────────────────────
-#3  Modern 2BR near UTM        0.87     82/100   84.8        1st  ⬆ TOP
-#7  Bright 2BR, en-suite       0.83     78/100   81.0        2nd
-#5  Cozy 2BR, 15 min           0.79     75/100   77.4        3rd
-#4  Renovated studio           0.71     68/100   69.8        4th
-#8  Furnished 1BR Sq One       0.61     72/100   65.4        5th
-#2  Shared room Erindale       0.52     65/100   57.2        6th
-#6  Large 3BR Mississauga      0.45     58/100   50.2        7th
-#1  Basement 1BR Dundas        0.34     55/100   42.4        8th  ⬇ BOTTOM
-```
-
-**Blend formula (for 100+ swipes, ai_weight = 0.6):**
-```
-Blend Score = (0.6 × AI × 100) + (0.4 × Rule Score)
-
-Example for Listing #3:
-= (0.6 × 0.87 × 100) + (0.4 × 82)
-= 52.2 + 32.8
-= 84.8  ← this is out of 100
-```
-
----
-
-## 7. What Sarah's Swipe Stack Looks Like
-
-When Sarah opens the `/discover` page, she sees this stack of cards — **the top card is the listing the system is most confident she'll like**:
+The model is exposed to the frontend via a single endpoint:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                                                        │  │
-│  │              📸 [Beautiful listing photo]               │  │
-│  │                                                        │  │
-│  │  Modern 2BR near UTM campus               Score: 84.8 │  │
-│  │  $2,100/mo · 2 bed · 1 bath · Furnished               │  │
-│  │  📍 5 min walk from UTM                                │  │
-│  │                                                        │  │
-│  │         ✕ PASS          ⭐ SAVE          ❤️ LIKE        │  │
-│  │                                                        │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌─ NEXT IN STACK ────────────────────────────────────────┐  │
-│  │  Bright 2BR, en-suite laundry              Score: 81.0 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Cozy 2BR, 15 min from UTM                 Score: 77.4 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Renovated studio, downtown                Score: 69.8 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Furnished 1BR near Square One             Score: 65.4 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Shared room near Erindale                 Score: 57.2 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Large 3BR, Mississauga                    Score: 50.2 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Basement 1BR on Dundas                    Score: 42.4 │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│                    END OF LISTINGS                            │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+POST /api/recommendations
 ```
 
-**Note:** The user never sees the scores — they just see the cards in order. The scores are internal.
-
----
-
-## 8. What Happens When Sarah Swipes
-
-Every swipe gets logged and feeds back into the model:
-
-```
-Sarah swipes RIGHT on "Modern 2BR near UTM" (Listing #3)
-    → POST /api/interactions
-    → { user_id: sarah, listing_id: 3, action: "like" }
-    → Stored in user_interactions table
-
-Sarah swipes LEFT on "Bright 2BR, en-suite" (Listing #7)
-    → POST /api/interactions
-    → { user_id: sarah, listing_id: 7, action: "pass" }
-    → Stored in user_interactions table
+**Request (frontend sends):**
+```json
+{
+  "budget_max": 1200,
+  "desired_beds": 2,
+  "has_cats": 1,
+  "pref_lat": 43.549,
+  "pref_lon": -79.663,
+  "top_n": 20
+}
 ```
 
-Over time, these swipes become **training data** for the model:
-
+**Response (frontend gets back):**
+```json
+{
+  "status": "success",
+  "count": 8,
+  "recommendations": [
+    {
+      "listing_id": "abc123",
+      "match_score": 0.87,
+      "match_percent": "87%",
+      "title": "Modern 2BR near UTM campus",
+      "price_per_month": 2100,
+      "number_of_bedrooms": 2,
+      "city": "Mississauga"
+    },
+    ...
+  ]
+}
 ```
-TRAINING DATA (grows with every swipe)
-─────────────────────────────────────────────
-| user_id | listing_id | label (like=1, pass=0) |
-|---------|------------|------------------------|
-| sarah   | 3          | 1                      |
-| sarah   | 7          | 0                      |
-| sarah   | 5          | 1                      |
-| mike    | 3          | 1                      |
-| mike    | 1          | 0                      |
-| ...     | ...        | ...                    |
-```
 
-When the model is retrained (nightly or every 100 swipes), it learns:
-- "Sarah likes listings close to UTM" → adjusts User Tower weights
-- "Sarah doesn't care about en-suite laundry" → reduces that feature's influence for her
-- "Listings near UTM with modern photos get swiped right by most users" → adjusts Item Tower weights
+The `match_percent` field is ready to render directly. The backend handles all filtering, encoding, and scoring — frontend just sends preferences and displays results.
 
-**The swipe stack gets smarter every time Sarah uses the app.**
+Interactive docs available at `/docs` on the backend server.
 
 ---
 
@@ -393,82 +400,61 @@ When the model is retrained (nightly or every 100 swipes), it learns:
 ```
 STEP 1: HARD CONSTRAINT FILTER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-All 200 listings in Toronto
+All active listings in DB
         │
         ▼
-    feasible_pairs.py checks:
-    City? Budget? Date? Bedrooms? ...
+    recommender.py checks:
+    Budget? Cats? Dogs? Smoking? Wheelchair?
         │
         ▼
-    8 listings survive (192 eliminated)
+    Eligible listings survive
 
 
 STEP 2: AI SCORING (Two-Tower Model)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Sarah's features ──► User Tower ──► u = [64 dims]
                                              │
-    For each of 8 listings:                  │
+    For each eligible listing:               │
         Listing features ──► Item Tower ──► v = [64 dims]
                                              │
                                       dot(u, v) → sigmoid
                                              │
-                                        AI Score (0-1)
+                                     Match Score (0-1)
 
 
-STEP 3: RULE-BASED SCORING (Existing System)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    For each of 8 listings:
-        scoring.py checks:
-        Bathrooms? Furnished? Utilities? Deposit? House Rules?
-                                             │
-                                        Rule Score (0-100)
-
-
-STEP 4: BLEND
-━━━━━━━━━━━━━
-    Final Score = (ai_weight × AI Score × 100) + ((1 - ai_weight) × Rule Score)
-
-    ai_weight depends on how many swipes Sarah has:
-        < 20 swipes:   0.0 (pure rules)
-        20-50 swipes:  0.3
-        50-100 swipes: 0.5
-        100+ swipes:   0.7
-
-
-STEP 5: RANK → SWIPE STACK
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Sort 8 listings by Final Score (highest first)
+STEP 3: RANK → RETURN
+━━━━━━━━━━━━━━━━━━━━━
+    Sort listings by match score (highest first)
         │
         ▼
-    This becomes the card stack on /discover
-    User swipes through top to bottom
+    Return top N with match_score + match_percent
 
 
-STEP 6: SWIPE → TRAINING DATA → RETRAIN
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Each swipe is logged in user_interactions
+STEP 4: SWIPE → FUTURE TRAINING DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Each save/like is logged
         │
         ▼
-    Nightly: retrain model with new swipe data
+    When enough real data accumulates → fine-tune model
         │
         ▼
-    Tomorrow's swipe stack is even more personalized
+    Recommendations get more personalized over time
 ```
 
 ---
 
-## 10. Key Takeaways for the Professor
+## 10. Key Takeaways
 
-1. **The model outputs a single float (0-1)** representing the probability a user would swipe right on a listing.
+1. **The model outputs a single float (0–1)** representing match probability, displayed as "X% match" in the UI.
 
-2. **It does NOT replace the existing system.** Hard constraints still filter first. The AI score is blended with the rule-based score using an adaptive weight.
+2. **The two towers are separate networks** because users and listings have different feature structures, but both map into the same 64-dimensional embedding space.
 
-3. **The two towers are separate neural networks** because users and listings have fundamentally different feature structures, but they map into the same 64-dimensional embedding space.
+3. **The dot product measures alignment** — if a user's embedding and a listing's embedding point in the same direction (cosine similarity ≈ 1), it's a strong match.
 
-4. **The dot product measures alignment** in that shared space — if a user's embedding and a listing's embedding point in the same direction, the model predicts a match.
+4. **The liked listing averages are the key behavioral signal.** Rather than just using profile data, the model also knows what listings a user has actually interacted with.
 
-5. **The swipe stack is simply the feasible listings sorted by blended score.** The highest-scored listing appears first.
+5. **Categorization is not a model feature.** The 6 listing categories (Budget Compact, Spacious Family, etc.) were only used to generate realistic synthetic training data. The model learns preference patterns from raw features on its own.
 
-6. **The system bootstraps from zero.** New users get pure rule-based ranking. As they swipe, the AI gradually takes over, personalizing the order based on learned behavior.
+6. **Cold start for new users:** A new user with no interaction history gets zeros for the liked listing features. The model falls back to their profile features only. The fix is an onboarding swipe session (10-15 listings at signup) to seed the behavioral signal.
 
-7. **The Gale-Shapley algorithm is completely unaffected.** The AI only changes the preference list ordering — the stable matching guarantees are preserved.
+7. **The model is currently trained on synthetic data.** It's a solid baseline, but quality improves significantly once real user interactions replace the synthetic training pairs.
