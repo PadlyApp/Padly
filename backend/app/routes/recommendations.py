@@ -1,0 +1,157 @@
+"""
+Recommendations route
+
+POST /api/recommendations
+Returns a ranked list of listings with match scores for a given user.
+Frontend just sends user preferences, gets back sorted listings with scores.
+"""
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
+
+from app.ai.recommender import score_listings
+
+router = APIRouter(prefix="/api", tags=["recommendations"])
+
+
+# ── request / response models ──────────────────────────────────────────────
+
+class UserPreferences(BaseModel):
+    """
+    User preferences for recommendation scoring.
+    All fields are optional — send whatever you have.
+    The more fields provided, the better the recommendations.
+    """
+    # Budget
+    budget_min: Optional[float] = None
+    budget_max: Optional[float] = None
+
+    # Housing preferences
+    desired_beds: Optional[float] = None
+    desired_baths: Optional[float] = None
+    desired_sqft_min: Optional[float] = None
+    wants_furnished: Optional[int] = None  # 1 = yes, 0 = no
+
+    # Location
+    pref_lat: Optional[float] = None
+    pref_lon: Optional[float] = None
+    max_distance_km: Optional[float] = None
+
+    # Hard constraints
+    has_cats: Optional[int] = None         # 1 = has cats
+    has_dogs: Optional[int] = None         # 1 = has dogs
+    is_smoker: Optional[int] = None        # 1 = smoker
+    needs_wheelchair: Optional[int] = None # 1 = needs access
+
+    # Demographics (improves accuracy but not required)
+    age: Optional[float] = None
+    household_size: Optional[float] = None
+    income: Optional[float] = None
+    has_ev: Optional[int] = None           # 1 = has EV
+
+    # Liked listing averages (from user's interaction history)
+    # If not provided, model falls back to profile features only
+    liked_mean_price: Optional[float] = None
+    liked_mean_beds: Optional[float] = None
+    liked_mean_sqfeet: Optional[float] = None
+
+    # How many results to return (default 20, max 100)
+    top_n: Optional[int] = 20
+
+
+class RecommendedListing(BaseModel):
+    """A single recommended listing with its match score."""
+    listing_id: str
+    match_score: float          # 0.0 to 1.0 — show as "X% match" in UI
+    match_percent: str          # e.g. "94%" — ready to display directly
+    title: Optional[str] = None
+    price_per_month: Optional[float] = None
+    number_of_bedrooms: Optional[int] = None
+    number_of_bathrooms: Optional[float] = None
+    area_sqft: Optional[int] = None
+    furnished: Optional[bool] = None
+    city: Optional[str] = None
+    property_type: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    available_from: Optional[str] = None
+    amenities: Optional[Dict[str, Any]] = None
+
+
+class RecommendationsResponse(BaseModel):
+    status: str
+    count: int
+    recommendations: List[RecommendedListing]
+
+
+# ── endpoint ───────────────────────────────────────────────────────────────
+
+@router.post("/recommendations", response_model=RecommendationsResponse)
+async def get_recommendations(preferences: UserPreferences):
+    """
+    Get ranked listing recommendations for a user.
+
+    Send the user's preferences and get back a list of listings sorted
+    by compatibility score (highest first).
+
+    The match_score is a number from 0 to 1.
+    The match_percent field is ready to display directly (e.g. "94%").
+
+    Example request:
+    {
+        "budget_max": 1500,
+        "desired_beds": 2,
+        "has_cats": 1,
+        "pref_lat": 43.65,
+        "pref_lon": -79.38,
+        "top_n": 20
+    }
+    """
+    try:
+        from app.services.supabase_client import SupabaseHTTPClient
+        client = SupabaseHTTPClient()
+        listings = await client.select(
+            table="listings",
+            filters={"status": "eq.active"},
+            limit=500,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch listings: {str(e)}")
+
+    if not listings:
+        return RecommendationsResponse(status="success", count=0, recommendations=[])
+
+    user = preferences.model_dump(exclude={"top_n"})
+    top_n = min(preferences.top_n or 20, 100)
+
+    try:
+        scored = score_listings(user, listings, top_n=top_n)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scoring failed: {str(e)}")
+
+    recommendations = []
+    for item in scored:
+        recommendations.append(RecommendedListing(
+            listing_id=str(item.get("id", "")),
+            match_score=item["match_score"],
+            match_percent=f"{round(item['match_score'] * 100)}%",
+            title=item.get("title"),
+            price_per_month=float(item["price_per_month"]) if item.get("price_per_month") else None,
+            number_of_bedrooms=item.get("number_of_bedrooms"),
+            number_of_bathrooms=float(item["number_of_bathrooms"]) if item.get("number_of_bathrooms") else None,
+            area_sqft=item.get("area_sqft"),
+            furnished=item.get("furnished"),
+            city=item.get("city"),
+            property_type=item.get("property_type"),
+            latitude=float(item["latitude"]) if item.get("latitude") else None,
+            longitude=float(item["longitude"]) if item.get("longitude") else None,
+            available_from=str(item["available_from"]) if item.get("available_from") else None,
+            amenities=item.get("amenities"),
+        ))
+
+    return RecommendationsResponse(
+        status="success",
+        count=len(recommendations),
+        recommendations=recommendations,
+    )
