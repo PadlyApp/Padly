@@ -1,13 +1,14 @@
 """
-Padly Two-Tower recommender -- softmax baseline.
+Padly Two-Tower recommender.
 
 Each tower maps its raw features into a shared embedding space.
-The dot product of the two embeddings becomes a 2-class logit
-[no-match, match] and is trained with softmax (sparse categorical
-cross-entropy).
+The dot product of the two embeddings is used to produce a match score,
+trained with either softmax (sparse categorical cross-entropy) or
+binary cross-entropy depending on the --loss argument.
 
 Run from backend/:
   python -m app.ai.two_tower_baseline
+  python -m app.ai.two_tower_baseline --loss bce
   python -m app.ai.two_tower_baseline --epochs 15 --embedding-dim 128
 """
 
@@ -33,8 +34,14 @@ def build_tower(input_dim: int, embedding_dim: int, dropout: float, name: str) -
     return keras.Model(inp, x, name=f"{name}_tower")
 
 
-def build_model(user_dim: int, item_dim: int, embedding_dim: int, dropout: float) -> keras.Model:
-    """Two towers + dot-product scoring with 2-class softmax output."""
+def build_model(
+    user_dim: int, item_dim: int, embedding_dim: int, dropout: float, loss: str
+) -> keras.Model:
+    """Two towers + dot-product scoring.
+
+    loss="softmax": outputs 2-class logits [no-match, match]
+    loss="bce":     outputs a single sigmoid probability (match score)
+    """
     user_input = keras.Input(shape=(user_dim,), name="user_features")
     item_input = keras.Input(shape=(item_dim,), name="item_features")
 
@@ -47,13 +54,16 @@ def build_model(user_dim: int, item_dim: int, embedding_dim: int, dropout: float
     # dot product -> scalar similarity per sample
     dot = layers.Dot(axes=1, name="dot")([user_vec, item_vec])
 
-    # 2-class logits: column 0 = "no match", column 1 = "match"
-    # A single learned bias-free projection from 1-D dot to 2-D logits
-    logits = layers.Dense(2, use_bias=False, name="logits")(dot)
+    if loss == "bce":
+        # single sigmoid output: probability of match
+        output = layers.Dense(1, use_bias=False, activation="sigmoid", name="match_prob")(dot)
+    else:
+        # 2-class logits: column 0 = "no match", column 1 = "match"
+        output = layers.Dense(2, use_bias=False, name="logits")(dot)
 
     return keras.Model(
         inputs={"user_features": user_input, "item_features": item_input},
-        outputs=logits,
+        outputs=output,
         name="padly_two_tower",
     )
 
@@ -83,6 +93,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output-model", type=Path,
                    default=Path("app/ai/artifacts/two_tower_baseline.keras"))
+    p.add_argument("--loss", type=str, default="bce", choices=["softmax", "bce"],
+                   help="Loss function: softmax (sparse categorical) or bce (binary cross-entropy)")
     return p.parse_args()
 
 
@@ -105,14 +117,24 @@ def main() -> None:
     train_y = labels[:split]
     val_y   = labels[split:]
 
-    model = build_model(user_dim, item_dim, args.embedding_dim, args.dropout)
+    model = build_model(user_dim, item_dim, args.embedding_dim, args.dropout, args.loss)
     model.summary()
 
-    model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=args.lr),
-        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-        metrics=[keras.metrics.SparseCategoricalAccuracy(name="acc")],
-    )
+    if args.loss == "bce":
+        labels = labels.astype(np.float32)
+        train_y = labels[:split]
+        val_y   = labels[split:]
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=args.lr),
+            loss=keras.losses.BinaryCrossentropy(),
+            metrics=[keras.metrics.BinaryAccuracy(name="acc")],
+        )
+    else:
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=args.lr),
+            loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+            metrics=[keras.metrics.SparseCategoricalAccuracy(name="acc")],
+        )
 
     model.fit(
         train_x, train_y,
