@@ -32,12 +32,15 @@ def _load():
     if _model is not None:
         return
 
+    print(f"[recommender] loading model from {_MODEL_PATH}")
     import tensorflow as tf  # imported here so the rest of the app doesn't need TF
 
-    _model = tf.keras.models.load_model(_MODEL_PATH)
+    _model = tf.keras.models.load_model(_MODEL_PATH, safe_mode=False)
+    print(f"[recommender] model loaded, input shapes: {[i.shape for i in _model.inputs]}")
 
     with open(_META_PATH) as f:
         _meta = json.load(f)
+    print(f"[recommender] meta loaded: user_dim={_meta['user_dim']} item_dim={_meta['item_dim']}")
 
 
 # ── feature encoding ───────────────────────────────────────────────────────
@@ -217,11 +220,18 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
     user_vecs = np.repeat(user_vec, len(eligible), axis=0)          # (N, user_dim)
 
     # Run model inference
-    scores = _model.predict(
+    raw = _model.predict(
         {"user_features": user_vecs, "item_features": item_vecs},
         batch_size=512,
         verbose=0,
-    ).flatten()  # BCE model outputs shape (N, 1) → flatten to (N,)
+    )
+    # Handle both output shapes:
+    #   (N, 2) — 2-class softmax: column 1 is the match probability
+    #   (N, 1) or (N,) — single sigmoid output
+    if raw.ndim == 2 and raw.shape[1] >= 2:
+        scores = raw[:, 1]
+    else:
+        scores = raw.reshape(-1)
 
     # Attach scores and sort
     results = []
