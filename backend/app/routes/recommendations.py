@@ -117,6 +117,7 @@ async def get_recommendations(preferences: UserPreferences):
             limit=500,
         )
     except Exception as e:
+        print(f"[recommendations] listings fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch listings: {str(e)}")
 
     if not listings:
@@ -128,6 +129,7 @@ async def get_recommendations(preferences: UserPreferences):
     try:
         scored = score_listings(user, listings, top_n=top_n)
     except Exception as e:
+        print(f"[recommendations] scoring error: {e}")
         raise HTTPException(status_code=500, detail=f"Scoring failed: {str(e)}")
 
     recommendations = []
