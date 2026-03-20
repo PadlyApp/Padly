@@ -9,9 +9,9 @@ export class AuthService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email,
-        password,
-        full_name: fullName,
+      email,
+      password,
+      full_name: fullName,
       }),
     });
 
@@ -100,4 +100,3 @@ export class AuthService {
     return response.json();
   }
 }
-

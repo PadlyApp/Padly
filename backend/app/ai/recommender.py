@@ -8,6 +8,7 @@ Designed to be called from the API route — no ML knowledge needed outside this
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -23,24 +24,36 @@ _META_PATH  = _AI_DIR / "dataset" / "feature_meta.json"
 
 _model = None
 _meta: Optional[Dict] = None
+_model_disabled = False
 
 
 def _load():
     """Load model and feature metadata once, cache for all subsequent calls."""
-    global _model, _meta
+    global _model, _meta, _model_disabled
 
-    if _model is not None:
+    if _model is not None or _model_disabled:
         return
 
-    print(f"[recommender] loading model from {_MODEL_PATH}")
-    import tensorflow as tf  # imported here so the rest of the app doesn't need TF
+    try:
+        print(f"[recommender] loading model from {_MODEL_PATH}")
+        import tensorflow as tf  # imported here so the rest of the app doesn't need TF
 
-    _model = tf.keras.models.load_model(_MODEL_PATH, safe_mode=False)
-    print(f"[recommender] model loaded, input shapes: {[i.shape for i in _model.inputs]}")
+        # compile=False avoids requiring training-only objects at inference time.
+        _model = tf.keras.models.load_model(_MODEL_PATH, safe_mode=False, compile=False)
+        print(f"[recommender] model loaded, input shapes: {[i.shape for i in _model.inputs]}")
+    except Exception as e:
+        # Degrade gracefully when model/runtime versions are incompatible.
+        _model = None
+        _model_disabled = True
+        print(f"[recommender] model unavailable, using heuristic fallback: {e}")
 
-    with open(_META_PATH) as f:
-        _meta = json.load(f)
-    print(f"[recommender] meta loaded: user_dim={_meta['user_dim']} item_dim={_meta['item_dim']}")
+    try:
+        with open(_META_PATH) as f:
+            _meta = json.load(f)
+        print(f"[recommender] meta loaded: user_dim={_meta['user_dim']} item_dim={_meta['item_dim']}")
+    except Exception as e:
+        _meta = None
+        print(f"[recommender] metadata unavailable, using heuristic fallback: {e}")
 
 
 # ── feature encoding ───────────────────────────────────────────────────────
@@ -181,6 +194,122 @@ def _passes_hard_constraints(user: Dict, listing: Dict) -> bool:
     return True
 
 
+# ── fallback scoring ────────────────────────────────────────────────────────
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Great-circle distance in kilometers.
+    """
+    r = 6371.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return r * c
+
+
+def _relative_closeness(value: float, target: float, tolerance: float) -> float:
+    if tolerance <= 0:
+        return 0.5
+    return _clamp01(1.0 - abs(value - target) / tolerance)
+
+
+def _heuristic_match_score(user: Dict, listing: Dict) -> float:
+    """
+    Lightweight deterministic fallback score used when ML model is unavailable.
+    """
+    components: List[float] = []
+    weights: List[float] = []
+    amenities = listing.get("amenities") or {}
+
+    # Budget proximity
+    price = _safe_float(listing.get("price_per_month"))
+    budget_min = _safe_float(user.get("budget_min"))
+    budget_max = _safe_float(user.get("budget_max"))
+    if budget_min > 0 or budget_max > 0:
+        if budget_min > 0 and budget_max > 0:
+            budget_target = (budget_min + budget_max) / 2.0
+        else:
+            budget_target = budget_max or budget_min
+        budget_tol = max(250.0, budget_target * 0.75)
+        components.append(_relative_closeness(price, budget_target, budget_tol))
+        weights.append(0.40)
+
+    # Bedroom preference
+    desired_beds = _safe_float(user.get("desired_beds"))
+    beds = _safe_float(listing.get("number_of_bedrooms"))
+    if desired_beds > 0:
+        components.append(_relative_closeness(beds, desired_beds, max(1.0, desired_beds)))
+        weights.append(0.20)
+
+    # Bathroom preference
+    desired_baths = _safe_float(user.get("desired_baths"))
+    baths = _safe_float(listing.get("number_of_bathrooms"))
+    if desired_baths > 0:
+        components.append(_relative_closeness(baths, desired_baths, max(1.0, desired_baths)))
+        weights.append(0.15)
+
+    # Furnished preference
+    wants_furnished = user.get("wants_furnished")
+    if wants_furnished is not None:
+        pref = 1 if bool(wants_furnished) else 0
+        listing_furnished = 1 if listing.get("furnished") else 0
+        components.append(1.0 if pref == listing_furnished else 0.35)
+        weights.append(0.10)
+
+    # Optional geo preference
+    pref_lat = _safe_float(user.get("pref_lat"))
+    pref_lon = _safe_float(user.get("pref_lon"))
+    lat = _safe_float(listing.get("latitude"))
+    lon = _safe_float(listing.get("longitude"))
+    if pref_lat and pref_lon and lat and lon:
+        dist = _distance_km(pref_lat, pref_lon, lat, lon)
+        max_dist = _safe_float(user.get("max_distance_km"))
+        if max_dist > 0:
+            components.append(_clamp01(1.0 - dist / max_dist))
+        else:
+            # Without explicit max distance, decay gently by distance.
+            components.append(1.0 / (1.0 + dist / 15.0))
+        weights.append(0.15)
+
+    # Pet-friendly signal when relevant
+    if user.get("has_cats"):
+        components.append(1.0 if amenities.get("cats_allowed") else 0.0)
+        weights.append(0.05)
+    if user.get("has_dogs"):
+        components.append(1.0 if amenities.get("dogs_allowed") else 0.0)
+        weights.append(0.05)
+
+    if not components:
+        return 0.5
+    return _clamp01(sum(c * w for c, w in zip(components, weights)) / sum(weights))
+
+
+def _score_with_heuristic(user: Dict, eligible: List[Dict], top_n: int) -> List[Dict]:
+    results = []
+    for listing in eligible:
+        result = dict(listing)
+        result["match_score"] = round(float(_heuristic_match_score(user, listing)), 4)
+        results.append(result)
+    results.sort(key=lambda x: x["match_score"], reverse=True)
+    return results[:top_n]
+
+
 # ── public API ─────────────────────────────────────────────────────────────
 
 def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Dict]:
@@ -204,6 +333,10 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
     if not eligible:
         return []
 
+    # Graceful degradation when model or metadata cannot be loaded.
+    if _model is None or _meta is None:
+        return _score_with_heuristic(user, eligible, top_n)
+
     # Encode user once
     user_vec = _encode_user(user)
     user_dim = _meta["user_dim"]
@@ -220,18 +353,22 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
     user_vecs = np.repeat(user_vec, len(eligible), axis=0)          # (N, user_dim)
 
     # Run model inference
-    raw = _model.predict(
-        {"user_features": user_vecs, "item_features": item_vecs},
-        batch_size=512,
-        verbose=0,
-    )
-    # Handle both output shapes:
-    #   (N, 2) — 2-class softmax: column 1 is the match probability
-    #   (N, 1) or (N,) — single sigmoid output
-    if raw.ndim == 2 and raw.shape[1] >= 2:
-        scores = raw[:, 1]
-    else:
-        scores = raw.reshape(-1)
+    try:
+        raw = _model.predict(
+            {"user_features": user_vecs, "item_features": item_vecs},
+            batch_size=512,
+            verbose=0,
+        )
+        # Handle both output shapes:
+        #   (N, 2) — 2-class softmax: column 1 is the match probability
+        #   (N, 1) or (N,) — single sigmoid output
+        if raw.ndim == 2 and raw.shape[1] >= 2:
+            scores = raw[:, 1]
+        else:
+            scores = raw.reshape(-1)
+    except Exception as e:
+        print(f"[recommender] inference failed, using heuristic fallback: {e}")
+        return _score_with_heuristic(user, eligible, top_n)
 
     # Attach scores and sort
     results = []

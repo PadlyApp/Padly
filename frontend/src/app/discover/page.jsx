@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group } from '@mantine/core';
 import { IconX, IconHeart, IconRefresh } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
@@ -12,6 +12,19 @@ import { SwipeCard } from '../components/SwipeCard';
 // ── localStorage helpers ────────────────────────────────────────────────────
 
 const LIKED_KEY = 'padly_liked_listings';
+const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
+
+function getOrCreateSwipeSessionId() {
+  if (typeof window === 'undefined') return 'server-session';
+  const existing = sessionStorage.getItem(SWIPE_SESSION_KEY);
+  if (existing) return existing;
+
+  const generated = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  sessionStorage.setItem(SWIPE_SESSION_KEY, generated);
+  return generated;
+}
 
 export function getLikedListings() {
   if (typeof window === 'undefined') return [];
@@ -48,6 +61,7 @@ function DiscoverContent() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const swipeSessionIdRef = useRef(null);
 
   const fetchRecommendations = useCallback(async () => {
     setLoading(true);
@@ -81,7 +95,12 @@ function DiscoverContent() {
         budget_max:      prefs.budget_max     ?? undefined,
         desired_beds:    prefs.required_bedrooms ?? undefined,
         desired_baths:   prefs.target_bathrooms  ?? undefined,
-        wants_furnished: prefs.target_furnished ? 1 : 0,
+        wants_furnished:
+          prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
+            ? 1
+            : prefs.target_furnished === true
+              ? 1
+              : undefined,
         pref_lat:        prefs.target_latitude   ?? undefined,
         pref_lon:        prefs.target_longitude  ?? undefined,
         top_n: 30,
@@ -115,10 +134,54 @@ function DiscoverContent() {
     fetchRecommendations();
   }, [fetchRecommendations]);
 
+  const persistSwipeEvent = useCallback(async ({ listing, action, position }) => {
+    if (!authState?.accessToken || !userId || !listing?.listing_id) return;
+
+    if (!swipeSessionIdRef.current) {
+      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+    }
+
+    try {
+      const response = await fetch('http://localhost:8000/api/interactions/swipes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          listing_id: listing.listing_id,
+          action,
+          surface: 'discover',
+          session_id: swipeSessionIdRef.current,
+          position_in_feed: position,
+          algorithm_version: 'phase1-rules',
+          model_version: 'recommender-v1',
+          city_filter: listing.city ?? null,
+        }),
+      });
+
+      // Do not disrupt UX on telemetry failures.
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to persist swipe interaction');
+      }
+    } catch {
+      // Best-effort only.
+    }
+  }, [authState?.accessToken, userId]);
+
   const handleSwipe = useCallback((direction, listing) => {
-    if (direction === 'right') saveLikedListing(listing);
+    const action = direction === 'right' ? 'like' : 'pass';
+    if (action === 'like') saveLikedListing(listing);
+
+    const position = listings.findIndex((item) => item.listing_id === listing?.listing_id);
+    void persistSwipeEvent({
+      listing,
+      action,
+      position: position >= 0 ? position : currentIndex,
+    });
+
     setCurrentIndex((prev) => prev + 1);
-  }, []);
+  }, [currentIndex, listings, persistSwipeEvent]);
 
   const handleButton = (direction) => {
     if (currentIndex >= listings.length) return;

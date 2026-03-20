@@ -68,6 +68,36 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
     listing_duration = listing.get('lease_duration_months')
     if group_duration is not None and listing_duration is not None and group_duration != listing_duration:
         return False, f"lease_duration_mismatch"
+
+    # Bathroom preference as hard requirement when present.
+    group_bathrooms = group.get('target_bathrooms')
+    listing_bathrooms = listing.get('number_of_bathrooms')
+    if group_bathrooms is not None and listing_bathrooms is not None:
+        try:
+            if float(listing_bathrooms) < float(group_bathrooms):
+                return False, "bathroom_requirement_not_met"
+        except (TypeError, ValueError):
+            return False, "invalid_bathroom_data"
+
+    # Maximum deposit as hard requirement when present.
+    max_deposit = group.get('target_deposit_amount')
+    listing_deposit = listing.get('deposit_amount')
+    if max_deposit is not None and listing_deposit is not None:
+        try:
+            if float(listing_deposit) > float(max_deposit):
+                return False, "deposit_requirement_not_met"
+        except (TypeError, ValueError):
+            return False, "invalid_deposit_data"
+
+    # Furnished requirement: only hard when explicitly required.
+    furnished_pref = (group.get('furnished_preference') or '').strip().lower()
+    furnished_is_hard = bool(group.get('furnished_is_hard')) or furnished_pref == 'required'
+    if furnished_is_hard and group.get('target_furnished') is True:
+        listing_furnished = listing.get('furnished')
+        if isinstance(listing_furnished, str):
+            listing_furnished = listing_furnished.lower() in ['true', 't', '1', 'yes']
+        if listing_furnished is not True:
+            return False, "furnished_requirement_not_met"
     
     return True, None
 
@@ -76,8 +106,13 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
 
 def calculate_bathroom_score(group: Dict, listing: Dict) -> float:
     """Bathroom match: meets/exceeds=20, within 0.5=10, else=5."""
-    target = float(group.get('target_bathrooms', 1.0))
-    actual = float(listing.get('number_of_bathrooms', 1.0))
+    if group.get('target_bathrooms') is None:
+        return 10.0
+    try:
+        target = float(group.get('target_bathrooms'))
+        actual = float(listing.get('number_of_bathrooms', 1.0))
+    except (TypeError, ValueError):
+        return 10.0
     if actual >= target:
         return 20.0
     if actual >= target - 0.5:
@@ -86,19 +121,33 @@ def calculate_bathroom_score(group: Dict, listing: Dict) -> float:
 
 
 def calculate_furnished_score(group: Dict, listing: Dict) -> float:
-    """Furnished match: same=20, different=10."""
-    group_pref = group.get('target_furnished', False)
+    """Furnished scoring with tri-state support."""
+    furnished_pref = (group.get('furnished_preference') or '').strip().lower()
+    group_pref = group.get('target_furnished', None)
     listing_val = listing.get('furnished', False)
-    if isinstance(group_pref, str):
-        group_pref = group_pref.lower() in ['true', 't', '1', 'yes']
     if isinstance(listing_val, str):
         listing_val = listing_val.lower() in ['true', 't', '1', 'yes']
+
+    if furnished_pref == 'required':
+        return 20.0 if listing_val is True else 0.0
+    if furnished_pref == 'preferred':
+        return 20.0 if listing_val is True else 10.0
+    if furnished_pref == 'no_preference':
+        return 10.0
+
+    # Legacy fallback.
+    if isinstance(group_pref, str):
+        group_pref = group_pref.lower() in ['true', 't', '1', 'yes']
+    if group_pref is None:
+        return 10.0
     return 20.0 if group_pref == listing_val else 10.0
 
 
 def calculate_utilities_score(group: Dict, listing: Dict) -> float:
     """Utilities match: same=20, different=10."""
-    group_pref = group.get('target_utilities_included', False)
+    group_pref = group.get('target_utilities_included', None)
+    if group_pref is None:
+        return 10.0
     listing_val = listing.get('utilities_included', False)
     if isinstance(group_pref, str):
         group_pref = group_pref.lower() in ['true', 't', '1', 'yes']
@@ -109,8 +158,13 @@ def calculate_utilities_score(group: Dict, listing: Dict) -> float:
 
 def calculate_deposit_score(group: Dict, listing: Dict) -> float:
     """Deposit: at/below=20, +$500=10, +$1500=5, else=0."""
-    target = float(group.get('target_deposit_amount') or 0)
-    actual = float(listing.get('deposit_amount') or 0)
+    if group.get('target_deposit_amount') is None:
+        return 10.0
+    try:
+        target = float(group.get('target_deposit_amount'))
+        actual = float(listing.get('deposit_amount') or 0)
+    except (TypeError, ValueError):
+        return 10.0
     if actual <= target:
         return 20.0
     if actual <= target + 500:

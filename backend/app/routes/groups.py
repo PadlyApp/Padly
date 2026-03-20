@@ -8,6 +8,7 @@ from typing import Optional, List
 from app.dependencies.auth import get_user_token, require_user_token
 from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
+from app.services.controlled_vocab import validate_city_name
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -431,6 +432,11 @@ async def create_group(
     # Create group
     group_dict = group_data.model_dump(exclude_none=True)
     group_dict['creator_user_id'] = user_id
+
+    try:
+        group_dict["target_city"] = validate_city_name(group_dict.get("target_city", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     
     # Convert non-JSON-serializable types
     from decimal import Decimal
@@ -548,6 +554,12 @@ async def update_group(
     
     if not update_dict:
         raise HTTPException(status_code=400, detail="No data provided for update")
+
+    if "target_city" in update_dict:
+        try:
+            update_dict["target_city"] = validate_city_name(update_dict.get("target_city", ""))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     
     updated_response = supabase.table('roommate_groups')\
         .update(update_dict)\
@@ -565,7 +577,7 @@ async def update_group(
     if any(field in update_dict for field in preference_fields):
         from app.routes.stable_matching import run_matching, RunMatchingRequest
         
-        target_city = group.get('target_city')
+        target_city = update_dict.get('target_city') or group.get('target_city')
         if target_city:
             try:
                 matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
@@ -1034,6 +1046,14 @@ async def join_group(
             update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
         if aggregate_prefs.get('target_bathrooms'):
             update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        if 'target_furnished' in aggregate_prefs:
+            update_data['target_furnished'] = aggregate_prefs.get('target_furnished')
+        if 'furnished_preference' in aggregate_prefs:
+            update_data['furnished_preference'] = aggregate_prefs.get('furnished_preference')
+        if 'furnished_is_hard' in aggregate_prefs:
+            update_data['furnished_is_hard'] = bool(aggregate_prefs.get('furnished_is_hard'))
+        if aggregate_prefs.get('gender_policy'):
+            update_data['gender_policy'] = aggregate_prefs.get('gender_policy')
         
         if update_data:
             supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
@@ -1508,6 +1528,14 @@ async def leave_group(
             update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
         if aggregate_prefs.get('target_bathrooms'):
             update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        if 'target_furnished' in aggregate_prefs:
+            update_data['target_furnished'] = aggregate_prefs.get('target_furnished')
+        if 'furnished_preference' in aggregate_prefs:
+            update_data['furnished_preference'] = aggregate_prefs.get('furnished_preference')
+        if 'furnished_is_hard' in aggregate_prefs:
+            update_data['furnished_is_hard'] = bool(aggregate_prefs.get('furnished_is_hard'))
+        if aggregate_prefs.get('gender_policy'):
+            update_data['gender_policy'] = aggregate_prefs.get('gender_policy')
         
         if update_data:
             supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
@@ -1640,6 +1668,14 @@ async def remove_member(
             update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
         if aggregate_prefs.get('target_bathrooms'):
             update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
+        if 'target_furnished' in aggregate_prefs:
+            update_data['target_furnished'] = aggregate_prefs.get('target_furnished')
+        if 'furnished_preference' in aggregate_prefs:
+            update_data['furnished_preference'] = aggregate_prefs.get('furnished_preference')
+        if 'furnished_is_hard' in aggregate_prefs:
+            update_data['furnished_is_hard'] = bool(aggregate_prefs.get('furnished_is_hard'))
+        if aggregate_prefs.get('gender_policy'):
+            update_data['gender_policy'] = aggregate_prefs.get('gender_policy')
         
         if update_data:
             supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
@@ -1855,6 +1891,113 @@ async def get_eligible_listings_for_group(
         },
         "count": len(eligible_listings),
         "listings": eligible_listings
+    }
+
+
+@router.get("/{group_id}/ranked-listings", response_model=dict)
+async def get_ranked_listings_for_group(
+    group_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max ranked listings to return"),
+    token: Optional[str] = Depends(get_user_token)
+):
+    """
+    Return listings for a group using:
+    1) Hard-constraint filtering (feasible pairs)
+    2) Soft rule-based scoring (0-100) for ranking
+
+    This endpoint is the direct Phase 1 "hard + soft rules" listing surface.
+    """
+    from app.services.stable_matching import (
+        build_feasible_pairs,
+        get_feasibility_statistics
+    )
+    from app.services.stable_matching.scoring import calculate_group_score
+
+    supabase = get_admin_client()
+
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .limit(1)\
+        .execute()
+
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group = group_response.data[0]
+    target_city = group.get('target_city')
+    if not target_city:
+        raise HTTPException(status_code=400, detail="Group must have a target city")
+
+    listings_response = supabase.table('listings')\
+        .select('*')\
+        .eq('city', target_city)\
+        .eq('status', 'active')\
+        .execute()
+
+    all_listings = listings_response.data if listings_response.data else []
+    if not all_listings:
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "count": 0,
+            "ranked_listings": [],
+            "message": f"No active listings found in {target_city}"
+        }
+
+    feasible_pairs, _ = build_feasible_pairs(
+        groups=[group],
+        listings=all_listings,
+        date_delta_days=30,
+        include_rejection_reasons=True
+    )
+    eligible_listing_ids = set(listing_id for _, listing_id in feasible_pairs)
+
+    group_size = int(group.get("target_group_size") or group.get("current_member_count") or 2)
+    group_size = max(group_size, 1)
+
+    ranked = []
+    for listing in all_listings:
+        if listing['id'] not in eligible_listing_ids:
+            continue
+
+        score = float(calculate_group_score(group, listing))
+        listing_copy = dict(listing)
+        listing_copy["match_score"] = round(score, 2)
+        listing_copy["match_percent"] = f"{round(score)}%"
+
+        listing_price = float(listing.get("price_per_month") or 0.0)
+        listing_copy["price_per_person"] = round(listing_price / group_size, 2)
+        ranked.append(listing_copy)
+
+    ranked.sort(key=lambda x: (-x.get("match_score", 0.0), x.get("price_per_month", float('inf'))))
+    ranked = ranked[:limit]
+
+    stats = get_feasibility_statistics([group], all_listings, feasible_pairs)
+
+    return {
+        "status": "success",
+        "group_id": group_id,
+        "group_constraints": {
+            "target_city": target_city,
+            "budget_min": group.get('budget_per_person_min'),
+            "budget_max": group.get('budget_per_person_max'),
+            "target_move_in_date": str(group.get('target_move_in_date')) if group.get('target_move_in_date') else None,
+            "target_lease_type": group.get('target_lease_type'),
+            "target_lease_duration_months": group.get('target_lease_duration_months'),
+            "target_bathrooms": group.get('target_bathrooms'),
+            "target_furnished": group.get('target_furnished'),
+            "target_utilities_included": group.get('target_utilities_included'),
+            "target_deposit_amount": group.get('target_deposit_amount'),
+            "target_house_rules": group.get('target_house_rules'),
+        },
+        "stats": {
+            "total_listings_in_city": stats['total_listings'],
+            "eligible_count": stats['total_feasible_pairs'],
+            "returned_count": len(ranked),
+        },
+        "count": len(ranked),
+        "ranked_listings": ranked
     }
 
 

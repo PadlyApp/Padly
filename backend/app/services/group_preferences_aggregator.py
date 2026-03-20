@@ -95,10 +95,34 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
     # Lifestyle: MOST RESTRICTIVE
     aggregated['lifestyle_preferences'] = aggregate_lifestyle_preferences(all_member_prefs)
     
-    # Furnished: ANY wants it → group wants it
-    furnished_prefs = [p.get('target_furnished') for p in all_member_prefs if p.get('target_furnished') is not None]
-    if furnished_prefs:
-        aggregated['target_furnished'] = any(furnished_prefs)
+    # Furnished preference:
+    # - required if any member marks required
+    # - preferred if anyone marks preferred and no one requires
+    # - no_preference otherwise
+    furnished_pref_values = [
+        p.get('furnished_preference')
+        for p in all_member_prefs
+        if p.get('furnished_preference') is not None
+    ]
+    if "required" in furnished_pref_values:
+        aggregated['furnished_preference'] = 'required'
+        aggregated['target_furnished'] = True
+        aggregated['furnished_is_hard'] = True
+    elif "preferred" in furnished_pref_values:
+        aggregated['furnished_preference'] = 'preferred'
+        aggregated['target_furnished'] = True
+        aggregated['furnished_is_hard'] = False
+    elif furnished_pref_values:
+        aggregated['furnished_preference'] = 'no_preference'
+        aggregated['target_furnished'] = None
+        aggregated['furnished_is_hard'] = False
+    else:
+        # Backward-compat fallback to legacy boolean field.
+        furnished_prefs = [p.get('target_furnished') for p in all_member_prefs if p.get('target_furnished') is not None]
+        if furnished_prefs:
+            aggregated['furnished_preference'] = 'required'
+            aggregated['target_furnished'] = any(furnished_prefs)
+            aggregated['furnished_is_hard'] = any(furnished_prefs)
     
     # Utilities: ANY wants it → group wants it
     utilities_prefs = [p.get('target_utilities_included') for p in all_member_prefs if p.get('target_utilities_included') is not None]
@@ -116,6 +140,13 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
     durations = [int(p.get('target_lease_duration_months')) for p in all_member_prefs if p.get('target_lease_duration_months')]
     if durations:
         aggregated['target_lease_duration_months'] = sorted(durations)[len(durations) // 2]
+
+    # Gender policy: if any member asks same-gender-only, group policy is restrictive.
+    gender_policies = [p.get('gender_policy') for p in all_member_prefs if p.get('gender_policy')]
+    if 'same_gender_only' in gender_policies:
+        aggregated['gender_policy'] = 'same_gender_only'
+    elif gender_policies:
+        aggregated['gender_policy'] = 'mixed_ok'
     
     return aggregated
 
@@ -142,9 +173,12 @@ def get_group_level_preferences(group_id: str) -> Dict[str, Any]:
         'target_bedrooms': g.get('target_bedrooms'),
         'target_bathrooms': g.get('target_bathrooms'),
         'target_furnished': g.get('target_furnished'),
+        'furnished_preference': g.get('furnished_preference'),
+        'furnished_is_hard': g.get('furnished_is_hard'),
         'target_utilities_included': g.get('target_utilities_included'),
         'target_lease_type': g.get('target_lease_type'),
         'target_lease_duration_months': g.get('target_lease_duration_months'),
+        'gender_policy': g.get('gender_policy'),
         'lifestyle_preferences': {}
     }
 
