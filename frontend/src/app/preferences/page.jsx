@@ -1,16 +1,55 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { 
-  Container, Title, Text, Stack, Box, Paper, Tabs, 
-  TextInput, NumberInput, Select, Switch, Button, Group,
-  MultiSelect, Grid, Divider, Loader, Alert, Textarea
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Container,
+  Grid,
+  Group,
+  Loader,
+  MultiSelect,
+  NumberInput,
+  Paper,
+  Select,
+  Stack,
+  Text,
+  Textarea,
+  Title,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
+import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
-import { IconHome, IconUsers, IconCheck, IconAlertCircle } from '@tabler/icons-react';
+
+const API_BASE = 'http://localhost:8000';
+
+const AMENITY_OPTIONS = [
+  { value: 'laundry', label: 'Laundry' },
+  { value: 'parking', label: 'Parking' },
+  { value: 'gym', label: 'Gym' },
+  { value: 'ac', label: 'Air Conditioning' },
+  { value: 'dishwasher', label: 'Dishwasher' },
+  { value: 'elevator', label: 'Elevator' },
+  { value: 'doorman', label: 'Doorman' },
+  { value: 'bike_storage', label: 'Bike Storage' },
+];
+
+const BUILDING_TYPE_OPTIONS = [
+  { value: 'apartment', label: 'Apartment' },
+  { value: 'condo', label: 'Condo' },
+  { value: 'house', label: 'House' },
+  { value: 'townhouse', label: 'Townhouse' },
+  { value: 'loft', label: 'Loft' },
+];
+
+function emptyToNull(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
 
 export default function PreferencesPage() {
   return (
@@ -22,213 +61,295 @@ export default function PreferencesPage() {
 
 function PreferencesPageContent() {
   const { user, authState, isLoading: authLoading } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
 
-  // Debug: Log auth state changes
-  useEffect(() => {
-    console.log('Auth state changed:', { 
-      authLoading,
-      hasUser: !!user, 
-      hasProfile: !!user?.profile,
-      profileId: user?.profile?.id,
-      hasToken: !!authState?.accessToken 
-    });
-  }, [user, authState, authLoading]);
-  
-  
-  // Housing Preferences
-  const [housingPrefs, setHousingPrefs] = useState({
-    // Hard Constraints
-    target_city: null,
+  const [countryOptions, setCountryOptions] = useState([]);
+  const [stateOptions, setStateOptions] = useState([]);
+  const [cityOptions, setCityOptions] = useState([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState('');
+
+  const [existingLifestyle, setExistingLifestyle] = useState({});
+
+  const [hardPrefs, setHardPrefs] = useState({
+    target_country: 'US',
     target_state_province: null,
+    target_city: null,
     budget_min: null,
     budget_max: null,
-    required_bedrooms: null,
+    required_bedrooms: null, // own=1, share=0
+    target_bathrooms: null, // own=1, share=0.5
+    target_deposit_amount: null,
+    furnished_preference: 'no_preference', // required | preferred | no_preference
+    gender_policy: 'mixed_ok', // same_gender_only | mixed_ok
     move_in_date: null,
     target_lease_type: null,
     target_lease_duration_months: null,
-    
-    // Soft Preferences
-    target_bathrooms: null,
-    target_furnished: null,
-    target_utilities_included: null,
-    target_deposit_amount: null,
-    target_house_rules: null,
-  });
-  
-  // Roommate Preferences
-  const [roommatePrefs, setRoommatePrefs] = useState({
-    // Demographics
-    age_min: null,
-    age_max: null,
-    gender_preference: null,
-    occupation_types: [],
-    
-    // Lifestyle
-    cleanliness_level: null,
-    noise_tolerance: null,
-    social_preference: null,
-    guest_policy: null,
-    work_schedule: null,
-    sleep_schedule: null,
-    cooking_frequency: null,
-    temperature_preference: null,
-    
-    // Substance & Lifestyle
-    smoking_ok: null,
-    alcohol_ok: null,
-    pets_ok: null,
-    has_pets: null,
-    pet_types: [],
-    
-    // Diet & Values
-    dietary_preferences: [],
-    languages_spoken: [],
-    lgbtq_friendly: null,
   });
 
-  // Load preferences on mount
+  const [softPrefs, setSoftPrefs] = useState({
+    preferred_neighborhoods: [],
+    cleanliness_level: null,
+    social_preference: null,
+    cooking_frequency: null,
+    gender_identity: null,
+    amenity_priorities: [],
+    building_type_preferences: [],
+    target_house_rules: '',
+  });
+
+  const roomPreference = useMemo(() => {
+    if (hardPrefs.required_bedrooms == null) return null;
+    return Number(hardPrefs.required_bedrooms) >= 1 ? 'own' : 'share';
+  }, [hardPrefs.required_bedrooms]);
+
+  const bathroomPreference = useMemo(() => {
+    if (hardPrefs.target_bathrooms == null) return null;
+    return Number(hardPrefs.target_bathrooms) >= 1 ? 'own' : 'share';
+  }, [hardPrefs.target_bathrooms]);
+
   useEffect(() => {
     loadPreferences();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, authState]);
+  }, [user, authState?.accessToken]);
 
-  const loadPreferences = async () => {
-    // MUST use profile.id (database user ID), not user.id (auth ID)
-    // TEMPORARY: If profile is missing, we can't load preferences
-    const userId = user?.profile?.id;
-    
-    if (!user?.profile) {
-      console.error('User profile is missing! This user needs to be recreated in the database.');
-      setError('Your user profile is incomplete. Please contact support or try logging out and signing up again.');
-      setLoading(false);
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/options/countries`);
+        if (!response.ok) return;
+        const result = await response.json();
+        setCountryOptions(result.data || []);
+      } catch {
+        // Keep page usable if options endpoint is unavailable.
+      }
+    };
+    loadCountries();
+  }, []);
+
+  useEffect(() => {
+    const country = hardPrefs.target_country;
+    if (!country) {
+      setStateOptions([]);
       return;
     }
-    
+
+    const loadStates = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/options/states?country_code=${encodeURIComponent(country)}`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setStateOptions(result.data || []);
+      } catch {
+        // Keep page usable if options endpoint is unavailable.
+      }
+    };
+    loadStates();
+  }, [hardPrefs.target_country]);
+
+  useEffect(() => {
+    const country = hardPrefs.target_country;
+    const state = hardPrefs.target_state_province;
+    if (!country || !state) {
+      setCityOptions([]);
+      return;
+    }
+
+    const loadCities = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/options/cities?country_code=${encodeURIComponent(country)}&state_code=${encodeURIComponent(state)}&q=${encodeURIComponent(citySearch)}&limit=250`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setCityOptions(result.data || []);
+      } catch {
+        // Keep page usable if options endpoint is unavailable.
+      }
+    };
+    loadCities();
+  }, [hardPrefs.target_country, hardPrefs.target_state_province, citySearch]);
+
+  useEffect(() => {
+    const city = hardPrefs.target_city;
+    if (!city) {
+      setNeighborhoodOptions([]);
+      return;
+    }
+
+    const loadNeighborhoods = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/options/neighborhoods?city=${encodeURIComponent(city)}&q=${encodeURIComponent(neighborhoodSearch)}&limit=250`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setNeighborhoodOptions(result.data || []);
+      } catch {
+        // Keep page usable if options endpoint is unavailable.
+      }
+    };
+    loadNeighborhoods();
+  }, [hardPrefs.target_city, neighborhoodSearch]);
+
+  const updateHard = (key, value) => {
+    setHardPrefs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateSoft = (key, value) => {
+    setSoftPrefs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const loadPreferences = async () => {
+    const userId = user?.profile?.id;
     if (!userId || !authState?.accessToken) {
-      console.log('Cannot load preferences:', { 
-        hasUserId: !!userId, 
-        hasToken: !!authState?.accessToken,
-        user: user,
-        profile: user?.profile
-      });
-      setLoading(false);
       return;
     }
 
     setLoading(true);
+    setError(null);
+
     try {
-      const response = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
+      const response = await fetch(`${API_BASE}/api/preferences/${userId}`, {
         headers: {
-          'Authorization': `Bearer ${authState.accessToken}`,
+          Authorization: `Bearer ${authState.accessToken}`,
           'Content-Type': 'application/json',
         },
       });
-      
-      if (response.ok) {
-        const result = await response.json();
-        const data = result.data;
-        
-        if (data) {
-          // Backend returns preferences fields directly in data (not nested)
-          // Extract the 13 preference fields
-          const housingPrefsData = {
-            // Hard Constraints
-            target_city: data.target_city,
-            target_state_province: data.target_state_province,
-            budget_min: data.budget_min,
-            budget_max: data.budget_max,
-            required_bedrooms: data.required_bedrooms,
-            move_in_date: data.move_in_date,
-            target_lease_type: data.target_lease_type,
-            target_lease_duration_months: data.target_lease_duration_months,
-            // Soft Preferences
-            target_bathrooms: data.target_bathrooms,
-            target_furnished: data.target_furnished,
-            target_utilities_included: data.target_utilities_included,
-            target_deposit_amount: data.target_deposit_amount,
-            target_house_rules: data.target_house_rules,
-          };
-          
-          setHousingPrefs(prev => ({ ...prev, ...housingPrefsData }));
-          
-          // Note: Roommate preferences are not persisted on backend,
-          // they're frontend-only for now per team decision
-        }
-      }
+      if (!response.ok) throw new Error('Failed to load preferences');
+
+      const result = await response.json();
+      const data = result.data || {};
+      const lifestyle = data.lifestyle_preferences || {};
+
+      setExistingLifestyle(lifestyle);
+
+      setHardPrefs((prev) => ({
+        ...prev,
+        target_country: data.target_country || 'US',
+        target_state_province: data.target_state_province || null,
+        target_city: data.target_city || null,
+        budget_min: data.budget_min ?? null,
+        budget_max: data.budget_max ?? null,
+        required_bedrooms: data.required_bedrooms ?? null,
+        target_bathrooms: data.target_bathrooms ?? null,
+        target_deposit_amount: data.target_deposit_amount ?? null,
+        furnished_preference: data.furnished_preference || 'no_preference',
+        gender_policy: data.gender_policy || 'mixed_ok',
+        move_in_date: data.move_in_date || null,
+        target_lease_type: data.target_lease_type || null,
+        target_lease_duration_months: data.target_lease_duration_months ?? null,
+      }));
+
+      setSoftPrefs((prev) => ({
+        ...prev,
+        preferred_neighborhoods: Array.isArray(data.preferred_neighborhoods)
+          ? data.preferred_neighborhoods
+          : [],
+        cleanliness_level: lifestyle.cleanliness_level || null,
+        social_preference: lifestyle.social_preference || null,
+        cooking_frequency: lifestyle.cooking_frequency || null,
+        gender_identity: lifestyle.gender_identity || null,
+        amenity_priorities: Array.isArray(lifestyle.amenity_priorities) ? lifestyle.amenity_priorities : [],
+        building_type_preferences: Array.isArray(lifestyle.building_type_preferences)
+          ? lifestyle.building_type_preferences
+          : [],
+        target_house_rules: data.target_house_rules || '',
+      }));
     } catch (err) {
-      console.error('Failed to load preferences:', err);
-      setError('Failed to load preferences');
+      setError(err.message || 'Failed to load preferences');
     } finally {
       setLoading(false);
     }
   };
 
+  const buildLifestylePayload = () => {
+    const merged = { ...existingLifestyle };
+
+    const valueMap = {
+      cleanliness_level: softPrefs.cleanliness_level,
+      social_preference: softPrefs.social_preference,
+      cooking_frequency: softPrefs.cooking_frequency,
+      gender_identity: softPrefs.gender_identity,
+    };
+
+    Object.entries(valueMap).forEach(([key, value]) => {
+      if (value == null || value === '') {
+        delete merged[key];
+      } else {
+        merged[key] = value;
+      }
+    });
+
+    if (softPrefs.amenity_priorities?.length) {
+      merged.amenity_priorities = softPrefs.amenity_priorities;
+    } else {
+      delete merged.amenity_priorities;
+    }
+
+    if (softPrefs.building_type_preferences?.length) {
+      merged.building_type_preferences = softPrefs.building_type_preferences;
+    } else {
+      delete merged.building_type_preferences;
+    }
+
+    return merged;
+  };
+
   const handleSave = async () => {
-    // MUST use profile.id (database user ID), not user.id (auth ID)
     const userId = user?.profile?.id;
-    
-    if (!user?.profile) {
-      setError('Your user profile is incomplete. Please log out and sign up again, or contact support.');
-      console.error('User profile missing:', user);
+    if (!userId || !authState?.accessToken) {
+      setError('You must be logged in to save preferences.');
       return;
     }
-    
-    if (!userId || !authState?.accessToken) {
-      console.error('Save failed - missing auth:', { 
-        hasUserId: !!userId, 
-        hasToken: !!authState?.accessToken,
-        user: user,
-        profile: user?.profile
-      });
-      setError('You must be logged in to save preferences. Please refresh the page and try again.');
+
+    if (!hardPrefs.target_country || !hardPrefs.target_state_province || !hardPrefs.target_city) {
+      setError('Please choose country, state/province, and city.');
       return;
     }
 
     setSaving(true);
     setError(null);
     setSuccess(false);
-    
+
     try {
-      
-      const payload = housingPrefs;
-      
-      const response = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
+      const payload = {
+        ...hardPrefs,
+        target_house_rules: emptyToNull(softPrefs.target_house_rules),
+        preferred_neighborhoods: softPrefs.preferred_neighborhoods || [],
+        lifestyle_preferences: buildLifestylePayload(),
+      };
+
+      const response = await fetch(`${API_BASE}/api/preferences/${userId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authState.accessToken}`,
+          Authorization: `Bearer ${authState.accessToken}`,
         },
         body: JSON.stringify(payload),
       });
-      
-      if (response.ok) {
-        setSuccess(true);
-        setTimeout(() => setSuccess(false), 3000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.detail || 'Failed to save preferences');
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to save preferences');
       }
+
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      setError('Network error. Please try again.');
-      console.error('Save error:', err);
+      setError(err.message || 'Network error. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
-  const updateHousingPref = (key, value) => {
-    setHousingPrefs(prev => ({ ...prev, [key]: value }));
-  };
-
-  const updateRoommatePref = (key, value) => {
-    setRoommatePrefs(prev => ({ ...prev, [key]: value }));
-  };
-
-  // Show loading while auth is initializing
   if (authLoading || loading) {
     return (
       <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -243,7 +364,6 @@ function PreferencesPageContent() {
     );
   }
 
-  // Show error if no user after auth loading is complete
   if (!authLoading && !user) {
     return (
       <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -260,318 +380,371 @@ function PreferencesPageContent() {
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
-      
-      <Container size="lg" style={{ paddingTop: '4rem', paddingLeft: '2rem', paddingRight: '2rem', paddingBottom: '6rem' }}>
+      <Container
+        size="lg"
+        style={{
+          paddingTop: '4rem',
+          paddingLeft: '2rem',
+          paddingRight: '2rem',
+          paddingBottom: '6rem',
+        }}
+      >
         <Stack gap="xl">
-          {/* Header */}
           <Stack align="center" gap="lg">
-            <Title 
-              order={1} 
-              style={{ 
-                fontSize: '2.5rem', 
-                fontWeight: 500,
-                color: '#111',
-                textAlign: 'center'
-              }}
+            <Title
+              order={1}
+              style={{ fontSize: '2.4rem', fontWeight: 500, color: '#111', textAlign: 'center' }}
             >
-              Set Your Preferences
+              Personal Preferences
             </Title>
-            <Text 
-              size="lg" 
-              c="dimmed" 
-              style={{ 
-                maxWidth: '42rem', 
-                textAlign: 'center',
-                color: '#666'
-              }}
-            >
-              Help us find your perfect match by setting your housing and roommate preferences
+            <Text size="lg" c="dimmed" style={{ maxWidth: '46rem', textAlign: 'center' }}>
+              Hard constraints filter listings. Soft constraints rank matches and help form compatible groups.
             </Text>
           </Stack>
 
-          {/* Alerts */}
           {success && (
-            <Alert icon={<IconCheck size={16} />} title="Success" color="green">
-              Your preferences have been saved successfully!
+            <Alert icon={<IconCheck size={16} />} title="Saved" color="green">
+              Preferences updated successfully.
             </Alert>
           )}
-          
+
           {error && (
             <Alert icon={<IconAlertCircle size={16} />} title="Error" color="red">
               {error}
             </Alert>
           )}
 
-          {/* Tabbed Sections */}
-          <Tabs defaultValue="housing" variant="pills">
-            <Tabs.List grow>
-              <Tabs.Tab value="housing" leftSection={<IconHome size={16} />}>
-                Housing Preferences
-              </Tabs.Tab>
-            </Tabs.List>
+          <Paper shadow="sm" p="xl" radius="md" withBorder>
+            <Title order={4} mb="md">
+              Hard Constraints
+            </Title>
+            <Text size="sm" c="dimmed" mb="lg">
+              Must-pass requirements for your housing match.
+            </Text>
 
-            {/* Housing Preferences Tab */}
-            <Tabs.Panel value="housing" pt="xl">
-              <Stack gap="lg">
-                <Paper shadow="sm" p="xl" radius="md" withBorder>
-                  <Title order={4} mb="md">🧱 Hard Constraints (Non-Negotiables)</Title>
-                  <Text size="sm" c="dimmed" mb="lg">
-                    These are absolute requirements that must be met
-                  </Text>
-                  
-                  <Grid>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <TextInput
-                        label="Target City"
-                        placeholder="e.g., Toronto"
-                        value={housingPrefs.target_city}
-                        onChange={(e) => updateHousingPref('target_city', e.currentTarget.value)}
-                        required
-                      />
-                    </Grid.Col>
-                  
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <TextInput
-                        label="State/Province"
-                        placeholder="e.g., Ontario, CA"
-                        value={housingPrefs.target_state_province}
-                        onChange={(e) => updateHousingPref('target_state_province', e.currentTarget.value)}
-                        required
-                      />
-                    </Grid.Col>
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="Country"
+                  placeholder="Select country"
+                  data={countryOptions}
+                  value={hardPrefs.target_country}
+                  onChange={(v) => {
+                    updateHard('target_country', v);
+                    updateHard('target_state_province', null);
+                    updateHard('target_city', null);
+                    updateSoft('preferred_neighborhoods', []);
+                    setCitySearch('');
+                    setNeighborhoodSearch('');
+                  }}
+                  required
+                />
+              </Grid.Col>
 
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <NumberInput
-                        label="Min Budget (Total)"
-                        placeholder="Minimum total budget"
-                        value={housingPrefs.budget_min}
-                        onChange={(v) => updateHousingPref('budget_min', v)}
-                        min={0}
-                        prefix="$"
-                        required
-                      />
-                    </Grid.Col>
-                  
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <NumberInput
-                        label="Max Budget (Total)"
-                        placeholder="Maximum total budget"
-                        value={housingPrefs.budget_max}
-                        onChange={(v) => updateHousingPref('budget_max', v)}
-                        min={0}
-                        prefix="$"
-                        required
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <NumberInput
-                        label="Required Bedrooms"
-                        placeholder="Exact number needed"
-                        value={housingPrefs.required_bedrooms}
-                        onChange={(v) => updateHousingPref('required_bedrooms', v)}
-                        min={1}
-                        max={10}
-                        required
-                      />
-                    </Grid.Col>
-                    
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <DatePickerInput
-                        label="Target Move-in Date"
-                        placeholder="Select date"
-                        value={housingPrefs.move_in_date ? new Date(housingPrefs.move_in_date) : null}
-                        onChange={(date) => updateHousingPref('move_in_date', date ? date.toISOString().split('T')[0] : null)}
-                        minDate={new Date()}
-                        required
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Select
-                        label="Lease Type"
-                        placeholder="Select lease type"
-                        data={[
-                          { value: 'fixed', label: 'Fixed-term lease' },
-                          { value: 'month_to_month', label: 'Month-to-month' },
-                          { value: 'sublet', label: 'Sublet' },
-                          { value: 'any', label: 'Any type' }
-                        ]}
-                        value={housingPrefs.target_lease_type}
-                        onChange={(v) => updateHousingPref('target_lease_type', v)}
-                        required
-                      />
-                    </Grid.Col>
-                  
-                  <div></div> {/* Empty cell for grid alignment */}
-                    {/* <Grid.Col span={{ base: 12, md: 3 }}>
-                      <NumberInput
-                        label="Min Lease Duration (months)"
-                        placeholder="Minimum months"
-                        value={housingPrefs.min_lease_duration_months}
-                        onChange={(v) => updateHousingPref('min_lease_duration_months', v)}
-                        min={1}
-                        max={24}
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 3 }}>
-                      <NumberInput
-                        label="Max Lease Duration (months)"
-                        placeholder="Maximum months"
-                        value={housingPrefs.max_lease_duration_months}
-                        onChange={(v) => updateHousingPref('max_lease_duration_months', v)}
-                        min={1}
-                        max={24}
-                      />
-                    </Grid.Col> */}
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <NumberInput
-                        label="Lease Duration (months)"
-                        placeholder="Duration"
-                        value={housingPrefs.target_lease_duration_months}
-                        onChange={(v) => updateHousingPref('target_lease_duration_months', v)}
-                        min={1}
-                        max={24}
-                      />
-                    </Grid.Col>
-                  </Grid>
-                </Paper>
-         
-                <Paper shadow="sm" p="xl" radius="md" withBorder>
-                  <Title order={4} mb="md">💬 Soft Preferences (Nice-to-Haves)</Title>
-                  <Text size="sm" c="dimmed" mb="lg">
-                    These preferences influence matching but aren't deal-breakers
-                  </Text>
-                  
-                  <Stack gap="md">
-                    <Grid>
-                      <Grid.Col span={{ base: 12, md: 6 }}>
-                        <NumberInput
-                          label="Minimum Bathrooms"
-                          placeholder="e.g., 1"
-                          value={housingPrefs.target_bathrooms}
-                          onChange={(v) => updateHousingPref('target_bathrooms', v)}
-                          min={1}
-                          max={10}
-                          step={0.5}
-                        />
-                      </Grid.Col>
-                      <Grid.Col span={{ base: 12, md: 6 }}>
-                        <NumberInput
-                          label="Min Deposit Amount"
-                          placeholder="Minimum acceptable deposit"
-                          value={housingPrefs.target_deposit_amount}
-                          onChange={(v) => updateHousingPref('target_deposit_amount', v)}
-                          min={0}
-                          prefix="$"
-                        />
-                      </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Switch
-                        label="Furnished Preference"
-                        checked={housingPrefs.target_furnished === true}
-                        onChange={(e) => updateHousingPref('target_furnished', e.currentTarget.checked ? true : null)}
-                      />
-                    </Grid.Col>
-                      <Grid.Col span={{ base: 12, md: 6 }}>
-                      <Switch
-                        label="Utilities included in rent"
-                        checked={housingPrefs.target_utilities_included === true}
-                        onChange={(e) => updateHousingPref('target_utilities_included', e.currentTarget.checked ? true : null)}
-                      />
-                      </Grid.Col>
-                    </Grid>
-                    <Divider my="lg" />
-                      <Title order={5} mb="md">🏠 House Rules & Lifestyle</Title>
-                      <Text size="sm" c="dimmed" mb="md">
-                        Describe any house rules or lifestyle preferences that matter to you
-                      </Text>
-                      
-                      <Stack gap="md">
-                        <Textarea
-                          label="House Rules & Lifestyle Preferences"
-                          placeholder="E.g., smoking policy, pet preferences, noise level, etc."
-                          value={housingPrefs.target_house_rules || ''}
-                          onChange={(e) => updateHousingPref('target_house_rules', e.currentTarget.value)}
-                          minRows={3}
-                          maxRows={6}
-                        />
-                      </Stack>
-                    {/* <Switch
-                      label="Laundry in unit"
-                      checked={housingPrefs.laundry_in_unit === true}
-                      onChange={(e) => updateHousingPref('laundry_in_unit', e.currentTarget.checked ? true : null)}
-                    /> 
-                    <Switch
-                      label="Laundry in building"
-                      checked={housingPrefs.laundry_in_building === true}
-                      onChange={(e) => updateHousingPref('laundry_in_building', e.currentTarget.checked ? true : null)}
-                    />
-                    
-                    <Switch
-                      label="Dishwasher"
-                      checked={housingPrefs.dishwasher === true}
-                      onChange={(e) => updateHousingPref('dishwasher', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Air conditioning"
-                      checked={housingPrefs.air_conditioning === true}
-                      onChange={(e) => updateHousingPref('air_conditioning', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Central heating"
-                      checked={housingPrefs.heating === true}
-                      onChange={(e) => updateHousingPref('heating', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Outdoor space (balcony/patio/yard)"
-                      checked={housingPrefs.outdoor_space === true}
-                      onChange={(e) => updateHousingPref('outdoor_space', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Gym access"
-                      checked={housingPrefs.gym_access === true}
-                      onChange={(e) => updateHousingPref('gym_access', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Pool access"
-                      checked={housingPrefs.pool_access === true}
-                      onChange={(e) => updateHousingPref('pool_access', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="Extra storage space"
-                      checked={housingPrefs.storage_space === true}
-                      onChange={(e) => updateHousingPref('storage_space', e.currentTarget.checked ? true : null)}
-                    />
-                    <Switch
-                      label="High-speed internet"
-                      checked={housingPrefs.high_speed_internet === true}
-                      onChange={(e) => updateHousingPref('high_speed_internet', e.currentTarget.checked ? true : null)}
-                    />*/}
-                    
-                  </Stack>
-                </Paper>
-              </Stack>
-            </Tabs.Panel>
-          </Tabs>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="State / Province"
+                  placeholder="Select state/province"
+                  data={stateOptions}
+                  value={hardPrefs.target_state_province}
+                  onChange={(v) => {
+                    updateHard('target_state_province', v);
+                    updateHard('target_city', null);
+                    updateSoft('preferred_neighborhoods', []);
+                    setCitySearch('');
+                    setNeighborhoodSearch('');
+                  }}
+                  searchable
+                  required
+                />
+              </Grid.Col>
 
-          {/* Save Button */}
-          <Box style={{ 
-            position: 'sticky', 
-            bottom: 0, 
-            backgroundColor: 'white',
-            padding: '1.5rem 0',
-            borderTop: '1px solid #f1f1f1',
-            marginTop: '2rem'
-          }}>
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="City"
+                  placeholder={hardPrefs.target_state_province ? 'Search city' : 'Select state/province first'}
+                  data={cityOptions}
+                  value={hardPrefs.target_city}
+                  onChange={(v) => {
+                    updateHard('target_city', v);
+                    updateSoft('preferred_neighborhoods', []);
+                    setNeighborhoodSearch('');
+                  }}
+                  searchable
+                  searchValue={citySearch}
+                  onSearchChange={setCitySearch}
+                  disabled={!hardPrefs.target_state_province}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <NumberInput
+                  label="Max Monthly Budget (Your Share)"
+                  placeholder="Maximum monthly amount"
+                  value={hardPrefs.budget_max}
+                  onChange={(v) => updateHard('budget_max', v)}
+                  min={0}
+                  prefix="$"
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <NumberInput
+                  label="Min Monthly Budget (Optional)"
+                  placeholder="Minimum monthly amount"
+                  value={hardPrefs.budget_min}
+                  onChange={(v) => updateHard('budget_min', v)}
+                  min={0}
+                  prefix="$"
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Room Preference"
+                  description="Your room arrangement in the unit"
+                  data={[
+                    { value: 'share', label: 'Share a room' },
+                    { value: 'own', label: 'Have my own room' },
+                  ]}
+                  value={roomPreference}
+                  onChange={(v) => {
+                    if (v === 'own') updateHard('required_bedrooms', 1);
+                    else if (v === 'share') updateHard('required_bedrooms', 0);
+                    else updateHard('required_bedrooms', null);
+                  }}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Bathroom Preference"
+                  description="Your bathroom arrangement in the unit"
+                  data={[
+                    { value: 'share', label: 'Share a bathroom' },
+                    { value: 'own', label: 'Have my own bathroom' },
+                  ]}
+                  value={bathroomPreference}
+                  onChange={(v) => {
+                    if (v === 'own') updateHard('target_bathrooms', 1);
+                    else if (v === 'share') updateHard('target_bathrooms', 0.5);
+                    else updateHard('target_bathrooms', null);
+                  }}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <NumberInput
+                  label="Max Deposit You Can Pay"
+                  placeholder="Highest acceptable deposit"
+                  value={hardPrefs.target_deposit_amount}
+                  onChange={(v) => updateHard('target_deposit_amount', v)}
+                  min={0}
+                  prefix="$"
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Furnished Requirement"
+                  description="Required is hard-filtered; preferred only boosts ranking"
+                  data={[
+                    { value: 'required', label: 'Required' },
+                    { value: 'preferred', label: 'Preferred' },
+                    { value: 'no_preference', label: 'No preference' },
+                  ]}
+                  value={hardPrefs.furnished_preference}
+                  onChange={(v) => updateHard('furnished_preference', v)}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Gender Policy"
+                  description="Used as a hard filter for group compatibility"
+                  data={[
+                    { value: 'mixed_ok', label: 'Mixed gender is okay' },
+                    { value: 'same_gender_only', label: 'Same gender only' },
+                  ]}
+                  value={hardPrefs.gender_policy}
+                  onChange={(v) => updateHard('gender_policy', v)}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <DatePickerInput
+                  label="Move-in Date"
+                  placeholder="Select date"
+                  value={hardPrefs.move_in_date ? new Date(hardPrefs.move_in_date) : null}
+                  onChange={(date) => updateHard('move_in_date', date ? date.toISOString().split('T')[0] : null)}
+                  minDate={new Date()}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Lease Type"
+                  placeholder="Select lease type"
+                  data={[
+                    { value: 'fixed', label: 'Fixed-term lease' },
+                    { value: 'month_to_month', label: 'Month-to-month' },
+                    { value: 'sublet', label: 'Sublet' },
+                    { value: 'any', label: 'Any type' },
+                  ]}
+                  value={hardPrefs.target_lease_type}
+                  onChange={(v) => updateHard('target_lease_type', v)}
+                  required
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <NumberInput
+                  label="Lease Duration (Months)"
+                  placeholder="e.g. 12"
+                  value={hardPrefs.target_lease_duration_months}
+                  onChange={(v) => updateHard('target_lease_duration_months', v)}
+                  min={1}
+                  max={24}
+                  required
+                />
+              </Grid.Col>
+            </Grid>
+          </Paper>
+
+          <Paper shadow="sm" p="xl" radius="md" withBorder>
+            <Title order={4} mb="md">
+              Soft Constraints
+            </Title>
+            <Text size="sm" c="dimmed" mb="lg">
+              Used for ranking and group compatibility only.
+            </Text>
+
+            <Grid>
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <MultiSelect
+                  label="Preferred Neighborhoods"
+                  placeholder={hardPrefs.target_city ? 'Pick neighborhoods' : 'Select city first'}
+                  data={neighborhoodOptions}
+                  value={softPrefs.preferred_neighborhoods}
+                  onChange={(v) => updateSoft('preferred_neighborhoods', v)}
+                  searchable
+                  searchValue={neighborhoodSearch}
+                  onSearchChange={setNeighborhoodSearch}
+                  disabled={!hardPrefs.target_city}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="Cleanliness"
+                  placeholder="Select"
+                  data={[
+                    { value: 'low', label: 'Low' },
+                    { value: 'moderate', label: 'Moderate' },
+                    { value: 'high', label: 'High' },
+                  ]}
+                  value={softPrefs.cleanliness_level}
+                  onChange={(v) => updateSoft('cleanliness_level', v)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="Social Style"
+                  placeholder="Select"
+                  data={[
+                    { value: 'quiet', label: 'Quiet' },
+                    { value: 'balanced', label: 'Balanced' },
+                    { value: 'social', label: 'Social' },
+                  ]}
+                  value={softPrefs.social_preference}
+                  onChange={(v) => updateSoft('social_preference', v)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 4 }}>
+                <Select
+                  label="Cooking Frequency"
+                  placeholder="Select"
+                  data={[
+                    { value: 'rarely', label: 'Rarely' },
+                    { value: 'sometimes', label: 'Sometimes' },
+                    { value: 'often', label: 'Often' },
+                  ]}
+                  value={softPrefs.cooking_frequency}
+                  onChange={(v) => updateSoft('cooking_frequency', v)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <Select
+                  label="Gender Identity"
+                  description="Needed only if your hard policy is same-gender-only"
+                  placeholder="Select"
+                  data={[
+                    { value: 'woman', label: 'Woman' },
+                    { value: 'man', label: 'Man' },
+                    { value: 'non_binary', label: 'Non-binary' },
+                    { value: 'other', label: 'Other' },
+                  ]}
+                  value={softPrefs.gender_identity}
+                  onChange={(v) => updateSoft('gender_identity', v)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <MultiSelect
+                  label="Amenity Priorities (Top 3)"
+                  placeholder="Select up to 3"
+                  data={AMENITY_OPTIONS}
+                  value={softPrefs.amenity_priorities}
+                  onChange={(v) => updateSoft('amenity_priorities', v)}
+                  maxValues={3}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={{ base: 12, md: 6 }}>
+                <MultiSelect
+                  label="Building Type Preferences"
+                  placeholder="Select preferred building types"
+                  data={BUILDING_TYPE_OPTIONS}
+                  value={softPrefs.building_type_preferences}
+                  onChange={(v) => updateSoft('building_type_preferences', v)}
+                />
+              </Grid.Col>
+
+              <Grid.Col span={12}>
+                <Textarea
+                  label="Optional House Rules / Notes"
+                  placeholder="Anything important for matching, like guest expectations or shared-space rules"
+                  value={softPrefs.target_house_rules}
+                  onChange={(e) => updateSoft('target_house_rules', e.currentTarget.value)}
+                  minRows={3}
+                  maxRows={6}
+                />
+              </Grid.Col>
+            </Grid>
+          </Paper>
+
+          <Box
+            style={{
+              position: 'sticky',
+              bottom: 0,
+              backgroundColor: 'white',
+              padding: '1.5rem 0',
+              borderTop: '1px solid #f1f1f1',
+              marginTop: '2rem',
+            }}
+          >
             <Group justify="center">
-              <Button 
-                size="lg" 
-                onClick={handleSave}
-                loading={saving}
-                disabled={saving}
-            style={{ 
-                  minWidth: '200px'
-                }}
-              >
+              <Button size="lg" onClick={handleSave} loading={saving} disabled={saving} style={{ minWidth: '220px' }}>
                 Save Preferences
               </Button>
             </Group>
@@ -581,5 +754,3 @@ function PreferencesPageContent() {
     </Box>
   );
 }
-
-

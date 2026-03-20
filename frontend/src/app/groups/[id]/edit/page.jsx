@@ -12,6 +12,7 @@ import {
   TextInput,
   Textarea,
   NumberInput,
+  Select,
   Group,
   Loader,
   Alert
@@ -36,11 +37,30 @@ export default function EditGroupPage() {
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [targetCity, setTargetCity] = useState('');
+  const [cityOptions, setCityOptions] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
   const [budgetMin, setBudgetMin] = useState(null);
   const [budgetMax, setBudgetMax] = useState(null);
   const [moveInDate, setMoveInDate] = useState(null);
   const [groupSize, setGroupSize] = useState(2);
   const [isSolo, setIsSolo] = useState(false);
+
+  useEffect(() => {
+    const loadCities = async () => {
+      try {
+        const query = citySearch.trim();
+        const response = await fetch(
+          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setCityOptions(result.data || []);
+      } catch {
+        // Keep form usable if options API is temporarily unavailable.
+      }
+    };
+    loadCities();
+  }, [citySearch]);
 
   // Fetch existing group data
   useEffect(() => {
@@ -64,6 +84,7 @@ export default function EditGroupPage() {
           setGroupName(group.group_name || '');
           setDescription(group.description || '');
           setTargetCity(group.target_city || '');
+          setCitySearch(group.target_city || '');
           setBudgetMin(group.budget_per_person_min || null);
           setBudgetMax(group.budget_per_person_max || null);
           setGroupSize(group.target_group_size || 2);
@@ -247,12 +268,16 @@ export default function EditGroupPage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
 
-                <TextInput
+                <Select
                   label="Target City"
-                  placeholder="e.g., San Francisco"
+                  placeholder="Search and select a city"
                   required
+                  data={cityOptions}
+                  searchable
                   value={targetCity}
-                  onChange={(e) => setTargetCity(e.target.value)}
+                  onChange={(value) => setTargetCity(value || '')}
+                  onSearchChange={setCitySearch}
+                  nothingFoundMessage="No cities found"
                 />
 
                 {!isSolo && (
@@ -311,5 +336,4 @@ export default function EditGroupPage() {
     </>
   );
 }
-
 

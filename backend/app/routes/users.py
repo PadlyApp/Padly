@@ -8,8 +8,26 @@ from typing import Optional, List
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import UserCreate, UserUpdate, UserResponse
+from app.services.controlled_vocab import (
+    validate_company,
+    validate_school,
+    validate_role_title,
+)
 
 router = APIRouter(prefix="/api", tags=["users"])
+
+
+def _validate_profile_catalog_fields(data: dict) -> dict:
+    """
+    Enforce controlled options for profile catalog fields.
+    """
+    if "company_name" in data:
+        data["company_name"] = validate_company(data.get("company_name"))
+    if "school_name" in data:
+        data["school_name"] = validate_school(data.get("school_name"))
+    if "role_title" in data:
+        data["role_title"] = validate_role_title(data.get("role_title"))
+    return data
 
 
 @router.get("/users")
@@ -83,6 +101,10 @@ async def create_user(
     
     # Convert Pydantic model to dict, excluding None values
     data = user_data.model_dump(exclude_none=True)
+    try:
+        data = _validate_profile_catalog_fields(data)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     
     user = await client.insert(
         table="users",
@@ -142,6 +164,11 @@ async def update_user(
     
     if not data:
         raise HTTPException(status_code=400, detail="No data provided for update")
+
+    try:
+        data = _validate_profile_catalog_fields(data)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     
     # Use admin client to bypass RLS for the update
     update_response = admin_client.table('users').update(data).eq('id', actual_user_id).execute()

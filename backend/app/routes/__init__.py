@@ -11,6 +11,8 @@ from .admin import router as admin_router
 from .auth import router as auth_router
 from .matches import router as matches_router
 from .recommendations import router as recommendations_router
+from .interactions import router as interactions_router
+from .options import router as options_router
 
 __all__ = [
     "users_router",
@@ -21,4 +23,6 @@ __all__ = [
     "auth_router",
     "matches_router",
     "recommendations_router",
+    "interactions_router",
+    "options_router",
 ]

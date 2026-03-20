@@ -61,7 +61,14 @@ async def trigger_group_rematching(group_id: str) -> Dict[str, Any]:
     
     # Update group with aggregated preferences
     try:
-        update_data = {'target_bedrooms': agg_prefs.get('target_bedrooms'), 'target_bathrooms': agg_prefs.get('target_bathrooms')}
+        update_data = {
+            'target_bedrooms': agg_prefs.get('target_bedrooms'),
+            'target_bathrooms': agg_prefs.get('target_bathrooms'),
+            'target_furnished': agg_prefs.get('target_furnished'),
+            'furnished_preference': agg_prefs.get('furnished_preference'),
+            'furnished_is_hard': agg_prefs.get('furnished_is_hard', False),
+            'gender_policy': agg_prefs.get('gender_policy'),
+        }
         if budget_min: update_data['budget_per_person_min'] = budget_min
         if budget_max: update_data['budget_per_person_max'] = budget_max
         if agg_prefs.get('target_move_in_date'): update_data['target_move_in_date'] = str(agg_prefs['target_move_in_date'])
