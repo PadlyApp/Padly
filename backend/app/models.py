@@ -339,11 +339,35 @@ class RoommateGroupBase(BaseModel):
     """Base roommate group model"""
     group_name: str
     description: Optional[str] = None
+    target_country: Optional[str] = None
+    target_state_province: Optional[str] = None
     target_city: str
+
+    # Keep legacy + personal-aligned naming in sync at API level.
+    budget_min: Optional[Decimal] = None
+    budget_max: Optional[Decimal] = None
     budget_per_person_min: Optional[Decimal] = None
     budget_per_person_max: Optional[Decimal] = None
+
+    move_in_date: Optional[date] = None
     target_move_in_date: Optional[date] = None
     target_group_size: int = 2
+
+    # Personal-aligned hard/soft fields
+    required_bedrooms: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_deposit_amount: Optional[Decimal] = None
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    target_furnished: Optional[bool] = None
+    furnished_is_hard: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
+    target_lease_type: Optional[str] = None
+    target_lease_duration_months: Optional[int] = None
+    target_house_rules: Optional[str] = None
+    preferred_neighborhoods: Optional[List[str]] = None
+    lifestyle_preferences: Optional[dict] = None
 
 
 class RoommateGroupCreate(RoommateGroupBase):
@@ -356,11 +380,32 @@ class RoommateGroupUpdate(BaseModel):
     """Model for updating a roommate group"""
     group_name: Optional[str] = None
     description: Optional[str] = None
+    target_country: Optional[str] = None
+    target_state_province: Optional[str] = None
     target_city: Optional[str] = None
+
+    budget_min: Optional[Decimal] = None
+    budget_max: Optional[Decimal] = None
     budget_per_person_min: Optional[Decimal] = None
     budget_per_person_max: Optional[Decimal] = None
+
+    move_in_date: Optional[date] = None
     target_move_in_date: Optional[date] = None
     target_group_size: Optional[int] = None
+    required_bedrooms: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_deposit_amount: Optional[Decimal] = None
+    furnished_preference: Optional[str] = None
+    target_furnished: Optional[bool] = None
+    furnished_is_hard: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    gender_policy: Optional[str] = None
+    target_lease_type: Optional[str] = None
+    target_lease_duration_months: Optional[int] = None
+    target_house_rules: Optional[str] = None
+    preferred_neighborhoods: Optional[List[str]] = None
+    lifestyle_preferences: Optional[dict] = None
     status: Optional[PostStatus] = None
 
     model_config = ConfigDict(extra='forbid')

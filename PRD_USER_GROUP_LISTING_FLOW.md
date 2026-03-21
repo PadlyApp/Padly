@@ -1,15 +1,15 @@
 # Product Requirements Document (PRD)
-## Padly User -> Group -> Listing Flow (v2)
+## Padly User -> Group -> Listing Flow (v3)
 
-Last updated: 2026-03-20  
-Status: Draft v2 (implementation-ready)
+Last updated: 2026-03-21  
+Status: Draft v3 (neural cutover plan added)
 
 ## 1) Objective
 
 Build an end-to-end flow where:
 1. A user registers and provides profile + housing preferences.
 2. The user discovers and joins a compatible roommate group.
-3. The group receives listing recommendations that pass hard constraints first, then are ranked by preferences and behavior (swipe history), with optional neural scoring.
+3. The group receives listing recommendations that pass hard constraints first, then are ranked by a neural-first recommender with rule/behavior fallback.
 
 ## 2) Product Principle
 
@@ -21,16 +21,18 @@ This is the correct architecture for the intended user experience and data model
 
 ## 3) Scope
 
-### In Scope (v1-v2)
+### In Scope (v1-v3)
 - User onboarding and preference capture.
 - User -> Group ranking and join workflow.
 - Group preference aggregation.
-- Group -> Listing hard-filter + ranking.
+- Group -> Listing hard-filter + neural ranking feed.
 - Swipe event collection and ranking features.
 - Deterministic fallback when neural model is unavailable.
+- Sunset of legacy stable matching for Group -> Listing path.
 
 ### Out of Scope (for now)
 - Fully ML-driven user -> group ranking.
+- Replacing current User -> Group matching service (keep existing logic for now).
 - Real-time chat and collaborative decision workflows.
 - Landlord-side personalization.
 
@@ -77,8 +79,9 @@ Rule: hard constraints are never used as tie-breakers. They are pass/fail gates.
 
 ### Stage D: Group -> Listing Discovery
 - Hard-filter listings by group constraints.
-- Rank eligible listings by rule score + behavior score + optional neural score.
-- Expose ranked list and explanation to group.
+- Rank eligible listings with neural-first scoring + rule/behavior fallback.
+- Expose top-N ranked feed and explanation to group.
+- No one-to-one stable assignment step in this stage.
 
 ### Stage E: Feedback Loop
 - Persist every swipe event.
@@ -134,7 +137,7 @@ Default weights:
 - `w_trust = 0.15`
 - `w_behavior = 0.15`
 
-## 7.2 Group -> Listing
+## 7.2 Group -> Listing (Neural Ranker, No Stable Matching)
 
 Hard gates:
 - city/state
@@ -159,6 +162,10 @@ Default weights by data maturity:
 If ML unavailable:
 - Force `w_ml=0` and re-normalize rule/behavior weights.
 - System must still return 200 with deterministic ranking.
+
+Operational rule:
+- Group -> Listing uses direct ranking only.
+- Deferred-acceptance/Gale-Shapley is not part of this path.
 
 ## 8) Swipe Event Contract (Required)
 
@@ -271,10 +278,10 @@ Reliability:
 
 ## 14) Rollout Plan With Gates
 
-### Phase 1: Rules-First Stable Flow
+### Phase 1: Rules-First Flow (legacy)
 Deliver:
 - user -> group rules ranking
-- group -> listing hard+soft rules
+- group -> listing hard+soft rules baseline
 - swipe event storage
 - deterministic fallback
 
@@ -293,16 +300,38 @@ Exit gate:
 - +8% swipe-like rate over Phase 1
 - no regression in hard-pass correctness
 
-### Phase 3: Neural Ranking
+### Phase 3A: Neural Group -> Listing Foundation
 Deliver:
-- two-tower inference in ranking path
-- dynamic weights by swipe volume
-- A/B switch and rollback kill-switch
+- introduce dedicated Group -> Listing neural ranking endpoint
+- two-tower inference in Group -> Listing ranking path
+- dynamic weights by swipe volume (rule/behavior/ml blend)
+- explainability payload and score breakdown in endpoint response
+- hard-filter correctness guardrail before scoring (must-pass gate)
+- shadow/parallel-read mode to compare neural-ranked output vs legacy output
+- feature flag + rollback kill-switch (default OFF)
 
 Exit gate:
-- +15% swipe-like rate vs Phase 1
-- >=99.5% availability
+- 100% hard-pass correctness in shadow mode
+- Group -> Listing ranking p95 within SLO (<900ms)
+- recommendation 5xx rate <0.5%
+- no blocker regressions in explanation payload contract
+- stable fallback proven (model unavailable still returns ranked list)
+
+### Phase 3B: Neural Cutover + Stable Sunset
+Deliver:
+- switch Group page listing feed to neural endpoint as primary source
+- gradual traffic ramp (for example 10% -> 25% -> 50% -> 100%)
+- keep kill-switch for instant rollback to prior serving path
+- stop creating new stable Group -> Listing assignments for live serving
+- keep stable matching data read-only for historical/audit access
+- update runbooks, alerting, and owner on-call procedures for neural serving
+
+Exit gate:
+- 100% production traffic served by neural Group -> Listing path
+- +15% swipe-like rate vs Phase 1 baseline
+- >=99.5% availability at full traffic
 - no fairness guardrail violations
+- zero dependency on stable matching for Group -> Listing serving path
 
 ## 15) Functional Acceptance Criteria
 
@@ -313,8 +342,27 @@ Exit gate:
   - request group join
 - Existing group can:
   - see only hard-eligible listings
-  - receive ranked listings with score explanations
+  - receive neural-ranked listings with score explanations
 - If ML model fails:
   - endpoint still returns ranked list using deterministic fallback
   - no 500 due to model load/inference failure
 
+## 16) Architecture Decision Update (2026-03-21)
+
+Decision:
+- Keep User -> Group matching as currently implemented.
+- Replace Group -> Listing stable matching with neural ranking.
+
+What changes:
+- Group listing feed is produced by neural/rules/behavior ranking after hard filters.
+- Stable matching endpoints/tables become legacy for historical data only.
+
+What stays the same:
+- User onboarding and preferences flow.
+- User -> Group discovery and join workflow.
+- Swipe telemetry and behavior feature extraction.
+
+Cutover requirements:
+- Add a dedicated Group -> Listing neural endpoint and move group pages to it.
+- Keep fallback scoring active when model inference is unavailable.
+- Keep explainability payload for every returned listing.

@@ -5,11 +5,23 @@ CRUD operations for listings table
 
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
+import os
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import ListingCreate, ListingUpdate
 
 router = APIRouter(prefix="/api", tags=["listings"])
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stable_group_listing_writes_enabled() -> bool:
+    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
 
 
 @router.get("/listings")
@@ -275,6 +287,15 @@ async def confirm_match_as_listing(
     Confirmed matches are preserved during re-matching - only unconfirmed
     matches are recalculated when new groups join or preferences change.
     """
+    if not _stable_group_listing_writes_enabled():
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Stable match confirmation writes are disabled in Phase 3B. "
+                "Group->Listing serving now uses neural ranking."
+            ),
+        )
+
     from datetime import datetime, timezone
     from app.dependencies.supabase import get_admin_client
     
@@ -371,6 +392,15 @@ async def reject_match_as_listing(
     
     This removes the match and optionally triggers re-matching.
     """
+    if not _stable_group_listing_writes_enabled():
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Stable match rejection writes are disabled in Phase 3B. "
+                "Group->Listing serving now uses neural ranking."
+            ),
+        )
+
     from app.dependencies.supabase import get_admin_client
     
     supabase = get_admin_client()
