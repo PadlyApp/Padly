@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field
 
 from app.dependencies.auth import require_user_token
 from app.dependencies.supabase import get_admin_client
+from app.services.behavior_features import (
+    build_group_behavior_vector,
+    build_user_behavior_vector,
+    get_swipe_health_summary,
+)
 
 router = APIRouter(prefix="/api/interactions", tags=["interactions"])
 
@@ -24,7 +29,7 @@ class SwipeEventCreate(BaseModel):
     surface: str = Field(default="discover", min_length=1, max_length=100)
     session_id: str = Field(..., min_length=1, max_length=128)
     position_in_feed: int = Field(default=0, ge=0)
-    algorithm_version: Optional[str] = Field(default=None, max_length=100)
+    algorithm_version: str = Field(..., min_length=1, max_length=100)
     model_version: Optional[str] = Field(default=None, max_length=100)
     city_filter: Optional[str] = Field(default=None, max_length=100)
     preference_snapshot_hash: Optional[str] = Field(default=None, max_length=128)
@@ -54,6 +59,24 @@ def _resolve_current_user_id(token: str) -> str:
         return fallback_record.data[0]["id"]
 
     raise HTTPException(status_code=404, detail="User profile not found")
+
+
+def _require_group_membership(group_id: str, user_id: str) -> None:
+    """
+    Require that user is an accepted member of the target group.
+    """
+    supabase = get_admin_client()
+    membership = (
+        supabase.table("group_members")
+        .select("group_id")
+        .eq("group_id", group_id)
+        .eq("user_id", user_id)
+        .eq("status", "accepted")
+        .limit(1)
+        .execute()
+    )
+    if not membership.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
 
 
 @router.post("/swipes")
@@ -173,3 +196,78 @@ async def get_my_swipe_events(
             )
         raise HTTPException(status_code=500, detail=f"Failed to fetch swipe events: {e}")
 
+
+@router.get("/behavior/me")
+async def get_my_behavior_vector(
+    days: int = Query(180, ge=7, le=365),
+    max_events: int = Query(2000, ge=100, le=10000),
+    token: str = Depends(require_user_token),
+):
+    """
+    Return Phase 2A behavior vector for the authenticated user.
+    """
+    user_id = _resolve_current_user_id(token)
+    try:
+        vector = build_user_behavior_vector(user_id=user_id, days=days, max_events=max_events)
+        return {"status": "success", "data": vector}
+    except Exception as e:
+        err = str(e).lower()
+        if "swipe_interactions" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Swipe storage not configured. Run migration 004_swipe_interactions.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to build user behavior vector: {e}")
+
+
+@router.get("/behavior/groups/{group_id}")
+async def get_group_behavior(
+    group_id: str,
+    days: int = Query(180, ge=7, le=365),
+    max_events_per_user: int = Query(2000, ge=100, le=10000),
+    token: str = Depends(require_user_token),
+):
+    """
+    Return Phase 2A behavior vector for a group.
+    Access is limited to accepted group members.
+    """
+    user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=user_id)
+    try:
+        vector = build_group_behavior_vector(
+            group_id=group_id,
+            days=days,
+            max_events_per_user=max_events_per_user,
+        )
+        return {"status": "success", "data": vector}
+    except Exception as e:
+        err = str(e).lower()
+        if "swipe_interactions" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Swipe storage not configured. Run migration 004_swipe_interactions.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to build group behavior vector: {e}")
+
+
+@router.get("/behavior/health")
+async def get_behavior_health(
+    days: int = Query(7, ge=1, le=90),
+    max_events: int = Query(10000, ge=500, le=100000),
+    token: str = Depends(require_user_token),
+):
+    """
+    Return event quality and freshness summary for swipe interactions.
+    """
+    _ = _resolve_current_user_id(token)
+    try:
+        summary = get_swipe_health_summary(days=days, max_events=max_events)
+        return {"status": "success", "data": summary}
+    except Exception as e:
+        err = str(e).lower()
+        if "swipe_interactions" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Swipe storage not configured. Run migration 004_swipe_interactions.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to build behavior health summary: {e}")

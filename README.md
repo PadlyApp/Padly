@@ -46,6 +46,7 @@ The FastAPI app mounts routers in `backend/app/main.py`:
 - `matches` (`/api/matches*`)
 - `stable-matches` (`/api/stable-matches*`)
 - `recommendations` (`/api/recommendations`)
+- `interactions` (`/api/interactions/*`)
 - `admin` (`/api/admin/*`)
 
 ## Matching and Recommendation System
@@ -232,6 +233,14 @@ chmod +x run-dev.sh
 - `DELETE /api/listings/{listing_id}`
 - `POST /api/recommendations`
 
+### Discover Interactions (Phase 2A)
+
+- `POST /api/interactions/swipes`
+- `GET /api/interactions/swipes/me`
+- `GET /api/interactions/behavior/me`
+- `GET /api/interactions/behavior/groups/{group_id}`
+- `GET /api/interactions/behavior/health`
+
 ## Notes for Contributors
 
 - Frontend currently uses `http://localhost:8000` directly in many pages; `NEXT_PUBLIC_API_URL` is only used in `frontend/lib/api.js`.
@@ -246,4 +255,3 @@ chmod +x run-dev.sh
 - `DATASET_REQUIREMENTS.md`
 - `SOURCE_OF_TRUTH.md`
 - `COMPLETION_SUMMARY.md`
-

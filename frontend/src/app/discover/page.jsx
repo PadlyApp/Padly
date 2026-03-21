@@ -83,11 +83,33 @@ function DiscoverContent() {
       // Build liked-listing averages to personalise the model
       const liked = getLikedListings();
       const likedExtras = {};
+      let behaviorSampleSize;
+
+      // Prefer persisted behavior features from backend (Phase 2A).
+      if (authState?.accessToken) {
+        try {
+          const behaviorRes = await fetch('http://localhost:8000/api/interactions/behavior/me?days=180', {
+            headers: { Authorization: `Bearer ${authState.accessToken}` },
+          });
+          if (behaviorRes.ok) {
+            const behaviorPayload = await behaviorRes.json();
+            const behavior = behaviorPayload?.data || {};
+            if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
+            if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
+            if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
+            if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
+          }
+        } catch {
+          // Behavior vector is optional in Phase 2A.
+        }
+      }
+
+      // Fallback to local in-session liked cache when backend behavior data is sparse.
       if (liked.length > 0) {
         const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
-        likedExtras.liked_mean_price  = avg(liked.map((l) => l.price_per_month));
-        likedExtras.liked_mean_beds   = avg(liked.map((l) => l.number_of_bedrooms));
-        likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
+        if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
+        if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
+        if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
       }
 
       const body = {
@@ -104,6 +126,7 @@ function DiscoverContent() {
         pref_lat:        prefs.target_latitude   ?? undefined,
         pref_lon:        prefs.target_longitude  ?? undefined,
         top_n: 30,
+        behavior_sample_size: behaviorSampleSize,
         ...likedExtras,
       };
 
@@ -154,8 +177,8 @@ function DiscoverContent() {
           surface: 'discover',
           session_id: swipeSessionIdRef.current,
           position_in_feed: position,
-          algorithm_version: 'phase1-rules',
-          model_version: 'recommender-v1',
+          algorithm_version: listing?.algorithm_version || 'phase2b-cold-no-ml',
+          model_version: listing?.ml_score != null ? 'recommender-v1' : null,
           city_filter: listing.city ?? null,
         }),
       });
