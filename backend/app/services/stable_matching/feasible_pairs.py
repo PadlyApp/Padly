@@ -100,15 +100,18 @@ def price_matches(group: Dict, listing: Dict) -> bool:
 # --- HARD ATTRIBUTES ---
 
 def hard_attributes_match(group: Dict, listing: Dict) -> bool:
-    """Check non-negotiable requirements (furnished, utilities, pets, parking, AC)."""
+    """Check non-negotiable requirements (furnished required, pets, parking, AC)."""
+    # Furnished is hard only when explicitly marked as hard requirement.
+    if (group.get('furnished_is_hard') or (group.get('furnished_preference') == 'required')) and group.get('target_furnished') is True:
+        if listing.get('furnished') is not True:
+            return False
+
     checks = [
-        ('target_furnished', 'furnished'),
-        ('target_utilities_included', 'utilities_included'),
         ('needs_pets_allowed', 'pets_allowed'),
         ('needs_parking', 'parking'),
         ('needs_air_conditioning', 'air_conditioning'),
     ]
-    
+
     for group_key, listing_key in checks:
         if group.get(group_key) is True and listing.get(listing_key) is not True:
             return False

@@ -92,6 +92,13 @@ backend/
 - `GET /api/listings` - List all listings
 - `POST /api/listings/{id}/confirm-match` - Confirm match
 
+### Interactions (Phase 2A)
+- `POST /api/interactions/swipes` - Persist Discover swipe events
+- `GET /api/interactions/swipes/me` - Inspect current user swipe history
+- `GET /api/interactions/behavior/me` - Build authenticated user behavior vector
+- `GET /api/interactions/behavior/groups/{group_id}` - Build group behavior vector (member-only access)
+- `GET /api/interactions/behavior/health` - Swipe event quality/freshness summary
+
 Full API documentation available at `/docs` when server is running.
 
 ---

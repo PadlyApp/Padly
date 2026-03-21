@@ -124,6 +124,7 @@ class UserResponse(UserBase):
 class PersonalPreferencesBase(BaseModel):
     """Base personal preferences model matching database schema"""
     # Hard Constraints (Non-Negotiables)
+    target_country: Optional[str] = None  # ISO alpha-2 code (US/CA)
     target_city: Optional[str] = None
     target_state_province: Optional[str] = None
     budget_min: Optional[float] = None  # Accept float from frontend
@@ -132,10 +133,12 @@ class PersonalPreferencesBase(BaseModel):
     move_in_date: Optional[str] = None  # Accept ISO string from frontend
     target_lease_type: Optional[str] = None
     target_lease_duration_months: Optional[int] = None
+    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
     
     # Soft Preferences (Nice-to-Haves)
     target_bathrooms: Optional[float] = None  # Accept float from frontend
     target_furnished: Optional[bool] = None
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
     target_utilities_included: Optional[bool] = None
     target_deposit_amount: Optional[float] = None  # Accept float from frontend
     target_house_rules: Optional[str] = None

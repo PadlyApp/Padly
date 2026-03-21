@@ -120,3 +120,66 @@ After migration is applied:
 3. ⏳ Monitor for 24 hours
 4. ⏳ Apply to production
 5. ⏳ Proceed with Phase 2: User-Group Matching Service
+
+---
+
+## Migration: Swipe Interactions (Phase 1)
+
+File: `004_swipe_interactions.sql`
+
+### Overview
+Creates `swipe_interactions` to store Discover swipe events for behavior-driven ranking.
+
+### What It Adds
+1. `swipe_interactions` table
+2. Idempotency unique index on `(actor_user_id, listing_id, session_id, position_in_feed)`
+3. Query indexes for user/group/listing event lookups
+
+### Apply
+Run `004_swipe_interactions.sql` in Supabase SQL Editor after existing migrations.
+
+### Verify
+```sql
+SELECT event_id, actor_user_id, listing_id, action, created_at
+FROM swipe_interactions
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+## Migration: Swipe Interaction Privileges (Phase 1 Fix)
+
+File: `005_swipe_interactions_privileges.sql`
+
+### Overview
+Adds grants and RLS policies for `swipe_interactions` so authenticated writes/reads and service-role access work correctly.
+
+### What It Adds
+1. `GRANT` for `authenticated` and `service_role`
+2. RLS enabled on `swipe_interactions`
+3. User-scoped insert/select policies
+
+## Migration: Office Location on Users
+
+File: `007_add_office_location_to_users.sql`
+
+### Overview
+Adds canonical office location fields to `users` so commute-aware and group-similarity logic can use office geography.
+
+### What It Adds
+1. `office_country` (`US`/`CA` constrained)
+2. `office_state_province`
+3. `office_city`
+4. Completeness check to avoid partial office locations
+5. Location indexes for filtering and matching
+
+## Migration: Remove Office Location from Users
+
+File: `009_remove_office_location_from_users.sql`
+
+### Overview
+Removes office location from `users` to simplify signup and preference flow.
+
+### What It Changes
+1. Drops office location constraints
+2. Drops office location indexes
+3. Drops `office_country`, `office_state_province`, and `office_city`

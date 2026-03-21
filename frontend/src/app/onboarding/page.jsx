@@ -16,6 +16,7 @@ import {
   Progress,
   SegmentedControl,
   Box,
+  Select,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -25,6 +26,9 @@ import { useAuth } from '../contexts/AuthContext';
 export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [active, setActive] = useState(0);
+  const [companyOptions, setCompanyOptions] = useState([]);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [roleTitleOptions, setRoleTitleOptions] = useState([]);
   const { user, authState, getValidToken } = useAuth();
   const router = useRouter();
 
@@ -34,6 +38,34 @@ export default function OnboardingPage() {
       router.push('/login');
     }
   }, [authState, router]);
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
+          fetch('http://localhost:8000/api/options/companies?limit=500'),
+          fetch('http://localhost:8000/api/options/schools?limit=500'),
+          fetch('http://localhost:8000/api/options/roles'),
+        ]);
+
+        if (companiesRes.ok) {
+          const result = await companiesRes.json();
+          setCompanyOptions(result.data || []);
+        }
+        if (schoolsRes.ok) {
+          const result = await schoolsRes.json();
+          setSchoolOptions(result.data || []);
+        }
+        if (rolesRes.ok) {
+          const result = await rolesRes.json();
+          setRoleTitleOptions(result.data || []);
+        }
+      } catch {
+        // Keep onboarding usable if options service is temporarily unavailable.
+      }
+    };
+    loadOptions();
+  }, []);
 
   const form = useForm({
     initialValues: {
@@ -247,14 +279,18 @@ export default function OnboardingPage() {
 
             <Stepper.Step label="Work" icon={<IconBriefcase size={18} />}>
               <Stack mt="md">
-                <TextInput
+                <Select
                   label="Company Name"
-                  placeholder="Where do you work? (optional)"
+                  placeholder="Select company (optional)"
+                  data={companyOptions}
+                  searchable
                   {...form.getInputProps('company_name')}
                 />
-                <TextInput
+                <Select
                   label="Role / Title"
-                  placeholder="Your job title (optional)"
+                  placeholder="Select role/title (optional)"
+                  data={roleTitleOptions}
+                  searchable
                   {...form.getInputProps('role_title')}
                 />
               </Stack>
@@ -262,9 +298,11 @@ export default function OnboardingPage() {
 
             <Stepper.Step label="Education" icon={<IconSchool size={18} />}>
               <Stack mt="md">
-                <TextInput
+                <Select
                   label="School / University"
-                  placeholder="Where did you study?"
+                  placeholder="Select school/university"
+                  data={schoolOptions}
+                  searchable
                   required
                   {...form.getInputProps('school_name')}
                 />

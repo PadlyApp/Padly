@@ -1,333 +1,257 @@
-# Padly
+# Padly (full-stack)
 
-A trusted platform for students, interns, and early-career professionals to find housing and compatible roommates.
+Padly is a housing and roommate matching platform for students, interns, and early-career professionals.  
+This branch contains an actively developed full-stack app:
 
----
+- Frontend: Next.js + Mantine (`frontend/`)
+- Backend: FastAPI + Supabase (`backend/`)
+- Matching stack: user-to-group compatibility + stable group-to-listing matching
 
-## Project Vision
+## What Is Implemented Now
 
-The mission of Padly is to eliminate the stress and fragmentation of finding housing during pivotal career and life transitions. We are building a centralized, secure, and user-centric platform that connects a community of peers, landlords, and subletters, enabling them to transact with confidence and ease.
+### Frontend Product Flows
 
----
+- Auth and session management (signup, signin, signout, token refresh, protected routes)
+- Onboarding flow and profile completion
+- Group discovery, creation, editing, and detail management
+- Group invitations and join-request review/approval flows
+- Preferences form (housing constraints + soft preferences)
+- Discover swipe experience for listing recommendations
+- Matches page (liked listings from Discover)
+- Listing detail page and account/profile editing
 
-## Key Features
+Main route files are under `frontend/src/app/`, including:
 
-### Authentication & Profiles
-- Secure sign-up and login with Supabase Auth (JWT-based)
-- User profiles with professional context (company, school, role)
-- Email verification system for trust building
-- Account management with editable profile information
+- `page.jsx` (home)
+- `login/page.jsx`, `signup/page.jsx`
+- `onboarding/page.jsx`
+- `groups/page.jsx`, `groups/create/page.jsx`, `groups/[id]/page.jsx`, `groups/[id]/edit/page.jsx`
+- `invitations/page.jsx`
+- `preferences/page.jsx`
+- `discover/page.jsx`
+- `matches/page.jsx`
+- `listings/[id]/page.jsx`
+- `account/page.jsx`
 
-### Roommate Groups
-- Create and manage roommate groups
-- Request to join existing groups
-- Group owner approval system for join requests
-- Dynamic group sizing (1-N members)
-- Solo groups for individual users
-- Group recommendations based on compatibility scoring
-- Automatic ownership transfer when creators leave
+### Backend API Domains
 
-### Housing Listings & Matching
-- Browse and search housing listings
-- Intelligent matching using Gale-Shapley Stable Matching algorithm
-- Large Neighborhood Search (LNS) optimization for improved match quality
-- Hard constraints filtering (city, budget, date, bedrooms)
-- Soft preferences scoring (bathrooms, furnished, utilities, deposit, house rules)
-- Real-time match updates when preferences change
+The FastAPI app mounts routers in `backend/app/main.py`:
 
-### Preferences System
-- Hard constraints (non-negotiable requirements)
-- Soft preferences (nice-to-haves with scoring)
-- Lifestyle compatibility matching
-- Automatic stable matching trigger on preference updates
+- `auth` (`/api/auth/*`)
+- `users` (`/api/users*`)
+- `listings` (`/api/listings*`)
+- `roommates` (`/api/roommate-posts*`)
+- `roommate-groups` (`/api/roommate-groups*`)
+- `preferences` (`/api/preferences*`)
+- `matches` (`/api/matches*`)
+- `stable-matches` (`/api/stable-matches*`)
+- `recommendations` (`/api/recommendations`)
+- `interactions` (`/api/interactions/*`)
+- `admin` (`/api/admin/*`)
 
-### Matching Algorithms
-- **Gale-Shapley Deferred Acceptance**: Guarantees stable matches with no blocking pairs
-- **Large Neighborhood Search (LNS)**: Optimizes match quality through iterative destroy-repair cycles
-- **Greedy Heuristics**: Regret-greedy and randomized greedy for repair operations
-- Compatibility scoring (0-100 points) based on budget, date, company/school, verification, and lifestyle
+## Matching and Recommendation System
 
----
+### 1) User -> Group Compatibility
 
-## Tech Stack
+`backend/app/services/user_group_matching.py` ranks groups for a user using:
 
-### Frontend
-- **Next.js 15** - React framework with server-side rendering
-- **React 19** - UI library
-- **Mantine** - Component library and UI framework
-- **TanStack React Query** - Data fetching and caching
-- **TypeScript** - Type safety
+- Hard filters: city, budget overlap, move-in date window, open group slots
+- Soft scoring (0-100): budget fit, date fit, lease prefs, amenities, affiliation, verification, lifestyle
 
-### Backend
-- **FastAPI** - High-performance Python web framework
-- **Uvicorn** - ASGI server
-- **Pydantic** - Data validation using Python type hints
-- **Supabase** - Backend-as-a-Service (Auth, Database, Storage)
+Used by:
 
-### Database
-- **PostgreSQL** - Relational database (via Supabase)
-- **PostgREST** - Auto-generated REST API from database schema
+- `GET /api/matches/groups`
+- `GET /api/roommate-groups/discover`
 
-### Authentication
-- **Supabase Auth** - JWT-based authentication with refresh tokens
+### 2) Group -> Listing Stable Matching
 
-### API Documentation
-- **OpenAPI/Swagger** - Auto-generated interactive API docs at `/docs`
+`POST /api/stable-matches/run` executes a multi-phase pipeline:
 
----
+1. Filter eligible groups/listings (`services/stable_matching/filters.py`)
+2. Build feasible pairs (`services/stable_matching/feasible_pairs.py`)
+3. Score and build preference lists (`services/stable_matching/scoring.py`)
+4. Run Gale-Shapley deferred acceptance (`services/stable_matching/deferred_acceptance.py`)
+5. Run LNS optimization (`services/lns_optimizer.py`)
+6. Persist matches/diagnostics (`services/stable_matching/persistence.py`)
 
-## Prerequisites
+The run preserves already confirmed matches and re-matches only unconfirmed candidates.
 
-Before you begin, ensure you have the following installed:
+### 3) Listing Recommendations Endpoint
 
-- **Node.js** (v18 or higher) and **npm**
-- **Python** (v3.9 or higher)
-- **Supabase Account** - [Create one here](https://supabase.com)
-- **Git**
+`POST /api/recommendations` (in `backend/app/routes/recommendations.py`) scores active listings and returns ranked recommendations for the Discover UI.
 
----
+## Tech Stack (Current)
 
-## Getting Started
+### Frontend (`frontend/package.json`)
 
-### 1. Clone the Repository
+- Next.js `15.5.4`
+- React `19.1.0`
+- Mantine `7.17.8`
+- TanStack Query `5.90.x`
+- Supabase JS `2.58.0`
+- TypeScript + ESLint
 
-```bash
-git clone <repository-url>
-cd Padly
-```
+### Backend (`backend/requirements.txt`)
 
-### 2. Set Up Supabase
-
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Go to Project Settings → API
-3. Copy your `SUPABASE_URL` and `SUPABASE_ANON_KEY`
-4. Copy your `SUPABASE_SERVICE_ROLE_KEY` (keep this secret!)
-
-### 3. Backend Setup
-
-```bash
-cd backend
-
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
-# On Windows:
-.\venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file in backend/app/ directory
-# Add the following variables:
-# SUPABASE_URL=your_supabase_url
-# SUPABASE_ANON_KEY=your_anon_key
-# SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
-
-### 4. Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Create .env.local file (optional, if using Supabase client directly)
-# NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-# NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-```
-
----
-
-## Running the Application
-
-### Option 1: Run Both Services Together (Recommended)
-
-```bash
-# From project root
-chmod +x run-dev.sh  # On Mac/Linux
-./run-dev.sh
-
-# On Windows, use Git Bash or WSL
-```
-
-This script will:
-- Start the FastAPI backend on `http://localhost:8000`
-- Start the Next.js frontend on `http://localhost:3000`
-- Auto-install dependencies if needed
-
-### Option 2: Run Services Separately
-
-**Backend:**
-```bash
-cd backend
-source venv/bin/activate  # or .\venv\Scripts\activate on Windows
-uvicorn app.main:app --reload
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-### Access Points
-
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
----
-
-## Neural Net Branch: Two-Tower Baseline
-
-This branch includes a TensorFlow baseline you can use to choose loss functions and define model inputs.
-
-### Baseline Location
-
-- **Model script**: `backend/app/ai/two_tower_baseline.py`
-- **Architecture explanation**: `TWO_TOWER_EXPLAINER.md`
-- **Integration roadmap**: `ML_ROADMAP.md`
-
-### Run the Baseline
-
-```bash
-cd backend
-source venv/bin/activate
-pip install -r requirements.txt
-python -m app.ai.two_tower_baseline --epochs 5 --loss binary_crossentropy
-```
-
-### Change Loss Function
-
-```bash
-python -m app.ai.two_tower_baseline --loss softmax
-```
-
-Supported loss values:
-- `binary_crossentropy`
-- `softmax`
-
-### Use Your Own Input Data
-
-Provide an `.npz` file with:
-- `user_features`: shape `(N, user_dim)`
-- `item_features`: shape `(N, item_dim)`
-- `labels`: shape `(N,)` with 0/1 labels
-
-Run:
-
-```bash
-python -m app.ai.two_tower_baseline --npz-path path/to/train_data.npz --loss binary_crossentropy
-```
-
-### Output
-
-By default, the trained model is saved to:
-
-- `backend/app/ai/artifacts/two_tower_baseline.keras`
-
----
+- FastAPI `0.118.0`
+- Uvicorn `0.37.0`
+- Supabase Python client `2.21.1`
+- Pydantic `2.12.3`
+- python-dotenv `1.0.0`
+- TensorFlow `2.20.0` (for AI/recommender experiments under `backend/app/ai/`)
 
 ## Project Structure
 
-```
+```text
 Padly/
-├── backend/                 # FastAPI backend
+├── frontend/
+│   ├── src/app/                 # Next.js App Router pages/components/providers
+│   ├── lib/                     # API + auth clients
+│   └── package.json
+├── backend/
 │   ├── app/
-│   │   ├── main.py         # FastAPI application entry point
-│   │   ├── routes/         # API route handlers
-│   │   │   ├── auth.py    # Authentication endpoints
-│   │   │   ├── users.py   # User management
-│   │   │   ├── groups.py   # Roommate groups
-│   │   │   ├── listings.py # Housing listings
-│   │   │   ├── preferences.py # User preferences
-│   │   │   └── stable_matching.py # Matching algorithm
-│   │   ├── services/       # Business logic
-│   │   │   ├── stable_matching/ # Matching algorithm modules
-│   │   │   ├── lns_optimizer.py # LNS optimization
-│   │   │   └── user_group_matching.py # User-group compatibility
-│   │   ├── models.py       # Pydantic models
-│   │   ├── db.py          # Database configuration
-│   │   └── schemas/        # Database schema SQL files
-│   ├── requirements.txt    # Python dependencies
-│   └── migrations/         # Database migrations
-│
-├── frontend/               # Next.js frontend
-│   ├── src/
-│   │   ├── app/           # Next.js app directory
-│   │   │   ├── account/   # Account management page
-│   │   │   ├── groups/    # Groups pages
-│   │   │   ├── listings/ # Listings pages
-│   │   │   ├── matches/   # Matches page
-│   │   │   ├── preferences/ # Preferences page
-│   │   │   └── components/ # React components
-│   │   ├── contexts/      # React contexts (Auth)
-│   │   └── lib/           # Utility functions
-│   └── package.json       # Node dependencies
-│
-└── run-dev.sh             # Development server launcher
+│   │   ├── main.py              # FastAPI entrypoint
+│   │   ├── routes/              # API route modules
+│   │   ├── services/            # Matching/business services
+│   │   ├── ai/                  # Recommender + model artifacts/docs
+│   │   ├── schemas/             # SQL schema + ERD
+│   │   └── db.py                # Supabase env + clients
+│   ├── migrations/              # SQL migrations
+│   └── requirements.txt
+└── run-dev.sh                   # Starts backend + frontend
 ```
 
----
+## Local Setup
 
-## API Endpoints
+### Prerequisites
 
-### Authentication
-- `POST /api/auth/signup` - Register new user
-- `POST /api/auth/signin` - Login user
-- `GET /api/auth/me` - Get current user
-- `POST /api/auth/signout` - Sign out
+- Node.js 18+
+- npm
+- Python 3.10+
+- Supabase project (URL + keys)
 
-### Users
-- `GET /api/users` - List users
-- `GET /api/users/{user_id}` - Get user profile
-- `PUT /api/users/{user_id}` - Update user profile
+### 1) Backend Setup
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate   # Windows: .\venv\Scripts\activate
+pip install -r requirements.txt
+cp app/.env.example app/.env
+```
+
+Update `backend/app/.env` with:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_KEY`
+- Optional: `VERIFY_JWT` (`true`/`false`)
+- Optional: `SUPABASE_JWT_SECRET`
+
+Then run:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Backend URLs:
+
+- API: `http://localhost:8000`
+- Swagger docs: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+### 2) Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend URL:
+
+- App: `http://localhost:3000`
+
+### 3) Start Both Services (Recommended)
+
+From repo root:
+
+```bash
+chmod +x run-dev.sh
+./run-dev.sh
+```
+
+## Database and Schema Artifacts
+
+- Main schema SQL: `backend/app/schemas/padly_schema.sql`
+- ERD: `backend/app/schemas/padly_erd.pdf` and `.drawio`
+- Migrations:
+  - `backend/migrations/001_dynamic_group_sizing.sql`
+  - `backend/migrations/002_solo_user_groups.sql`
+  - `backend/migrations/003_expand_personal_preferences.sql`
+  - `backend/migrations/003_match_confirmation.sql`
+  - `backend/migrations/add_group_members_status.sql`
+
+## Useful API Surface (Quick Reference)
+
+### Auth
+
+- `POST /api/auth/signup`
+- `POST /api/auth/signin`
+- `POST /api/auth/refresh`
+- `POST /api/auth/signout`
+- `GET /api/auth/me`
+
+### Preferences / Matching
+
+- `GET /api/preferences/{user_id}`
+- `PUT /api/preferences/{user_id}` (also triggers stable matching for target city)
+- `GET /api/matches/groups`
+- `POST /api/stable-matches/run`
+- `GET /api/stable-matches/active`
+- `GET /api/stable-matches/stats`
 
 ### Groups
-- `GET /api/roommate-groups` - List groups (with filters)
-- `GET /api/roommate-groups/{group_id}` - Get group details
-- `POST /api/roommate-groups` - Create group
-- `PUT /api/roommate-groups/{group_id}` - Update group
-- `POST /api/roommate-groups/{group_id}/request-join` - Request to join
-- `POST /api/roommate-groups/{group_id}/accept-request/{user_id}` - Accept join request
-- `DELETE /api/roommate-groups/{group_id}/leave` - Leave group
 
-### Matching
-- `GET /api/matches/groups` - Get compatible groups for user
-- `POST /api/stable-matches/run` - Run stable matching algorithm
-- `GET /api/stable-matches/active` - Get active matches
+- `GET /api/roommate-groups`
+- `POST /api/roommate-groups`
+- `GET /api/roommate-groups/{group_id}`
+- `PUT /api/roommate-groups/{group_id}`
+- `DELETE /api/roommate-groups/{group_id}`
+- `POST /api/roommate-groups/{group_id}/request-join`
+- `POST /api/roommate-groups/{group_id}/join`
+- `POST /api/roommate-groups/{group_id}/reject`
+- `POST /api/roommate-groups/{group_id}/accept-request/{user_id}`
+- `POST /api/roommate-groups/{group_id}/reject-request/{user_id}`
 
-### Preferences
-- `GET /api/preferences/{user_id}` - Get user preferences
-- `PUT /api/preferences/{user_id}` - Update preferences
+### Listings / Recommendations
 
-## Links
+- `GET /api/listings`
+- `GET /api/listings/{listing_id}`
+- `POST /api/listings`
+- `PUT /api/listings/{listing_id}`
+- `DELETE /api/listings/{listing_id}`
+- `POST /api/recommendations`
 
-- [Supabase Documentation](https://supabase.com/docs)
-- [FastAPI Documentation](https://fastapi.tiangolo.com)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Mantine Documentation](https://mantine.dev)
+### Discover Interactions (Phase 2A)
 
----
+- `POST /api/interactions/swipes`
+- `GET /api/interactions/swipes/me`
+- `GET /api/interactions/behavior/me`
+- `GET /api/interactions/behavior/groups/{group_id}`
+- `GET /api/interactions/behavior/health`
 
-## Troubleshooting
+## Notes for Contributors
 
-### Backend won't start
-- Ensure virtual environment is activated
-- Check that `.env` file exists with correct Supabase credentials
-- Verify Python version (3.9+)
+- Frontend currently uses `http://localhost:8000` directly in many pages; `NEXT_PUBLIC_API_URL` is only used in `frontend/lib/api.js`.
+- `backend/app/.env.example` currently includes `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`; add `SUPABASE_ANON_KEY` manually because backend startup requires it (`backend/app/db.py`).
+- Legacy mock auth pages/routes still exist under `frontend/src/app/auth/*` and `frontend/src/app/api/auth/*`; primary app auth flow uses `frontend/src/app/login/page.jsx` and `frontend/src/app/signup/page.jsx` with backend `/api/auth/*`.
+- `GET /api/preferences/me` is currently a placeholder returning `501` by design.
 
-### Frontend won't start
-- Ensure Node.js version is 18+
-- Delete `node_modules` and run `npm install` again
-- Check for port conflicts (3000, 8000)
+## Additional Docs In Repo
 
-### Database connection errors
-- Verify Supabase credentials in `.env`
-- Check Supabase project is active
-- Ensure database schema is applied
+- `backend/MATCHING_ALGORITHM.md`
+- `TWO_TOWER_EXPLAINER.md`
+- `DATASET_REQUIREMENTS.md`
+- `SOURCE_OF_TRUTH.md`
+- `COMPLETION_SUMMARY.md`

@@ -15,6 +15,7 @@ from app.models import (
     PersonalPreferencesResponse
 )
 import json
+from app.services.controlled_vocab import validate_location, validate_neighborhoods
 
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
@@ -66,6 +67,7 @@ def serialize_preferences(prefs_data: dict) -> dict:
     # Database fields match the model directly
     db_data = {
         # Hard Constraints
+        "target_country": prefs_data.get("target_country"),
         "target_city": prefs_data.get("target_city"),
         "target_state_province": prefs_data.get("target_state_province"),
         "budget_min": prefs_data.get("budget_min"),
@@ -74,9 +76,11 @@ def serialize_preferences(prefs_data: dict) -> dict:
         "move_in_date": prefs_data.get("move_in_date"),
         "target_lease_type": prefs_data.get("target_lease_type"),
         "target_lease_duration_months": prefs_data.get("target_lease_duration_months"),
+        "gender_policy": prefs_data.get("gender_policy"),
         # Soft Preferences
         "target_bathrooms": prefs_data.get("target_bathrooms"),
         "target_furnished": prefs_data.get("target_furnished"),
+        "furnished_preference": prefs_data.get("furnished_preference"),
         "target_utilities_included": prefs_data.get("target_utilities_included"),
         "target_deposit_amount": prefs_data.get("target_deposit_amount"),
         "target_house_rules": prefs_data.get("target_house_rules"),
@@ -101,6 +105,7 @@ def deserialize_preferences(db_data: dict) -> dict:
     result = {
         "user_id": db_data.get("user_id"),
         # Hard Constraints
+        "target_country": db_data.get("target_country"),
         "target_city": db_data.get("target_city"),
         "target_state_province": db_data.get("target_state_province"),
         "budget_min": db_data.get("budget_min"),
@@ -109,9 +114,11 @@ def deserialize_preferences(db_data: dict) -> dict:
         "move_in_date": db_data.get("move_in_date"),
         "target_lease_type": db_data.get("target_lease_type"),
         "target_lease_duration_months": db_data.get("target_lease_duration_months"),
+        "gender_policy": db_data.get("gender_policy"),
         # Soft Preferences
         "target_bathrooms": db_data.get("target_bathrooms"),
         "target_furnished": db_data.get("target_furnished"),
+        "furnished_preference": db_data.get("furnished_preference"),
         "target_utilities_included": db_data.get("target_utilities_included"),
         "target_deposit_amount": db_data.get("target_deposit_amount"),
         "target_house_rules": db_data.get("target_house_rules"),
@@ -150,6 +157,7 @@ async def get_user_preferences(
             "data": {
                 "user_id": user_id,
                 # Hard Constraints
+                "target_country": None,
                 "target_city": None,
                 "target_state_province": None,
                 "budget_min": None,
@@ -158,9 +166,11 @@ async def get_user_preferences(
                 "move_in_date": None,
                 "target_lease_type": None,
                 "target_lease_duration_months": None,
+                "gender_policy": "mixed_ok",
                 # Soft Preferences
                 "target_bathrooms": None,
                 "target_furnished": None,
+                "furnished_preference": "no_preference",
                 "target_utilities_included": None,
                 "target_deposit_amount": None,
                 "target_house_rules": None,
@@ -205,16 +215,72 @@ async def update_user_preferences(
         
         if not prefs_data:
             raise HTTPException(status_code=400, detail="No data provided for update")
-        
-        # Convert to DB format
-        db_data = serialize_preferences(prefs_data)
-        
-        # Check if preferences exist
+
+        # Load existing record early so partial updates can still validate against
+        # already-saved canonical location values.
         existing = await client.select_one(
             table="personal_preferences",
             id_value=user_id,
             id_column="user_id"
         )
+
+        # Strict controlled location validation.
+        location_keys = ("target_country", "target_state_province", "target_city")
+        has_location_update = any(k in prefs_data for k in location_keys)
+        if has_location_update:
+            country = prefs_data.get("target_country")
+            state = prefs_data.get("target_state_province")
+            city = prefs_data.get("target_city")
+            if not all(v for v in [country, state, city]):
+                raise HTTPException(
+                    status_code=422,
+                    detail="target_country, target_state_province, and target_city must all be provided together."
+                )
+            try:
+                canonical_country, canonical_state, canonical_city = validate_location(
+                    str(country), str(state), str(city)
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+
+            prefs_data["target_country"] = canonical_country
+            prefs_data["target_state_province"] = canonical_state
+            prefs_data["target_city"] = canonical_city
+
+        # Validate neighborhood options against effective city (updated or existing).
+        if "preferred_neighborhoods" in prefs_data:
+            effective_city = prefs_data.get("target_city") or (existing or {}).get("target_city")
+            try:
+                prefs_data["preferred_neighborhoods"] = validate_neighborhoods(
+                    str(effective_city or ""),
+                    prefs_data.get("preferred_neighborhoods"),
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+
+        gender_policy = prefs_data.get("gender_policy")
+        if gender_policy is not None:
+            allowed = {"same_gender_only", "mixed_ok"}
+            if str(gender_policy) not in allowed:
+                raise HTTPException(status_code=422, detail="gender_policy must be one of: same_gender_only, mixed_ok")
+
+        furnished_preference = prefs_data.get("furnished_preference")
+        if furnished_preference is not None:
+            allowed = {"required", "preferred", "no_preference"}
+            if str(furnished_preference) not in allowed:
+                raise HTTPException(status_code=422, detail="furnished_preference must be one of: required, preferred, no_preference")
+            # Keep legacy boolean aligned with new tri-state preference.
+            if furnished_preference in {"required", "preferred"}:
+                prefs_data["target_furnished"] = True
+            else:
+                prefs_data["target_furnished"] = None
+        
+        # Convert to DB format
+        db_data = serialize_preferences(prefs_data)
+
+        # Ensure no_preference explicitly clears legacy boolean column.
+        if prefs_data.get("furnished_preference") == "no_preference":
+            db_data["target_furnished"] = None
         
         if existing:
             # Update existing preferences
@@ -317,4 +383,3 @@ async def get_my_preferences(
         status_code=501,
         detail="This endpoint requires JWT parsing to extract user_id. Use GET /{user_id} for now."
     )
-

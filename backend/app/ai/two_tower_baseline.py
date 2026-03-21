@@ -30,7 +30,7 @@ def build_tower(input_dim: int, embedding_dim: int, dropout: float, name: str) -
     x = layers.Dropout(dropout, name=f"{name}_drop1")(x)
     x = layers.Dense(128, activation="relu", name=f"{name}_dense2")(x)
     x = layers.Dense(embedding_dim, name=f"{name}_embed")(x)
-    x = layers.Lambda(lambda t: tf.math.l2_normalize(t, axis=1), name=f"{name}_norm")(x)
+    x = layers.UnitNormalization(axis=-1, name=f"{name}_norm")(x)
     return keras.Model(inp, x, name=f"{name}_tower")
 
 
