@@ -9,6 +9,7 @@ import {
   Box, 
   TextInput, 
   Textarea, 
+  Select,
   Button, 
   Card,
   Group,
@@ -47,6 +48,9 @@ function AccountPageContent() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [companyOptions, setCompanyOptions] = useState([]);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [roleTitleOptions, setRoleTitleOptions] = useState([]);
   
   // User profile data
   const [userData, setUserData] = useState({
@@ -103,6 +107,35 @@ function AccountPageContent() {
     
     fetchUserData();
   }, [authState, getValidToken]);
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
+          fetch('http://localhost:8000/api/options/companies?limit=500'),
+          fetch('http://localhost:8000/api/options/schools?limit=500'),
+          fetch('http://localhost:8000/api/options/roles'),
+        ]);
+
+        if (companiesRes.ok) {
+          const result = await companiesRes.json();
+          setCompanyOptions(result.data || []);
+        }
+        if (schoolsRes.ok) {
+          const result = await schoolsRes.json();
+          setSchoolOptions(result.data || []);
+        }
+        if (rolesRes.ok) {
+          const result = await rolesRes.json();
+          setRoleTitleOptions(result.data || []);
+        }
+      } catch {
+        // Keep account page usable if options API is temporarily unavailable.
+      }
+    };
+
+    loadOptions();
+  }, []);
 
   // Handle form field changes
   const handleChange = (field, value) => {
@@ -271,29 +304,35 @@ function AccountPageContent() {
               <Divider label="Work & Education" labelPosition="center" />
               
               {/* Company */}
-              <TextInput
+              <Select
                 label="Company"
-                placeholder="Where do you work?"
+                placeholder="Select company"
+                data={companyOptions}
+                searchable
                 value={userData.company_name}
-                onChange={(e) => handleChange('company_name', e.target.value)}
+                onChange={(value) => handleChange('company_name', value || '')}
                 leftSection={<IconBuilding size={16} />}
               />
               
               {/* School */}
-              <TextInput
+              <Select
                 label="School"
-                placeholder="Where do you study?"
+                placeholder="Select school"
+                data={schoolOptions}
+                searchable
                 value={userData.school_name}
-                onChange={(e) => handleChange('school_name', e.target.value)}
+                onChange={(value) => handleChange('school_name', value || '')}
                 leftSection={<IconSchool size={16} />}
               />
               
               {/* Role/Title */}
-              <TextInput
+              <Select
                 label="Job Title / Role"
-                placeholder="e.g., Software Engineer, Student"
+                placeholder="Select role/title"
+                data={roleTitleOptions}
+                searchable
                 value={userData.role_title}
-                onChange={(e) => handleChange('role_title', e.target.value)}
+                onChange={(value) => handleChange('role_title', value || '')}
                 leftSection={<IconBriefcase size={16} />}
               />
             </Stack>

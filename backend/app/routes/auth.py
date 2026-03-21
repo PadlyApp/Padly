@@ -4,7 +4,6 @@ Handles user signup, login, and JWT token management with Supabase Auth
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Response
-from typing import Optional
 from pydantic import BaseModel, EmailStr
 from app.db import supabase_anon
 from app.dependencies.auth import get_user_token
@@ -135,6 +134,8 @@ async def signup(user_data: SignUpRequest):
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         if hasattr(e, 'message') and "already registered" in str(e.message):
             raise HTTPException(

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Container, 
@@ -33,10 +33,29 @@ export default function CreateGroupPage() {
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [targetCity, setTargetCity] = useState('');
+  const [cityOptions, setCityOptions] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
   const [budgetMin, setBudgetMin] = useState(null);
   const [budgetMax, setBudgetMax] = useState(null);
   const [moveInDate, setMoveInDate] = useState(null);
   const [groupSize, setGroupSize] = useState(2);
+
+  useEffect(() => {
+    const loadCities = async () => {
+      try {
+        const query = citySearch.trim();
+        const response = await fetch(
+          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setCityOptions(result.data || []);
+      } catch {
+        // Keep form usable if options API is temporarily unavailable.
+      }
+    };
+    loadCities();
+  }, [citySearch]);
 
   const handleSubmit = async (e) => {
     console.log("we submitting baby")
@@ -189,12 +208,16 @@ export default function CreateGroupPage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
 
-                <TextInput
+                <Select
                   label="Target City"
-                  placeholder="e.g., San Francisco"
+                  placeholder="Search and select a city"
                   required
+                  data={cityOptions}
+                  searchable
                   value={targetCity}
-                  onChange={(e) => setTargetCity(e.target.value)}
+                  onChange={(value) => setTargetCity(value || '')}
+                  onSearchChange={setCitySearch}
+                  nothingFoundMessage="No cities found"
                 />
 
                 <NumberInput

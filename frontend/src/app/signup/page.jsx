@@ -11,9 +11,7 @@ import {
   Title, 
   Text, 
   Container, 
-  Alert,
   Stack,
-  Group
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -133,4 +131,3 @@ export default function SignupPage() {
     </Container>
   );
 }
-

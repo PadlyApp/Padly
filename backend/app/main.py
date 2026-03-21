@@ -15,6 +15,8 @@ from app.routes import (
     auth_router,
     matches_router,
     recommendations_router,
+    interactions_router,
+    options_router,
 )
 from app.routes.stable_matching import router as stable_matching_router
 from app.routes.groups import router as groups_router
@@ -51,6 +53,8 @@ app.include_router(matches_router)
 app.include_router(stable_matching_router)  # Stable matching endpoints
 app.include_router(admin_router)
 app.include_router(recommendations_router)
+app.include_router(interactions_router)
+app.include_router(options_router)
 
 
 # Root endpoints

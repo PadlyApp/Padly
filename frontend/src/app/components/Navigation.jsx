@@ -64,6 +64,13 @@ export function Navigation() {
                       </Text>
                     </UnstyledButton>
                   </Link>
+                  <Link href="/discover" style={{ textDecoration: 'none' }}>
+                    <UnstyledButton>
+                      <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
+                        Discover
+                      </Text>
+                    </UnstyledButton>
+                  </Link>
                   <Link href="/matches" style={{ textDecoration: 'none' }}>
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
@@ -162,6 +169,13 @@ export function Navigation() {
                   <UnstyledButton style={{ width: '100%' }}>
                     <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
                       Preferences
+                    </Text>
+                  </UnstyledButton>
+                </Link>
+                <Link href="/discover" style={{ textDecoration: 'none' }} onClick={handleLinkClick}>
+                  <UnstyledButton style={{ width: '100%' }}>
+                    <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
+                      Discover
                     </Text>
                   </UnstyledButton>
                 </Link>
