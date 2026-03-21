@@ -62,16 +62,37 @@ async def trigger_group_rematching(group_id: str) -> Dict[str, Any]:
     # Update group with aggregated preferences
     try:
         update_data = {
+            'target_country': agg_prefs.get('target_country'),
+            'target_state_province': agg_prefs.get('target_state_province'),
+            'target_city': agg_prefs.get('target_city'),
             'target_bedrooms': agg_prefs.get('target_bedrooms'),
+            'required_bedrooms': agg_prefs.get('required_bedrooms', agg_prefs.get('target_bedrooms')),
             'target_bathrooms': agg_prefs.get('target_bathrooms'),
             'target_furnished': agg_prefs.get('target_furnished'),
             'furnished_preference': agg_prefs.get('furnished_preference'),
             'furnished_is_hard': agg_prefs.get('furnished_is_hard', False),
+            'target_utilities_included': agg_prefs.get('target_utilities_included'),
+            'target_deposit_amount': agg_prefs.get('target_deposit_amount'),
             'gender_policy': agg_prefs.get('gender_policy'),
+            'target_lease_type': agg_prefs.get('target_lease_type'),
+            'target_lease_duration_months': agg_prefs.get('target_lease_duration_months'),
+            'target_house_rules': agg_prefs.get('target_house_rules'),
+            'preferred_neighborhoods': agg_prefs.get('preferred_neighborhoods'),
+            'lifestyle_preferences': agg_prefs.get('lifestyle_preferences'),
         }
-        if budget_min: update_data['budget_per_person_min'] = budget_min
-        if budget_max: update_data['budget_per_person_max'] = budget_max
-        if agg_prefs.get('target_move_in_date'): update_data['target_move_in_date'] = str(agg_prefs['target_move_in_date'])
+        if budget_min is not None:
+            update_data['budget_per_person_min'] = budget_min
+            update_data['budget_min'] = budget_min
+        if budget_max is not None:
+            update_data['budget_per_person_max'] = budget_max
+            update_data['budget_max'] = budget_max
+        if agg_prefs.get('target_move_in_date'):
+            move_in = str(agg_prefs['target_move_in_date'])
+            update_data['target_move_in_date'] = move_in
+            update_data['move_in_date'] = move_in
+
+        # Remove keys with None to avoid accidental nulling during partial updates.
+        update_data = {k: v for k, v in update_data.items() if v is not None}
         supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
     except:
         pass

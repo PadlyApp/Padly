@@ -142,16 +142,28 @@ export default function GroupDetailPage() {
         setMembers(groupData.data.members || []);
       }
 
-      // Fetch matches
-      const matchesResponse = await fetch(
-        `http://localhost:8000/api/roommate-groups/${groupId}/matches`,
+      // Fetch group->listing feed (Phase 3B neural primary, rule fallback).
+      let listingsFeed = [];
+      const neuralResponse = await fetch(
+        `http://localhost:8000/api/roommate-groups/${groupId}/neural-ranked-listings?limit=50&force_enable=true`,
         { headers }
       );
-      const matchesData = await matchesResponse.json();
+      const neuralData = await neuralResponse.json();
 
-      if (matchesResponse.ok && matchesData.status === 'success') {
-        setMatches(matchesData.data || []);
+      if (neuralResponse.ok && neuralData.status === 'success') {
+        listingsFeed = neuralData.ranked_listings || [];
+      } else {
+        const fallbackResponse = await fetch(
+          `http://localhost:8000/api/roommate-groups/${groupId}/ranked-listings?limit=50`,
+          { headers }
+        );
+        const fallbackData = await fallbackResponse.json();
+        if (fallbackResponse.ok && fallbackData.status === 'success') {
+          listingsFeed = fallbackData.ranked_listings || [];
+        }
       }
+
+      setMatches(listingsFeed);
     } catch (error) {
       console.error('Error fetching group data:', error);
       notifications.show({
@@ -749,7 +761,7 @@ export default function GroupDetailPage() {
               Members
             </Tabs.Tab>
             <Tabs.Tab value="matches" leftSection={<IconHome size={16} />}>
-              Matches ({matches.length})
+              Listings ({matches.length})
             </Tabs.Tab>
             {isCreator && (
               <Tabs.Tab 
@@ -832,82 +844,100 @@ export default function GroupDetailPage() {
               <Card withBorder>
                 <Stack align="center" py="xl">
                   <IconBuildingCommunity size={48} stroke={1.5} color="gray" />
-                  <Text c="dimmed">No matches found yet</Text>
+                  <Text c="dimmed">No listing recommendations found yet</Text>
                   <Text size="sm" c="dimmed" ta="center">
-                    Matches will appear here once the matching algorithm runs
+                    Listings will appear here after hard filtering and ranking.
                   </Text>
                 </Stack>
               </Card>
             ) : (
               <Stack gap="md">
-                {matches.map((match) => (
-                  <Card key={match.id} withBorder p="lg" style={{ cursor: 'pointer' }}
-                    onClick={() => router.push(`/listings/${match.listing_id}`)}>
-                    <Stack gap="md">
-                      <Group justify="space-between">
-                        <div>
-                          <Title order={4}>{match.listing?.title || 'Listing'}</Title>
-                          <Group gap="xs" mt="xs">
-                            <IconMapPin size={16} />
-                            <Text size="sm" c="dimmed">
-                              {match.listing?.address}, {match.listing?.city}
+                {matches.map((match, index) => {
+                  const listing = match.listing || match;
+                  const scoreValueRaw = match.match_score ?? match.group_score ?? listing.match_score;
+                  const scoreValue = scoreValueRaw != null ? Number(scoreValueRaw) : null;
+                  const scorePercent = scoreValue == null
+                    ? null
+                    : scoreValue <= 1
+                      ? Math.round(scoreValue * 100)
+                      : Math.round(scoreValue);
+                  const locationText = [
+                    listing.address || listing.address_line_1,
+                    listing.city,
+                  ].filter(Boolean).join(', ');
+
+                  return (
+                    <Card
+                      key={match.id || match.listing_id || listing?.id || index}
+                      withBorder
+                      p="lg"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => router.push(`/listings/${match.listing_id || match.id || listing?.id}`)}
+                    >
+                      <Stack gap="md">
+                        <Group justify="space-between">
+                          <div>
+                            <Title order={4}>{listing?.title || 'Listing'}</Title>
+                            <Group gap="xs" mt="xs">
+                              <IconMapPin size={16} />
+                              <Text size="sm" c="dimmed">
+                                {locationText || 'Location unavailable'}
+                              </Text>
+                            </Group>
+                          </div>
+                          <Badge color={match.is_stable ? 'green' : 'blue'} size="lg">
+                            {match.is_stable ? 'Stable Match (Legacy)' : 'Neural Ranked'}
+                          </Badge>
+                        </Group>
+
+                        <Grid>
+                          <Grid.Col span={6}>
+                            <Paper p="sm" withBorder bg="blue.0">
+                              <Text size="xs" c="dimmed">Price</Text>
+                              <Text fw={600} size="lg">
+                                ${listing?.price_per_month}/month
+                              </Text>
+                            </Paper>
+                          </Grid.Col>
+                          <Grid.Col span={6}>
+                            <Paper p="sm" withBorder bg="blue.0">
+                              <Text size="xs" c="dimmed">Bedrooms</Text>
+                              <Text fw={600} size="lg">
+                                {listing?.number_of_bedrooms} bed
+                              </Text>
+                            </Paper>
+                          </Grid.Col>
+                        </Grid>
+
+                        <Group gap="xl">
+                          <div>
+                            <Text size="xs" c="dimmed">Rank</Text>
+                            <Text fw={600}>#{match.group_rank || index + 1}</Text>
+                          </div>
+                          {scorePercent != null && (
+                            <div>
+                              <Text size="xs" c="dimmed">Match Score</Text>
+                              <Text fw={600}>{scorePercent}%</Text>
+                            </div>
+                          )}
+                          <div>
+                            <Text size="xs" c="dimmed">Algorithm</Text>
+                            <Text fw={600}>{listing.algorithm_version || 'rule-fallback'}</Text>
+                          </div>
+                        </Group>
+
+                        {listing?.available_from && (
+                          <Group gap="xs">
+                            <IconCalendar size={16} />
+                            <Text size="sm">
+                              Available from: {new Date(listing.available_from).toLocaleDateString()}
                             </Text>
                           </Group>
-                        </div>
-                        <Badge color={match.is_stable ? 'green' : 'orange'} size="lg">
-                          {match.is_stable ? 'Stable Match' : 'Unstable'}
-                        </Badge>
-                      </Group>
-
-                      <Grid>
-                        <Grid.Col span={6}>
-                          <Paper p="sm" withBorder bg="blue.0">
-                            <Text size="xs" c="dimmed">Price</Text>
-                            <Text fw={600} size="lg">
-                              ${match.listing?.price_per_month}/month
-                            </Text>
-                          </Paper>
-                        </Grid.Col>
-                        <Grid.Col span={6}>
-                          <Paper p="sm" withBorder bg="blue.0">
-                            <Text size="xs" c="dimmed">Bedrooms</Text>
-                            <Text fw={600} size="lg">
-                              {match.listing?.number_of_bedrooms} bed
-                            </Text>
-                          </Paper>
-                        </Grid.Col>
-                      </Grid>
-
-                      <Group gap="xl">
-                        <div>
-                          <Text size="xs" c="dimmed">Your Group Rank</Text>
-                          <Text fw={600}>#{match.group_rank}</Text>
-                        </div>
-                        <div>
-                          <Text size="xs" c="dimmed">Listing Rank</Text>
-                          <Text fw={600}>#{match.listing_rank}</Text>
-                        </div>
-                        <div>
-                          <Text size="xs" c="dimmed">Group Score</Text>
-                          <Text fw={600}>{match.group_score?.toFixed(2)}</Text>
-                        </div>
-                        <div>
-                          <Text size="xs" c="dimmed">Listing Score</Text>
-                          <Text fw={600}>{match.listing_score?.toFixed(2)}</Text>
-                        </div>
-                      </Group>
-
-                      {match.listing?.available_from && (
-                        <Group gap="xs">
-                          <IconCalendar size={16} />
-                          <Text size="sm">
-                            Available from: {new Date(match.listing.available_from).toLocaleDateString()}
-                          </Text>
-                        </Group>
-                      )}
-                    </Stack>
-                  </Card>
-                ))}
+                        )}
+                      </Stack>
+                    </Card>
+                  );
+                })}
               </Stack>
             )}
           </Tabs.Panel>

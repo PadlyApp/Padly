@@ -5,7 +5,7 @@ This branch contains an actively developed full-stack app:
 
 - Frontend: Next.js + Mantine (`frontend/`)
 - Backend: FastAPI + Supabase (`backend/`)
-- Matching stack: user-to-group compatibility + stable group-to-listing matching
+- Matching stack: user-to-group compatibility + neural-first group-to-listing ranking
 
 ## What Is Implemented Now
 
@@ -63,18 +63,15 @@ Used by:
 - `GET /api/matches/groups`
 - `GET /api/roommate-groups/discover`
 
-### 2) Group -> Listing Stable Matching
+### 2) Group -> Listing Neural Ranking (Phase 3B)
 
-`POST /api/stable-matches/run` executes a multi-phase pipeline:
+Live serving uses:
 
-1. Filter eligible groups/listings (`services/stable_matching/filters.py`)
-2. Build feasible pairs (`services/stable_matching/feasible_pairs.py`)
-3. Score and build preference lists (`services/stable_matching/scoring.py`)
-4. Run Gale-Shapley deferred acceptance (`services/stable_matching/deferred_acceptance.py`)
-5. Run LNS optimization (`services/lns_optimizer.py`)
-6. Persist matches/diagnostics (`services/stable_matching/persistence.py`)
+- `GET /api/roommate-groups/{group_id}/neural-ranked-listings` (primary)
+- `GET /api/roommate-groups/{group_id}/ranked-listings` (deterministic fallback)
+- `GET /api/roommate-groups/{group_id}/matches` (compatibility alias; neural-backed in Phase 3B)
 
-The run preserves already confirmed matches and re-matches only unconfirmed candidates.
+Stable matching endpoints remain for historical/audit reads; write operations are disabled by default in Phase 3B.
 
 ### 3) Listing Recommendations Endpoint
 
@@ -205,9 +202,8 @@ chmod +x run-dev.sh
 ### Preferences / Matching
 
 - `GET /api/preferences/{user_id}`
-- `PUT /api/preferences/{user_id}` (also triggers stable matching for target city)
+- `PUT /api/preferences/{user_id}`
 - `GET /api/matches/groups`
-- `POST /api/stable-matches/run`
 - `GET /api/stable-matches/active`
 - `GET /api/stable-matches/stats`
 
@@ -223,6 +219,8 @@ chmod +x run-dev.sh
 - `POST /api/roommate-groups/{group_id}/reject`
 - `POST /api/roommate-groups/{group_id}/accept-request/{user_id}`
 - `POST /api/roommate-groups/{group_id}/reject-request/{user_id}`
+- `GET /api/roommate-groups/{group_id}/neural-ranked-listings` (primary Group->Listing feed)
+- `GET /api/roommate-groups/{group_id}/matches` (legacy-compatible alias, neural-backed)
 
 ### Listings / Recommendations
 
@@ -245,6 +243,10 @@ chmod +x run-dev.sh
 
 - Frontend currently uses `http://localhost:8000` directly in many pages; `NEXT_PUBLIC_API_URL` is only used in `frontend/lib/api.js`.
 - `backend/app/.env.example` currently includes `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`; add `SUPABASE_ANON_KEY` manually because backend startup requires it (`backend/app/db.py`).
+- Phase 3B Group->Listing controls:
+  - `PADLY_GROUP_NEURAL_RANKING_ENABLED=true` to enable
+  - `PADLY_GROUP_NEURAL_KILL_SWITCH=true` to hard-disable
+  - `PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED=false` keeps stable matching write paths disabled (default)
 - Legacy mock auth pages/routes still exist under `frontend/src/app/auth/*` and `frontend/src/app/api/auth/*`; primary app auth flow uses `frontend/src/app/login/page.jsx` and `frontend/src/app/signup/page.jsx` with backend `/api/auth/*`.
 - `GET /api/preferences/me` is currently a placeholder returning `501` by design.
 

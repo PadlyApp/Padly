@@ -1,6 +1,6 @@
 # Padly Backend
 
-> A roommate and housing matching platform using Gale-Shapley stable matching with LNS optimization.
+> A roommate and housing matching backend with neural-first Group->Listing ranking and legacy stable matching kept for historical reads.
 
 ## Quick Start
 
@@ -70,9 +70,9 @@ backend/
 | Feature | Description |
 |---------|-------------|
 | **User→Group Matching** | Solo users find compatible groups (0-100 score) |
-| **Gale-Shapley** | Stable matching guaranteeing no blocking pairs |
+| **Neural Group→Listing Feed** | Hard-filtered + neural/rule/behavior ranked recommendations |
 | **LNS Optimization** | Improves match quality by 13.8% |
-| **Auto Re-matching** | Triggers on group changes, rejections |
+| **Legacy Stable Matching** | Read-only historical/audit access in Phase 3B |
 
 ---
 
@@ -80,13 +80,14 @@ backend/
 
 ### Matching
 - `GET /api/matches/groups` - Discover compatible groups
-- `POST /api/stable-matches/run` - Run matching algorithm
+- `GET /api/roommate-groups/{id}/neural-ranked-listings` - Primary Group→Listing feed
+- `GET /api/roommate-groups/{id}/ranked-listings` - Deterministic fallback feed
 - `GET /api/stable-matches/active` - Get active matches
 
 ### Groups
 - `POST /api/roommate-groups` - Create group
 - `POST /api/roommate-groups/{id}/join` - Request to join
-- `POST /api/roommate-groups/{id}/confirm-match` - Confirm match
+- `GET /api/roommate-groups/{id}/matches` - Legacy-compatible alias (neural-backed in Phase 3B)
 
 ### Listings
 - `GET /api/listings` - List all listings

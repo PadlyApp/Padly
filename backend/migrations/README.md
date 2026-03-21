@@ -183,3 +183,15 @@ Removes office location from `users` to simplify signup and preference flow.
 1. Drops office location constraints
 2. Drops office location indexes
 3. Drops `office_country`, `office_state_province`, and `office_city`
+
+## Migration: Group Preference Field Parity
+
+File: `010_group_preferences_field_parity.sql`
+
+### Overview
+Adds personal-preference parity fields to `roommate_groups` so group preferences can be persisted with the same key set used by user preferences.
+
+### What It Adds
+1. Alias scalar fields: `budget_min`, `budget_max`, `move_in_date`, `required_bedrooms`
+2. Group soft-preference fields: `preferred_neighborhoods` (text[]) and `lifestyle_preferences` (jsonb)
+3. Backfill from legacy group fields (`budget_per_person_*`, `target_move_in_date`, `target_bedrooms`)

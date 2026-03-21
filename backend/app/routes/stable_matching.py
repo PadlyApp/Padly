@@ -20,6 +20,7 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 import logging
+import os
 
 from app.dependencies.supabase import get_admin_client
 from app.models import ListingResponse, RoommateGroupResponse
@@ -44,6 +45,30 @@ from app.services.stable_matching import (
 
 router = APIRouter(prefix="/api/stable-matches", tags=["Stable Matching"])
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stable_writes_enabled() -> bool:
+    # Phase 3B default: stable matching is read-only legacy.
+    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
+
+
+def _require_stable_writes_enabled() -> None:
+    if _stable_writes_enabled():
+        return
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Stable matching write operations are disabled in Phase 3B. "
+            "Use neural group listing ranking endpoints for live serving."
+        ),
+    )
 
 
 # ============================================================================
@@ -162,6 +187,8 @@ async def run_matching(request: RunMatchingRequest):
     
     Returns match results and diagnostics.
     """
+    _require_stable_writes_enabled()
+
     try:
         start_time = datetime.now()
         logger.info(f"Starting matching for city: {request.city}")
@@ -525,6 +552,8 @@ async def delete_matches_for_group(group_id: str):
     - Group preferences changed significantly
     - Group wants to opt out of matching
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         engine = MatchPersistenceEngine(supabase)
@@ -552,6 +581,8 @@ async def delete_matches_for_listing(listing_id: str):
     - Listing becomes unavailable
     - Listing details changed significantly
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         engine = MatchPersistenceEngine(supabase)
@@ -579,6 +610,8 @@ async def expire_old_matches(
     Marks matches older than the threshold as 'expired'.
     Default: 30 days
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         
