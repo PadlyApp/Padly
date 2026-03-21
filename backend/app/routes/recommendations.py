@@ -55,6 +55,7 @@ class UserPreferences(BaseModel):
     liked_mean_price: Optional[float] = None
     liked_mean_beds: Optional[float] = None
     liked_mean_sqfeet: Optional[float] = None
+    behavior_sample_size: Optional[int] = None
 
     # How many results to return (default 20, max 100)
     top_n: Optional[int] = 20
@@ -65,6 +66,12 @@ class RecommendedListing(BaseModel):
     listing_id: str
     match_score: float          # 0.0 to 1.0 — show as "X% match" in UI
     match_percent: str          # e.g. "94%" — ready to display directly
+    rule_score: Optional[float] = None
+    behavior_score: Optional[float] = None
+    ml_score: Optional[float] = None
+    algorithm_version: Optional[str] = None
+    score_breakdown: Optional[Dict[str, Any]] = None
+    explainability: Optional[Dict[str, Any]] = None
     title: Optional[str] = None
     price_per_month: Optional[float] = None
     number_of_bedrooms: Optional[int] = None
@@ -138,6 +145,12 @@ async def get_recommendations(preferences: UserPreferences):
             listing_id=str(item.get("id", "")),
             match_score=item["match_score"],
             match_percent=f"{round(item['match_score'] * 100)}%",
+            rule_score=item.get("rule_score"),
+            behavior_score=item.get("behavior_score"),
+            ml_score=item.get("ml_score"),
+            algorithm_version=item.get("algorithm_version"),
+            score_breakdown=item.get("score_breakdown"),
+            explainability=item.get("explainability"),
             title=item.get("title"),
             price_per_month=float(item["price_per_month"]) if item.get("price_per_month") else None,
             number_of_bedrooms=item.get("number_of_bedrooms"),

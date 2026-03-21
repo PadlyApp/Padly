@@ -300,13 +300,185 @@ def _heuristic_match_score(user: Dict, listing: Dict) -> float:
     return _clamp01(sum(c * w for c, w in zip(components, weights)) / sum(weights))
 
 
-def _score_with_heuristic(user: Dict, eligible: List[Dict], top_n: int) -> List[Dict]:
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_swipe_count(user: Dict) -> int:
+    for key in ("behavior_sample_size", "sample_size", "total_swipes", "swipe_count"):
+        if key in user:
+            count = _coerce_int(user.get(key), default=0)
+            if count >= 0:
+                return count
+    return 0
+
+
+def _resolve_weight_profile(swipe_count: int, ml_available: bool) -> Dict[str, Any]:
+    # PRD defaults by data maturity.
+    if swipe_count < 20:
+        profile = "cold"
+        weights = {"rule": 0.80, "behavior": 0.20, "ml": 0.00}
+    elif swipe_count < 100:
+        profile = "warm"
+        weights = {"rule": 0.50, "behavior": 0.25, "ml": 0.25}
+    else:
+        profile = "mature"
+        weights = {"rule": 0.35, "behavior": 0.20, "ml": 0.45}
+
+    if not ml_available and weights["ml"] > 0:
+        # ML unavailable: force w_ml=0 and re-normalize rule/behavior.
+        rule_behavior_total = weights["rule"] + weights["behavior"]
+        if rule_behavior_total <= 0:
+            weights = {"rule": 0.50, "behavior": 0.50, "ml": 0.00}
+        else:
+            weights = {
+                "rule": weights["rule"] / rule_behavior_total,
+                "behavior": weights["behavior"] / rule_behavior_total,
+                "ml": 0.00,
+            }
+
+    return {
+        "profile": profile,
+        "weights": {
+            "rule": round(float(weights["rule"]), 4),
+            "behavior": round(float(weights["behavior"]), 4),
+            "ml": round(float(weights["ml"]), 4),
+        },
+    }
+
+
+def _behavior_similarity_score(user: Dict, listing: Dict) -> float:
+    """
+    Behavior score from swipe-derived liked listing averages.
+    Returns neutral prior (0.5) when signal is missing/sparse.
+    """
+    liked_price = _safe_float(user.get("liked_mean_price"))
+    liked_beds = _safe_float(user.get("liked_mean_beds"))
+    liked_sqft = _safe_float(user.get("liked_mean_sqfeet"))
+
+    price = _safe_float(listing.get("price_per_month"))
+    beds = _safe_float(listing.get("number_of_bedrooms"))
+    sqft = _safe_float(listing.get("area_sqft"))
+
+    components: List[float] = []
+    weights: List[float] = []
+
+    if liked_price > 0 and price > 0:
+        tol = max(300.0, liked_price * 0.60)
+        components.append(_relative_closeness(price, liked_price, tol))
+        weights.append(0.50)
+
+    if liked_beds > 0 and beds > 0:
+        tol = max(1.0, liked_beds)
+        components.append(_relative_closeness(beds, liked_beds, tol))
+        weights.append(0.20)
+
+    if liked_sqft > 0 and sqft > 0:
+        tol = max(250.0, liked_sqft * 0.60)
+        components.append(_relative_closeness(sqft, liked_sqft, tol))
+        weights.append(0.30)
+
+    if not components:
+        return 0.5
+    return _clamp01(sum(c * w for c, w in zip(components, weights)) / sum(weights))
+
+
+def _build_component_explainability(
+    rule_score: float,
+    behavior_score: float,
+    ml_score: Optional[float],
+    weights: Dict[str, float],
+) -> Dict[str, Any]:
+    labeled: List[Dict[str, Any]] = [
+        {
+            "label": "Rule preference alignment",
+            "score": rule_score,
+            "contribution": weights["rule"] * rule_score,
+        },
+        {
+            "label": "Behavior similarity to liked listings",
+            "score": behavior_score,
+            "contribution": weights["behavior"] * behavior_score,
+        },
+    ]
+    if ml_score is not None and weights["ml"] > 0:
+        labeled.append(
+            {
+                "label": "Neural model affinity",
+                "score": ml_score,
+                "contribution": weights["ml"] * ml_score,
+            }
+        )
+
+    labeled_sorted = sorted(labeled, key=lambda x: x["contribution"], reverse=True)
+    positives = [x["label"] for x in labeled_sorted[:3]]
+    negative = min(labeled, key=lambda x: x["score"])["label"] if labeled else None
+
+    return {
+        "hard_pass": True,
+        "top_positive_contributors": positives,
+        "top_negative_contributor": negative,
+    }
+
+
+def _score_with_blend(
+    user: Dict,
+    eligible: List[Dict],
+    top_n: int,
+    ml_scores: Optional[List[float]] = None,
+) -> List[Dict]:
+    swipe_count = _resolve_swipe_count(user)
+    ml_available = ml_scores is not None
+    profile = _resolve_weight_profile(swipe_count=swipe_count, ml_available=ml_available)
+    weights = profile["weights"]
+    algorithm_version = (
+        f"phase2b-{profile['profile']}-{'with-ml' if ml_available and weights['ml'] > 0 else 'no-ml'}"
+    )
+
     results = []
-    for listing in eligible:
+    for idx, listing in enumerate(eligible):
+        rule_score = _clamp01(_heuristic_match_score(user, listing))
+        behavior_score = _clamp01(_behavior_similarity_score(user, listing))
+        ml_score: Optional[float] = None
+        if ml_available and ml_scores is not None and idx < len(ml_scores):
+            ml_score = _clamp01(_safe_float(ml_scores[idx], default=0.5))
+
+        final_score = (
+            (weights["rule"] * rule_score)
+            + (weights["behavior"] * behavior_score)
+            + (weights["ml"] * (ml_score if ml_score is not None else 0.0))
+        )
+        final_score = _clamp01(final_score)
+
         result = dict(listing)
-        result["match_score"] = round(float(_heuristic_match_score(user, listing)), 4)
+        result["rule_score"] = round(float(rule_score), 4)
+        result["behavior_score"] = round(float(behavior_score), 4)
+        result["ml_score"] = round(float(ml_score), 4) if ml_score is not None and weights["ml"] > 0 else None
+        result["match_score"] = round(float(final_score), 4)
+        result["algorithm_version"] = algorithm_version
+        result["score_breakdown"] = {
+            "rule": result["rule_score"],
+            "behavior": result["behavior_score"],
+            "ml": result["ml_score"],
+            "final": result["match_score"],
+            "weights": weights,
+            "weights_profile": profile["profile"],
+            "swipe_count_used": swipe_count,
+        }
+        result["explainability"] = _build_component_explainability(
+            rule_score=rule_score,
+            behavior_score=behavior_score,
+            ml_score=ml_score if weights["ml"] > 0 else None,
+            weights=weights,
+        )
         results.append(result)
-    results.sort(key=lambda x: x["match_score"], reverse=True)
+
+    results.sort(key=lambda x: (x["match_score"], str(x.get("id") or "")), reverse=True)
     return results[:top_n]
 
 
@@ -335,7 +507,7 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
 
     # Graceful degradation when model or metadata cannot be loaded.
     if _model is None or _meta is None:
-        return _score_with_heuristic(user, eligible, top_n)
+        return _score_with_blend(user, eligible, top_n, ml_scores=None)
 
     # Encode user once
     user_vec = _encode_user(user)
@@ -367,15 +539,7 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
         else:
             scores = raw.reshape(-1)
     except Exception as e:
-        print(f"[recommender] inference failed, using heuristic fallback: {e}")
-        return _score_with_heuristic(user, eligible, top_n)
+        print(f"[recommender] inference failed, using blended fallback without ML: {e}")
+        return _score_with_blend(user, eligible, top_n, ml_scores=None)
 
-    # Attach scores and sort
-    results = []
-    for listing, score in zip(eligible, scores):
-        result = dict(listing)
-        result["match_score"] = round(float(score), 4)
-        results.append(result)
-
-    results.sort(key=lambda x: x["match_score"], reverse=True)
-    return results[:top_n]
+    return _score_with_blend(user, eligible, top_n, ml_scores=[float(s) for s in scores])
