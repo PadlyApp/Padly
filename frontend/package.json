@@ -14,6 +14,7 @@
         "@mantine/form": "^7.17.8",
         "@mantine/hooks": "^7.17.8",
         "@mantine/notifications": "^7.17.8",
+        "@reactour/tour": "^3.8.0",
         "@supabase/supabase-js": "^2.58.0",
         "@tabler/icons-react": "^3.35.0",
         "@tanstack/react-query": "^5.90.5",

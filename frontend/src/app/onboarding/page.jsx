@@ -22,6 +22,7 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconUser, IconBriefcase, IconSchool, IconCheck, IconHome, IconSearch } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePadlyTour } from '../contexts/TourContext';
 
 export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -29,15 +30,15 @@ export default function OnboardingPage() {
   const [companyOptions, setCompanyOptions] = useState([]);
   const [schoolOptions, setSchoolOptions] = useState([]);
   const [roleTitleOptions, setRoleTitleOptions] = useState([]);
-  const { user, authState, getValidToken } = useAuth();
+  const { user, authState, isLoading: authLoading, getValidToken } = useAuth();
+  const { startTour } = usePadlyTour();
   const router = useRouter();
 
-  // Redirect if not authenticated
   useEffect(() => {
-    if (!authState?.accessToken) {
+    if (!authLoading && !authState?.accessToken) {
       router.push('/login');
     }
-  }, [authState, router]);
+  }, [authLoading, authState, router]);
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -153,9 +154,8 @@ export default function OnboardingPage() {
           icon: <IconCheck />,
         });
         
-        // Mark onboarding as complete in localStorage
         localStorage.setItem('padly_onboarding_complete', 'true');
-        
+        startTour();
         router.push('/');
       } else {
         throw new Error(data.detail || 'Failed to update profile');

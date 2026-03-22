@@ -270,7 +270,7 @@ export default function GroupsPage() {
       <Container size="lg" py="xl">
         <Stack gap="xl">
         {/* Header */}
-        <Group justify="space-between" align="flex-start">
+        <Group justify="space-between" align="flex-start" data-tour="groups-header">
           <div>
             <Title order={1}>Roommate Groups</Title>
             <Text c="dimmed" mt="xs">
@@ -287,7 +287,7 @@ export default function GroupsPage() {
         </Group>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onChange={setActiveTab}>
+        <Tabs value={activeTab} onChange={setActiveTab} data-tour="groups-tabs">
           <Tabs.List>
             {authState?.accessToken && (
               <Tabs.Tab value="recommended" leftSection={<IconSparkles size={16} />}>
@@ -306,7 +306,7 @@ export default function GroupsPage() {
         </Tabs>
 
         {/* Search and Filters */}
-        <Card withBorder>
+        <Card withBorder data-tour="groups-search">
           <Group gap="md">
             <TextInput
               placeholder="Search by city..."
@@ -332,6 +332,7 @@ export default function GroupsPage() {
         </Card>
 
         {/* Groups Grid */}
+        <div data-tour="groups-list">
         {(activeTab === 'recommended' ? loadingRecommended : loading) ? (
           <Stack align="center" gap="md" style={{ minHeight: '300px', justifyContent: 'center' }}>
             <Loader size="lg" />
@@ -510,6 +511,7 @@ export default function GroupsPage() {
             ))}
           </Grid>
         )}
+        </div>
       </Stack>
     </Container>
     </>

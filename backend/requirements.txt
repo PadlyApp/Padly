@@ -6,4 +6,5 @@ pydantic[email]==2.12.3
 email-validator==2.2.0
 httpx>=0.27
 tensorflow==2.20.0
+geonamescache
 geonamescache==3.0.0

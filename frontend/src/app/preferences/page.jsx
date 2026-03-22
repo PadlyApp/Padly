@@ -23,6 +23,7 @@ import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
+import { usePadlyTour } from '../contexts/TourContext';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -61,6 +62,7 @@ export default function PreferencesPage() {
 
 function PreferencesPageContent() {
   const { user, authState, isLoading: authLoading } = useAuth();
+  const { tourPhase } = usePadlyTour();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -343,6 +345,10 @@ function PreferencesPageContent() {
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
+
+      if (tourPhase === 'preferences') {
+        window.dispatchEvent(new CustomEvent('padly-tour-prefs-saved'));
+      }
     } catch (err) {
       setError(err.message || 'Network error. Please try again.');
     } finally {
@@ -414,7 +420,7 @@ function PreferencesPageContent() {
             </Alert>
           )}
 
-          <Paper shadow="sm" p="xl" radius="md" withBorder>
+          <Paper shadow="sm" p="xl" radius="md" withBorder data-tour="prefs-hard">
             <Title order={4} mb="md">
               Hard Constraints
             </Title>
@@ -618,7 +624,7 @@ function PreferencesPageContent() {
             </Grid>
           </Paper>
 
-          <Paper shadow="sm" p="xl" radius="md" withBorder>
+          <Paper shadow="sm" p="xl" radius="md" withBorder data-tour="prefs-soft">
             <Title order={4} mb="md">
               Soft Constraints
             </Title>
@@ -743,7 +749,7 @@ function PreferencesPageContent() {
               marginTop: '2rem',
             }}
           >
-            <Group justify="center">
+            <Group justify="center" data-tour="prefs-save">
               <Button size="lg" onClick={handleSave} loading={saving} disabled={saving} style={{ minWidth: '220px' }}>
                 Save Preferences
               </Button>

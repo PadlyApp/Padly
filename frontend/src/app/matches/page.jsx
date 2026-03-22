@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ImageWithFallback } from '../components/ImageWithFallback';
-import { getLikedListings } from '../discover/page';
+import { getLikedListings } from '../discover/likedListings';
 
 export default function MatchesPage() {
   return (
@@ -33,7 +33,7 @@ function MatchesPageContent() {
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
 
-      <Container size="xl" style={{ padding: '4rem 3rem' }}>
+      <Container size="xl" style={{ padding: '4rem 3rem' }} data-tour="matches-content">
         {/* Header */}
         <Stack align="center" gap="lg" mb={64}>
           <Title

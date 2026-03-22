@@ -1,12 +1,32 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Container, Title, Text, Button, Stack, Box, Group } from '@mantine/core';
 import Link from 'next/link';
 import { Navigation } from './components/Navigation';
 import { useAuth } from './contexts/AuthContext';
+import { usePadlyTour } from './contexts/TourContext';
 
 export default function Home() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { tourPhase, isTourActive, isReady: tourReady, startTour } = usePadlyTour();
+
+  useEffect(() => {
+    if (!tourReady || isLoading || !isAuthenticated) return;
+
+    const onboardingDone = localStorage.getItem('padly_onboarding_complete') === 'true';
+    let tourDone = false;
+    try {
+      const tourState = localStorage.getItem('padly_tour_state');
+      tourDone = tourState && JSON.parse(tourState).phase === 'complete';
+    } catch {
+      // corrupt state — treat as not done
+    }
+
+    if (onboardingDone && !tourDone && !isTourActive) {
+      startTour();
+    }
+  }, [tourReady, isLoading, isAuthenticated, isTourActive, startTour]);
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
