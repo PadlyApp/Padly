@@ -7,11 +7,13 @@ import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
+import { usePadlyTour } from '../contexts/TourContext';
 import { SwipeCard } from '../components/SwipeCard';
 
-// ── localStorage helpers ────────────────────────────────────────────────────
+import { getLikedListings, saveLikedListing } from './likedListings';
 
-const LIKED_KEY = 'padly_liked_listings';
+// ── session helpers ─────────────────────────────────────────────────────────
+
 const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
 
 function getOrCreateSwipeSessionId() {
@@ -26,22 +28,6 @@ function getOrCreateSwipeSessionId() {
   return generated;
 }
 
-export function getLikedListings() {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(LIKED_KEY) || '[]'); }
-  catch { return []; }
-}
-
-export function saveLikedListing(listing) {
-  const existing = getLikedListings();
-  if (existing.find((l) => l.listing_id === listing.listing_id)) return;
-  localStorage.setItem(LIKED_KEY, JSON.stringify([...existing, listing]));
-}
-
-export function clearLikedListings() {
-  localStorage.removeItem(LIKED_KEY);
-}
-
 // ── page ────────────────────────────────────────────────────────────────────
 
 export default function DiscoverPage() {
@@ -54,6 +40,7 @@ export default function DiscoverPage() {
 
 function DiscoverContent() {
   const { user, authState } = useAuth();
+  const { tourPhase } = usePadlyTour();
   const userId = user?.profile?.id;
   const router = useRouter();
 
@@ -204,7 +191,13 @@ function DiscoverContent() {
     });
 
     setCurrentIndex((prev) => prev + 1);
-  }, [currentIndex, listings, persistSwipeEvent]);
+
+    if (tourPhase === 'discover') {
+      window.dispatchEvent(new CustomEvent('padly-tour-swipe', {
+        detail: { direction },
+      }));
+    }
+  }, [currentIndex, listings, persistSwipeEvent, tourPhase]);
 
   const handleButton = (direction) => {
     if (currentIndex >= listings.length) return;
@@ -225,7 +218,7 @@ function DiscoverContent() {
             Discover
           </Title>
           {!loading && !isDone && (
-            <Text size="sm" c="dimmed">
+            <Text size="sm" c="dimmed" data-tour="discover-counter">
               {remaining} listing{remaining !== 1 ? 's' : ''} left
             </Text>
           )}
@@ -278,7 +271,7 @@ function DiscoverContent() {
           {/* Card stack + buttons */}
           {!loading && !error && !isDone && (
             <>
-              <Box style={{ position: 'relative', width: '100%', maxWidth: 400, height: 520 }}>
+              <Box data-tour="discover-card" style={{ position: 'relative', width: '100%', maxWidth: 400, height: 520 }}>
                 {[2, 1, 0].map((offset) => {
                   const idx = currentIndex + offset;
                   if (idx >= listings.length) return null;
@@ -295,8 +288,9 @@ function DiscoverContent() {
               </Box>
 
               {/* Action buttons */}
-              <Group gap={48} justify="center">
+              <Group gap={48} justify="center" data-tour="discover-actions">
                 <ActionIcon
+                  data-tour="discover-pass-btn"
                   size={64}
                   radius="xl"
                   variant="light"
@@ -307,6 +301,7 @@ function DiscoverContent() {
                   <IconX size={28} />
                 </ActionIcon>
                 <ActionIcon
+                  data-tour="discover-like-btn"
                   size={64}
                   radius="xl"
                   variant="light"

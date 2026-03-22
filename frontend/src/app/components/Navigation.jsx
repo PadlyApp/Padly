@@ -5,9 +5,11 @@ import { Container, Group, Text, UnstyledButton, Button, Burger, Drawer, Stack, 
 import { useDisclosure } from '@mantine/hooks';
 import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
+import { usePadlyTour } from '../contexts/TourContext';
 
 export function Navigation() {
   const { isAuthenticated, user, signout, isLoading } = useAuth();
+  const { isTourPaused, resumeTour } = usePadlyTour();
   const [opened, { open, close }] = useDisclosure(false);
 
   const handleSignout = async () => {
@@ -43,48 +45,59 @@ export function Navigation() {
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/groups" style={{ textDecoration: 'none' }}>
+                  <Link href="/groups" style={{ textDecoration: 'none' }} data-tour="nav-groups">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Groups
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/invitations" style={{ textDecoration: 'none' }}>
+                  <Link href="/invitations" style={{ textDecoration: 'none' }} data-tour="nav-invitations">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Invitations
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/preferences" style={{ textDecoration: 'none' }}>
+                  <Link href="/preferences" style={{ textDecoration: 'none' }} data-tour="nav-preferences">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Preferences
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/discover" style={{ textDecoration: 'none' }}>
+                  <Link href="/discover" style={{ textDecoration: 'none' }} data-tour="nav-discover">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Discover
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/matches" style={{ textDecoration: 'none' }}>
+                  <Link href="/matches" style={{ textDecoration: 'none' }} data-tour="nav-matches">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Recommendations
                       </Text>
                     </UnstyledButton>
                   </Link>
-                  <Link href="/account" style={{ textDecoration: 'none' }}>
+                  <Link href="/account" style={{ textDecoration: 'none' }} data-tour="nav-account">
                     <UnstyledButton>
                       <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
                         Account
                       </Text>
                     </UnstyledButton>
                   </Link>
+                  {isTourPaused && (
+                    <Button
+                      variant="light"
+                      color="teal"
+                      size="xs"
+                      onClick={resumeTour}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      Resume Tour
+                    </Button>
+                  )}
                   <Button
                     variant="subtle"
                     color="gray"
@@ -195,6 +208,17 @@ export function Navigation() {
                 </Link>
                 
                 <Divider />
+
+                {isTourPaused && (
+                  <Button
+                    variant="light"
+                    color="teal"
+                    fullWidth
+                    onClick={() => { resumeTour(); close(); }}
+                  >
+                    Resume Tour
+                  </Button>
+                )}
                 
                 <Button
                   variant="subtle"
