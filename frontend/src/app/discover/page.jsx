@@ -16,6 +16,9 @@ import { getLikedListings, saveLikedListing } from './likedListings';
 
 const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
 
+/** Stable client label for swipe telemetry (backend requires algorithm_version). */
+const DISCOVER_ALGORITHM_VERSION = 'discover-v1';
+
 function getOrCreateSwipeSessionId() {
   if (typeof window === 'undefined') return 'server-session';
   const existing = sessionStorage.getItem(SWIPE_SESSION_KEY);
@@ -144,12 +147,17 @@ function DiscoverContent() {
     fetchRecommendations();
   }, [fetchRecommendations]);
 
-  const persistSwipeEvent = useCallback(async ({ listing, action, position }) => {
+  const persistSwipeEvent = useCallback(async ({ listing, action, position, startedAt }) => {
     if (!authState?.accessToken || !userId || !listing?.listing_id) return;
 
     if (!swipeSessionIdRef.current) {
       swipeSessionIdRef.current = getOrCreateSwipeSessionId();
     }
+
+    const algorithmVersion =
+      listing?.algorithm_version != null && String(listing.algorithm_version).trim()
+        ? String(listing.algorithm_version).trim()
+        : DISCOVER_ALGORITHM_VERSION;
 
     try {
       const response = await fetch('http://localhost:8000/api/interactions/swipes', {
@@ -164,9 +172,13 @@ function DiscoverContent() {
           surface: 'discover',
           session_id: swipeSessionIdRef.current,
           position_in_feed: position,
-          algorithm_version: listing?.algorithm_version || 'phase2b-cold-no-ml',
+          algorithm_version: algorithmVersion,
           model_version: listing?.ml_score != null ? 'recommender-v1' : null,
           city_filter: listing.city ?? null,
+          latency_ms:
+            startedAt != null && typeof performance !== 'undefined'
+              ? Math.max(0, Math.round(performance.now() - startedAt))
+              : undefined,
         }),
       });
 
@@ -183,11 +195,19 @@ function DiscoverContent() {
     const action = direction === 'right' ? 'like' : 'pass';
     if (action === 'like') saveLikedListing(listing);
 
-    const position = listings.findIndex((item) => item.listing_id === listing?.listing_id);
+    // Feed position must match the card index in this session's stack (0-based).
+    const top = listings[currentIndex];
+    const position =
+      top && listing?.listing_id === top.listing_id
+        ? currentIndex
+        : listings.findIndex((item) => item.listing_id === listing?.listing_id);
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
+
     void persistSwipeEvent({
       listing,
       action,
       position: position >= 0 ? position : currentIndex,
+      startedAt,
     });
 
     setCurrentIndex((prev) => prev + 1);
