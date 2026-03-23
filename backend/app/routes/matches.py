@@ -14,6 +14,14 @@ from typing import Optional
 from app.dependencies.auth import get_user_token, require_user_token
 from app.dependencies.supabase import get_admin_client
 from app.services.user_group_matching import find_compatible_groups, calculate_user_group_compatibility
+from app.services.roommate_suggestions import (
+    DEFAULT_BEHAVIOR_PREFILTER_K,
+    DEFAULT_CANDIDATE_POOL_CAP,
+    MAX_BEHAVIOR_PREFILTER_K,
+    MAX_CANDIDATE_POOL_CAP,
+    MAX_RESULT_LIMIT,
+    get_roommate_suggestions,
+)
 
 router = APIRouter(prefix="/api/matches", tags=["matches"])
 
@@ -109,6 +117,62 @@ async def discover_compatible_groups(
         },
         "count": len(compatible_groups),
         "groups": compatible_groups
+    }
+
+
+@router.get("/roommate-suggestions")
+async def roommate_suggestions(
+    limit: int = Query(20, ge=1, le=MAX_RESULT_LIMIT, description="Max suggestions to return"),
+    candidate_pool_cap: int = Query(
+        DEFAULT_CANDIDATE_POOL_CAP,
+        ge=1,
+        le=MAX_CANDIDATE_POOL_CAP,
+        description="Max personal_preferences rows to load for this city before hard gates",
+    ),
+    behavior_prefilter_k: int = Query(
+        DEFAULT_BEHAVIOR_PREFILTER_K,
+        ge=1,
+        le=MAX_BEHAVIOR_PREFILTER_K,
+        description="Top lifestyle matches to run behavior fingerprint on",
+    ),
+    token: str = Depends(require_user_token),
+):
+    """
+    Ranked individual roommate candidates: hard gates (city, optional state, budget, gender policy,
+    incompatible active group), then lifestyle similarity plus behavioral fingerprint fusion.
+    """
+    supabase = get_admin_client()
+
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    auth_user_id = user_response.user.id
+
+    user_record = supabase.table("users").select("*").eq("auth_id", auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    user = user_record.data[0]
+    user_id = user["id"]
+
+    prefs_response = supabase.table("personal_preferences").select("*").eq("user_id", user_id).execute()
+    user_prefs = prefs_response.data[0] if prefs_response.data else {}
+
+    try:
+        payload = await get_roommate_suggestions(
+            user_id,
+            user_prefs,
+            limit=limit,
+            candidate_pool_cap=candidate_pool_cap,
+            behavior_prefilter_k=behavior_prefilter_k,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "status": "success",
+        **payload,
     }
 
 
