@@ -6,6 +6,11 @@ on the capped candidate pool, then compute fingerprints only for the top behavio
 
 When both users are behavior-cold (similarity_behavior cold_cold), final score is lifestyle-only;
 behavior is null in the API response for that pair.
+
+Phase 3.2 (optional): with blend_embedding=true, mean item-tower embeddings from recent likes
+are blended into the lifestyle term (see EMBEDDING_IN_LIFESTYLE_WEIGHT) before fusion with
+behavior. If the two-tower model is unavailable or a user has no encodable likes, embedding
+is skipped with no regression.
 """
 
 from __future__ import annotations
@@ -28,7 +33,13 @@ logger = logging.getLogger(__name__)
 ALPHA_BEHAVIOR = 0.6
 BETA_LIFESTYLE = 0.4
 
+# When blend_embedding is on: lifestyle_effective = (1-delta)*lifestyle + delta*embedding_sim
+EMBEDDING_IN_LIFESTYLE_WEIGHT = 0.4
+
 DEFAULT_CANDIDATE_POOL_CAP = 300
+DEFAULT_EMBEDDING_LIKE_CAP = 50
+MAX_EMBEDDING_LIKE_CAP = 100
+
 DEFAULT_BEHAVIOR_PREFILTER_K = 80
 MAX_CANDIDATE_POOL_CAP = 500
 MAX_BEHAVIOR_PREFILTER_K = 200
@@ -270,6 +281,19 @@ def fuse_final_score(
     return alpha * behavior_sim + beta * lifestyle_sim
 
 
+def blend_lifestyle_with_embedding(
+    lifestyle_sim: float,
+    embedding_sim: Optional[float],
+    *,
+    delta: float = EMBEDDING_IN_LIFESTYLE_WEIGHT,
+) -> float:
+    """Blend raw lifestyle [0,1] with taste embedding similarity; no-op if embedding is None."""
+    if embedding_sim is None:
+        return float(lifestyle_sim)
+    d = max(0.0, min(1.0, float(delta)))
+    return (1.0 - d) * float(lifestyle_sim) + d * float(embedding_sim)
+
+
 def _chunked(ids: List[str], size: int) -> List[List[str]]:
     return [ids[i : i + size] for i in range(0, len(ids), size)]
 
@@ -283,6 +307,8 @@ async def get_roommate_suggestions(
     behavior_prefilter_k: int = DEFAULT_BEHAVIOR_PREFILTER_K,
     alpha: float = ALPHA_BEHAVIOR,
     beta: float = BETA_LIFESTYLE,
+    blend_embedding: bool = False,
+    embedding_like_cap: int = DEFAULT_EMBEDDING_LIKE_CAP,
 ) -> Dict[str, Any]:
     """
     Returns dict: user_id, weights, suggestions (list), and optional debug timings via logging.
@@ -294,6 +320,16 @@ async def get_roommate_suggestions(
     cap = clamp_cap(candidate_pool_cap, DEFAULT_CANDIDATE_POOL_CAP, MAX_CANDIDATE_POOL_CAP)
     pre_k = clamp_cap(behavior_prefilter_k, DEFAULT_BEHAVIOR_PREFILTER_K, MAX_BEHAVIOR_PREFILTER_K)
     out_limit = max(1, min(limit, MAX_RESULT_LIMIT))
+    like_k = max(1, min(int(embedding_like_cap), MAX_EMBEDDING_LIKE_CAP))
+
+    _rec: Any = None
+    seeker_taste_vec: Optional[Any] = None
+    if blend_embedding:
+        from app.ai import recommender as _rec
+
+        seeker_taste_vec = _rec.mean_taste_item_embedding(
+            seeker_id, k=like_k, days=180, max_events=2000
+        )
 
     supabase = get_admin_client()
     target_city = str(city).strip()
@@ -353,9 +389,12 @@ async def get_roommate_suggestions(
         filtered.append(row)
 
     if not filtered:
+        weights_out: Dict[str, Any] = {"alpha": alpha, "beta": beta}
+        if blend_embedding:
+            weights_out["embedding_in_lifestyle"] = EMBEDDING_IN_LIFESTYLE_WEIGHT
         return {
             "user_id": seeker_id,
-            "weights": {"alpha": alpha, "beta": beta},
+            "weights": weights_out,
             "suggestions": [],
         }
 
@@ -382,25 +421,35 @@ async def get_roommate_suggestions(
             k=ROOMMATE_BEHAVIOR_MIN_SWIPES,
         )
         ls = lifestyle_similarity_user_user(seeker_prefs, row)
+        emb_sim: Optional[float] = None
+        if blend_embedding and seeker_taste_vec is not None and _rec is not None:
+            cand_taste = _rec.mean_taste_item_embedding(cid, k=like_k, days=180, max_events=2000)
+            emb_sim = _rec.taste_similarity_from_mean_embeddings(seeker_taste_vec, cand_taste)
+        ls_eff = blend_lifestyle_with_embedding(ls, emb_sim) if blend_embedding else ls
+
         if beh.get("cold_cold"):
             b_val = None
-            final = ls
+            final = ls_eff
             conf = "low"
         else:
             b_val = float(beh["similarity"])
-            final = fuse_final_score(b_val, ls, alpha, beta)
+            final = fuse_final_score(b_val, ls_eff, alpha, beta)
             conf = str(beh.get("behavior_confidence") or "low")
+
+        score_row: Dict[str, Any] = {
+            "behavior": b_val,
+            "lifestyle": round(ls, 4),
+            "final": round(final, 4),
+            "behavior_confidence": conf,
+        }
+        if blend_embedding:
+            score_row["embedding"] = round(emb_sim, 4) if emb_sim is not None else None
 
         ranked.append(
             {
                 "user_id": cid,
                 "final": final,
-                "scores": {
-                    "behavior": b_val,
-                    "lifestyle": round(ls, 4),
-                    "final": round(final, 4),
-                    "behavior_confidence": conf,
-                },
+                "scores": score_row,
                 "cand_prefs": row,
                 "meta_c": fp_c.get("metadata") or {},
             }
@@ -455,9 +504,13 @@ async def get_roommate_suggestions(
         len(suggestions),
     )
 
+    weights_out = {"alpha": alpha, "beta": beta}
+    if blend_embedding:
+        weights_out["embedding_in_lifestyle"] = EMBEDDING_IN_LIFESTYLE_WEIGHT
+
     return {
         "user_id": seeker_id,
-        "weights": {"alpha": alpha, "beta": beta},
+        "weights": weights_out,
         "suggestions": suggestions,
     }
 
@@ -465,8 +518,12 @@ async def get_roommate_suggestions(
 __all__ = [
     "ALPHA_BEHAVIOR",
     "BETA_LIFESTYLE",
+    "EMBEDDING_IN_LIFESTYLE_WEIGHT",
+    "DEFAULT_EMBEDDING_LIKE_CAP",
+    "MAX_EMBEDDING_LIKE_CAP",
     "DEFAULT_BEHAVIOR_PREFILTER_K",
     "DEFAULT_CANDIDATE_POOL_CAP",
+    "blend_lifestyle_with_embedding",
     "MAX_BEHAVIOR_PREFILTER_K",
     "MAX_CANDIDATE_POOL_CAP",
     "MAX_RESULT_LIMIT",

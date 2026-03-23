@@ -17,8 +17,10 @@ from app.services.user_group_matching import find_compatible_groups, calculate_u
 from app.services.roommate_suggestions import (
     DEFAULT_BEHAVIOR_PREFILTER_K,
     DEFAULT_CANDIDATE_POOL_CAP,
+    DEFAULT_EMBEDDING_LIKE_CAP,
     MAX_BEHAVIOR_PREFILTER_K,
     MAX_CANDIDATE_POOL_CAP,
+    MAX_EMBEDDING_LIKE_CAP,
     MAX_RESULT_LIMIT,
     get_roommate_suggestions,
 )
@@ -135,11 +137,22 @@ async def roommate_suggestions(
         le=MAX_BEHAVIOR_PREFILTER_K,
         description="Top lifestyle matches to run behavior fingerprint on",
     ),
+    blend_embedding: bool = Query(
+        False,
+        description="When true, blend two-tower mean taste embeddings into the lifestyle term (Phase 3.2); no-op if model or likes missing",
+    ),
+    embedding_like_cap: int = Query(
+        DEFAULT_EMBEDDING_LIKE_CAP,
+        ge=1,
+        le=MAX_EMBEDDING_LIKE_CAP,
+        description="Max distinct liked listings per user when building mean taste embedding",
+    ),
     token: str = Depends(require_user_token),
 ):
     """
     Ranked individual roommate candidates: hard gates (city, optional state, budget, gender policy,
     incompatible active group), then lifestyle similarity plus behavioral fingerprint fusion.
+    Optional blend_embedding adds item-tower taste similarity (mean of recent like embeddings).
     """
     supabase = get_admin_client()
 
@@ -166,6 +179,8 @@ async def roommate_suggestions(
             limit=limit,
             candidate_pool_cap=candidate_pool_cap,
             behavior_prefilter_k=behavior_prefilter_k,
+            blend_embedding=blend_embedding,
+            embedding_like_cap=embedding_like_cap,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
