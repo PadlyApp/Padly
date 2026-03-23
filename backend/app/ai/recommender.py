@@ -3,6 +3,10 @@ Padly Recommender Service
 
 Loads the trained Two-Tower model and scores listings for a given user.
 Designed to be called from the API route — no ML knowledge needed outside this file.
+
+Phase 3.1: exposes user_tower_latent / item_tower_latent and mean taste vectors from liked
+listings (item tower). All embedding entrypoints return None when the model or towers are
+unavailable — same graceful degradation as listing scoring.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ _META_PATH  = _AI_DIR / "dataset" / "feature_meta.json"
 _model = None
 _meta: Optional[Dict] = None
 _model_disabled = False
+_user_tower = None
+_item_tower = None
+_towers_resolved = False
 
 
 def _load():
@@ -54,6 +61,231 @@ def _load():
     except Exception as e:
         _meta = None
         print(f"[recommender] metadata unavailable, using heuristic fallback: {e}")
+
+
+def _resolve_tower_submodels():
+    """
+    Extract user/item tower submodels from the saved two-tower graph (see two_tower_baseline.py).
+    Caches result; returns (user_tower, item_tower) or (None, None) if unavailable.
+    """
+    global _user_tower, _item_tower, _towers_resolved
+
+    if _towers_resolved:
+        return _user_tower, _item_tower
+
+    _towers_resolved = True
+    _user_tower, _item_tower = None, None
+
+    _load()
+    if _model is None:
+        return None, None
+
+    try:
+        for layer in _model.layers:
+            if layer.name == "user_tower":
+                _user_tower = layer
+            elif layer.name == "item_tower":
+                _item_tower = layer
+    except Exception as e:
+        print(f"[recommender] could not resolve tower layers: {e}")
+
+    if _user_tower is None or _item_tower is None:
+        print(
+            "[recommender] user_tower/item_tower layers missing; "
+            "embedding APIs will return None until model layout matches training."
+        )
+        _user_tower, _item_tower = None, None
+
+    return _user_tower, _item_tower
+
+
+def embedding_inference_available() -> bool:
+    """True when the two-tower model, metadata, and tower submodels are usable."""
+    _load()
+    ut, it = _resolve_tower_submodels()
+    return _model is not None and _meta is not None and ut is not None and it is not None
+
+
+def _pad_user_features(user_vec: np.ndarray) -> np.ndarray:
+    """Trim or pad user feature matrix rows to _meta['user_dim']."""
+    if _meta is None:
+        return user_vec
+    user_dim = int(_meta["user_dim"])
+    if user_vec.shape[1] < user_dim:
+        pad = np.zeros((user_vec.shape[0], user_dim - user_vec.shape[1]), dtype=np.float32)
+        user_vec = np.hstack([user_vec, pad])
+    elif user_vec.shape[1] > user_dim:
+        user_vec = user_vec[:, :user_dim]
+    return user_vec
+
+
+def user_tower_latent(user: Dict) -> Optional[np.ndarray]:
+    """
+    Forward pass through the user tower only. Returns shape (embedding_dim,) or None if unavailable.
+    """
+    ut, _ = _resolve_tower_submodels()
+    if ut is None or _meta is None:
+        return None
+    try:
+        user_vec = _pad_user_features(_encode_user(user))
+        out = ut.predict(user_vec, verbose=0)
+        return np.asarray(out, dtype=np.float32).reshape(-1)
+    except Exception as e:
+        print(f"[recommender] user_tower_latent failed: {e}")
+        return None
+
+
+def item_tower_latent(listing: Dict) -> Optional[np.ndarray]:
+    """
+    Forward pass through the item tower only. Returns shape (embedding_dim,) or None if unavailable.
+    """
+    _, it = _resolve_tower_submodels()
+    if it is None or _meta is None:
+        return None
+    try:
+        item_vec = _encode_listing(listing)
+        out = it.predict(item_vec, verbose=0)
+        return np.asarray(out, dtype=np.float32).reshape(-1)
+    except Exception as e:
+        print(f"[recommender] item_tower_latent failed: {e}")
+        return None
+
+
+def item_tower_latent_batch(listings: List[Dict]) -> Optional[np.ndarray]:
+    """Batch item tower forward. Returns array (N, embedding_dim) or None."""
+    _, it = _resolve_tower_submodels()
+    if it is None or _meta is None or not listings:
+        return None
+    try:
+        mats = [_encode_listing(l) for l in listings]
+        batch = np.vstack(mats)
+        out = it.predict(batch, verbose=0)
+        return np.asarray(out, dtype=np.float32)
+    except Exception as e:
+        print(f"[recommender] item_tower_latent_batch failed: {e}")
+        return None
+
+
+def _fetch_listings_for_item_tower(listing_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Load listing rows with fields required by _encode_listing."""
+    if not listing_ids:
+        return {}
+    from app.dependencies.supabase import get_admin_client
+
+    supabase = get_admin_client()
+    out: Dict[str, Dict[str, Any]] = {}
+    chunk_size = 200
+    for i in range(0, len(listing_ids), chunk_size):
+        chunk = listing_ids[i : i + chunk_size]
+        response = (
+            supabase.table("listings")
+            .select(
+                "id, price_per_month, number_of_bedrooms, number_of_bathrooms, area_sqft, "
+                "furnished, utilities_included, amenities, latitude, longitude, property_type"
+            )
+            .in_("id", chunk)
+            .execute()
+        )
+        for row in response.data or []:
+            rid = row.get("id")
+            if rid is not None:
+                out[str(rid)] = row
+    return out
+
+
+def _cosine_to_unit_interval(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity mapped from [-1, 1] to [0, 1]."""
+    a = np.asarray(a, dtype=np.float64).reshape(-1)
+    b = np.asarray(b, dtype=np.float64).reshape(-1)
+    na = float(np.linalg.norm(a))
+    nb = float(np.linalg.norm(b))
+    if na <= 1e-12 or nb <= 1e-12:
+        return 0.5
+    cos = float(np.dot(a, b) / (na * nb))
+    return _clamp01((cos + 1.0) / 2.0)
+
+
+def _l2_normalize_vector(v: np.ndarray) -> np.ndarray:
+    x = np.asarray(v, dtype=np.float32).reshape(-1)
+    n = float(np.linalg.norm(x))
+    if n <= 1e-12:
+        return x
+    return (x / n).astype(np.float32)
+
+
+def mean_taste_item_embedding(
+    user_id: str,
+    *,
+    k: int = 50,
+    days: int = 180,
+    max_events: int = 2000,
+) -> Optional[np.ndarray]:
+    """
+    Mean of item-tower embeddings over up to k distinct positively swiped listings (recent first).
+    The mean vector is L2-normalized for stable cosine similarity vs other users.
+    Returns None if the model is off, metadata missing, or there are no encodable likes.
+    """
+    if not embedding_inference_available():
+        return None
+
+    from app.services.behavior_features import POSITIVE_ACTIONS, _fetch_user_swipes
+
+    events = _fetch_user_swipes(user_id=user_id, days=days, max_events=max_events)
+    positive = [
+        e for e in events if e.get("action") in POSITIVE_ACTIONS and e.get("listing_id")
+    ]
+    seen = set()
+    listing_ids: List[str] = []
+    for e in positive:
+        lid = str(e.get("listing_id"))
+        if lid in seen:
+            continue
+        seen.add(lid)
+        listing_ids.append(lid)
+        if len(listing_ids) >= max(1, k):
+            break
+
+    if not listing_ids:
+        return None
+
+    rows = _fetch_listings_for_item_tower(listing_ids)
+    ordered = [rows[lid] for lid in listing_ids if lid in rows]
+    if not ordered:
+        return None
+
+    embs = item_tower_latent_batch(ordered)
+    if embs is None or embs.size == 0:
+        return None
+
+    mean_vec = np.mean(embs, axis=0)
+    return _l2_normalize_vector(mean_vec)
+
+
+def taste_similarity_from_mean_embeddings(
+    embedding_a: Optional[np.ndarray],
+    embedding_b: Optional[np.ndarray],
+) -> Optional[float]:
+    """Map cosine similarity between two mean taste vectors to [0, 1]. None if either is missing."""
+    if embedding_a is None or embedding_b is None:
+        return None
+    return _cosine_to_unit_interval(embedding_a, embedding_b)
+
+
+def taste_embedding_similarity_users(
+    user_id_a: str,
+    user_id_b: str,
+    *,
+    k: int = 50,
+    days: int = 180,
+    max_events: int = 2000,
+) -> Optional[float]:
+    """
+    Cosine-based similarity in [0, 1] between mean taste vectors of two users.
+    None if either side has no usable embedding.
+    """
+    ea = mean_taste_item_embedding(user_id_a, k=k, days=days, max_events=max_events)
+    eb = mean_taste_item_embedding(user_id_b, k=k, days=days, max_events=max_events)
+    return taste_similarity_from_mean_embeddings(ea, eb)
 
 
 # ── feature encoding ───────────────────────────────────────────────────────
@@ -510,15 +742,7 @@ def score_listings(user: Dict, listings: List[Dict], top_n: int = 50) -> List[Di
         return _score_with_blend(user, eligible, top_n, ml_scores=None)
 
     # Encode user once
-    user_vec = _encode_user(user)
-    user_dim = _meta["user_dim"]
-
-    # Pad or trim to expected user_dim
-    if user_vec.shape[1] < user_dim:
-        pad = np.zeros((1, user_dim - user_vec.shape[1]), dtype=np.float32)
-        user_vec = np.hstack([user_vec, pad])
-    elif user_vec.shape[1] > user_dim:
-        user_vec = user_vec[:, :user_dim]
+    user_vec = _pad_user_features(_encode_user(user))
 
     # Encode all eligible listings
     item_vecs = np.vstack([_encode_listing(l) for l in eligible])  # (N, item_dim)

@@ -3,6 +3,8 @@
 import pytest
 
 from app.services.roommate_suggestions import (
+    EMBEDDING_IN_LIFESTYLE_WEIGHT,
+    blend_lifestyle_with_embedding,
     budgets_overlap_user,
     build_top_reasons,
     candidate_excluded_for_incompatible_group,
@@ -63,6 +65,16 @@ def test_fuse_final_score_lifestyle_only_when_behavior_none():
 def test_fuse_final_score_blend():
     assert fuse_final_score(1.0, 0.0, 0.6, 0.4) == pytest.approx(0.6)
     assert fuse_final_score(0.0, 1.0, 0.6, 0.4) == pytest.approx(0.4)
+
+
+def test_blend_lifestyle_with_embedding_no_embedding():
+    assert blend_lifestyle_with_embedding(0.8, None) == pytest.approx(0.8)
+
+
+def test_blend_lifestyle_with_embedding_mix():
+    d = EMBEDDING_IN_LIFESTYLE_WEIGHT
+    out = blend_lifestyle_with_embedding(0.5, 1.0, delta=d)
+    assert out == pytest.approx((1.0 - d) * 0.5 + d * 1.0)
 
 
 def test_seeker_compatible_with_group_hard():
