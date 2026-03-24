@@ -47,6 +47,7 @@ coverage/
 dist/
 build/
 out/
+/.next/
 
 # Temporary folders
 tmp/
