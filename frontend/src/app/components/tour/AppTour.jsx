@@ -15,6 +15,33 @@ import {
   MATCHES_TOUR_STEPS,
 } from './tourSteps';
 
+function waitForSelector(selector, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const interval = 150;
+    const stabilityChecks = 2;
+    let elapsed = 0;
+    let consecutiveHits = 0;
+
+    const poll = setInterval(() => {
+      elapsed += interval;
+      const found = document.querySelector(selector);
+      if (found) {
+        consecutiveHits++;
+        if (consecutiveHits >= stabilityChecks) {
+          clearInterval(poll);
+          resolve(found);
+        }
+      } else {
+        consecutiveHits = 0;
+        if (elapsed >= timeoutMs) {
+          clearInterval(poll);
+          reject(new Error(`Tour target "${selector}" not found after ${timeoutMs}ms`));
+        }
+      }
+    }, interval);
+  });
+}
+
 function buildReactourSteps(stepDefs, { onNext, onPrev, onClose, totalSteps }) {
   return stepDefs.map((def, i) => ({
     selector: def.selector,
@@ -68,13 +95,15 @@ export function AppTour() {
     if (!isReady || tourPhase !== 'nav' || pathname !== '/') return;
     if (phaseInitRef.current === 'nav') return;
     phaseInitRef.current = 'nav';
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
+    waitForSelector(NAV_TOUR_STEPS[0].selector).then(() => {
+      if (cancelled) return;
       const onNext = (i) => {
         if (i === NAV_TOUR_STEPS.length - 1) {
           setIsOpen(false);
           setTourPhase('preferences');
-          router.push('/preferences');
+          router.push('/account?tab=preferences');
         } else {
           setCurrentStep(i + 1);
         }
@@ -89,18 +118,20 @@ export function AppTour() {
       }));
       setCurrentStep(0);
       setIsOpen(true);
-    }, 400);
+    }).catch(() => {});
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, setTourPhase, router, closeTour]);
 
   // ── Preferences phase ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!isReady || tourPhase !== 'preferences' || pathname !== '/preferences') return;
+    if (!isReady || tourPhase !== 'preferences' || pathname !== '/account') return;
     if (phaseInitRef.current === 'preferences') return;
     phaseInitRef.current = 'preferences';
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
+    waitForSelector(PREFERENCES_TOUR_STEPS[0].selector).then(() => {
+      if (cancelled) return;
       const onNext = (i) => {
         if (i === PREFERENCES_TOUR_STEPS.length - 1) {
           setIsOpen(false);
@@ -118,9 +149,9 @@ export function AppTour() {
       }));
       setCurrentStep(0);
       setIsOpen(true);
-    }, 600);
+    }).catch(() => {});
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, closeTour]);
 
   // Listen for preferences save event → advance to discover
@@ -147,8 +178,10 @@ export function AppTour() {
     if (phaseInitRef.current === 'discover') return;
     phaseInitRef.current = 'discover';
     discoverStepRef.current = 0;
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
+    waitForSelector(DISCOVER_TOUR_STEPS[0].selector).then(() => {
+      if (cancelled) return;
       const onNext = (i) => {
         if (i === DISCOVER_TOUR_STEPS.length - 1) {
           setIsOpen(false);
@@ -172,9 +205,9 @@ export function AppTour() {
       }));
       setCurrentStep(0);
       setIsOpen(true);
-    }, 800);
+    }).catch(() => {});
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, setTourPhase, router, closeTour]);
 
   // Listen for swipe events to auto-advance guided swipe steps
@@ -208,8 +241,10 @@ export function AppTour() {
     if (!isReady || tourPhase !== 'groups' || pathname !== '/groups') return;
     if (phaseInitRef.current === 'groups') return;
     phaseInitRef.current = 'groups';
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
+    waitForSelector(GROUPS_TOUR_STEPS[0].selector).then(() => {
+      if (cancelled) return;
       const onNext = (i) => {
         if (i === GROUPS_TOUR_STEPS.length - 1) {
           setIsOpen(false);
@@ -229,9 +264,9 @@ export function AppTour() {
       }));
       setCurrentStep(0);
       setIsOpen(true);
-    }, 600);
+    }).catch(() => {});
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, setTourPhase, router, closeTour]);
 
   // ── Matches phase ─────────────────────────────────────────────────────
@@ -239,8 +274,10 @@ export function AppTour() {
     if (!isReady || tourPhase !== 'matches' || pathname !== '/matches') return;
     if (phaseInitRef.current === 'matches') return;
     phaseInitRef.current = 'matches';
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
+    waitForSelector(MATCHES_TOUR_STEPS[0].selector).then(() => {
+      if (cancelled) return;
       const onNext = () => {
         setIsOpen(false);
         setTourPhase('finishing');
@@ -252,9 +289,9 @@ export function AppTour() {
       }));
       setCurrentStep(0);
       setIsOpen(true);
-    }, 600);
+    }).catch(() => {});
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; };
   }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, setTourPhase, closeTour]);
 
   // ── Finishing phase ───────────────────────────────────────────────────

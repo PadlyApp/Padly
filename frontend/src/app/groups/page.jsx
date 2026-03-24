@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   Container, 
   Title, 
@@ -18,19 +18,30 @@ import {
   ActionIcon,
   Tabs
 } from '@mantine/core';
-import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar, IconInbox } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { Navigation } from '../components/Navigation';
+import { InvitationsPanel } from '../components/InvitationsPanel';
 
 export default function GroupsPage() {
+  return (
+    <Suspense fallback={<><Navigation /><Stack align="center" py="xl"><Loader size="lg" /></Stack></>}>
+      <GroupsPageContent />
+    </Suspense>
+  );
+}
+
+function GroupsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, authState, isLoading: authLoading } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchCity, setSearchCity] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
-  const [activeTab, setActiveTab] = useState('all');
+  const tabFromUrl = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabFromUrl === 'invitations' ? 'invitations' : 'all');
   const [userGroupIds, setUserGroupIds] = useState(new Set()); // Non-solo groups user is in (for "My Group" badge)
   const [userInAnyGroup, setUserInAnyGroup] = useState(false); // True if user is in ANY group (including solo)
   const [pendingRequestIds, setPendingRequestIds] = useState(new Set()); // Groups where user has pending join request
@@ -39,6 +50,7 @@ export default function GroupsPage() {
   const [loadingRecommended, setLoadingRecommended] = useState(false);
 
   useEffect(() => {
+    if (activeTab === 'invitations') return;
     if (activeTab === 'recommended' && authState?.accessToken) {
       fetchRecommendedGroups();
     } else {
@@ -221,7 +233,7 @@ export default function GroupsPage() {
         
         notifications.show({
           title: 'Join Request Sent!',
-          message: 'Check your Invitations page to accept and join the group',
+          message: 'Check the Invitations tab to accept and join the group',
           color: 'green',
           icon: <IconCheck />,
         });
@@ -302,9 +314,19 @@ export default function GroupsPage() {
                 My Groups
               </Tabs.Tab>
             )}
+            {authState?.accessToken && (
+              <Tabs.Tab value="invitations" leftSection={<IconInbox size={16} />}>
+                Invitations
+              </Tabs.Tab>
+            )}
           </Tabs.List>
         </Tabs>
 
+        {/* Invitations Tab Content */}
+        {activeTab === 'invitations' ? (
+          <InvitationsPanel user={user} authState={authState} />
+        ) : (
+        <>
         {/* Search and Filters */}
         <Card withBorder data-tour="groups-search">
           <Group gap="md">
@@ -512,6 +534,8 @@ export default function GroupsPage() {
           </Grid>
         )}
         </div>
+        </>
+        )}
       </Stack>
     </Container>
     </>
