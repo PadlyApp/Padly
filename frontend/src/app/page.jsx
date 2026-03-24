@@ -85,7 +85,7 @@ export default function Home() {
                       View Matches
                     </Button>
                   </Link>
-                  <Link href="/preferences" style={{ textDecoration: 'none' }}>
+                  <Link href="/account?tab=preferences" style={{ textDecoration: 'none' }}>
                     <Button
                       size="lg"
                       radius="md"

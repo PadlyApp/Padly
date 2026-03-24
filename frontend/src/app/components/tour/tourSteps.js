@@ -1,27 +1,11 @@
 export const NAV_TOUR_STEPS = [
   {
-    selector: '[data-tour="nav-preferences"]',
-    icon: '⚙️',
-    title: 'Preferences',
-    description:
-      'Set your budget, city, move-in date, and lifestyle preferences here. ' +
-      'We\'ll take you there next to fill these out.',
-  },
-  {
     selector: '[data-tour="nav-groups"]',
     icon: '👥',
     title: 'Groups',
     description:
       'Browse and join roommate groups that match your criteria. ' +
-      'Once you\'re in a group, your combined preferences drive listing recommendations.',
-  },
-  {
-    selector: '[data-tour="nav-invitations"]',
-    icon: '✉️',
-    title: 'Invitations',
-    description:
-      'When a group admin invites you, it shows up here. ' +
-      'Accept to join, or decline if it\'s not the right fit.',
+      'Group invitations also live here under the Invitations tab.',
   },
   {
     selector: '[data-tour="nav-discover"]',
@@ -42,7 +26,8 @@ export const NAV_TOUR_STEPS = [
     icon: '👤',
     title: 'Account',
     description:
-      'Update your profile, bio, and details anytime. A complete profile helps with group matching.',
+      'Your profile and housing preferences live here. ' +
+      'A complete profile and well-set preferences drive better matches.',
     nextLabel: 'Set preferences →',
   },
 ];
