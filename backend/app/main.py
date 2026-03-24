@@ -4,6 +4,72 @@ A trusted platform for students, interns, and early-career professionals
 to find housing and compatible roommates.
 """
 
+# region agent log
+import importlib.util
+import json
+import sys
+import time
+
+def _agent_dbg_log(*, message: str, hypothesis_id: str, data: dict, run_id: str = "pre-fix") -> None:
+    try:
+        with open(
+            "/Users/qais4/Desktop/work/Padly/.cursor/debug-910a7a.log",
+            "a",
+            encoding="utf-8",
+        ) as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "910a7a",
+                        "runId": run_id,
+                        "hypothesisId": hypothesis_id,
+                        "location": "main.py:bootstrap",
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except OSError:
+        pass
+
+
+_ssl_ver = None
+_ssl_err = None
+try:
+    import ssl as _ssl_mod
+
+    _ssl_ver = _ssl_mod.OPENSSL_VERSION
+except Exception as _e:  # noqa: BLE001
+    _ssl_err = repr(_e)
+
+_blake2_spec = importlib.util.find_spec("_blake2")
+_blake2_ok = False
+_blake2_err = None
+try:
+    import _blake2 as _blake2_mod  # noqa: F401
+
+    _blake2_ok = True
+except Exception as _e:  # noqa: BLE001
+    _blake2_err = repr(_e)
+
+_agent_dbg_log(
+    message="pre-import hashlib probe",
+    hypothesis_id="H1-H5",
+    data={
+        "executable": sys.executable,
+        "version": sys.version,
+        "openssl_version": _ssl_ver,
+        "openssl_import_error": _ssl_err,
+        "_blake2_spec_origin": getattr(_blake2_spec, "origin", None),
+        "_blake2_import_ok": _blake2_ok,
+        "_blake2_import_error": _blake2_err,
+    },
+)
+# endregion agent log
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import (

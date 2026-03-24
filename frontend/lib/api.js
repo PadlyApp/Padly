@@ -1,4 +1,24 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+function parseFastApiDetail(payload) {
+  const d = payload?.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d
+      .map((x) => (typeof x === 'string' ? x : x?.msg || JSON.stringify(x)))
+      .join(', ');
+  }
+  return payload?.message || 'Request failed';
+}
+
+async function readApiError(response) {
+  try {
+    const j = await response.json();
+    return parseFastApiDetail(j);
+  } catch {
+    return response.statusText || 'Request failed';
+  }
+}
 
 export const api = {
   // Listings endpoints
@@ -67,6 +87,90 @@ export const api = {
     }
     const data = await response.json();
     return data;
+  },
+
+  /** Authenticated user profile fetch (for inbox name resolution). */
+  async getUserWithAuth(id, token) {
+    const response = await fetch(`${API_BASE_URL}/api/users/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const msg = await readApiError(response);
+      throw new Error(msg);
+    }
+    return response.json();
+  },
+
+  /** Ranked roommate suggestions (Phase 2); requires target_city on seeker prefs. */
+  async getRoommateSuggestions(token, options = {}) {
+    const params = new URLSearchParams();
+    const limit = options.limit ?? 20;
+    params.append('limit', String(limit));
+    if (options.blendEmbedding) {
+      params.append('blend_embedding', 'true');
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/api/matches/roommate-suggestions?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
+  },
+
+  async expressRoommateInterest(token, toUserId) {
+    const response = await fetch(`${API_BASE_URL}/api/roommate-intros/express-interest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ to_user_id: toUserId }),
+    });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
+  },
+
+  async getRoommateIntroInbox(token) {
+    const response = await fetch(`${API_BASE_URL}/api/roommate-intros/inbox`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
+  },
+
+  async respondToRoommateIntro(token, introId, action) {
+    const response = await fetch(
+      `${API_BASE_URL}/api/roommate-intros/${encodeURIComponent(introId)}/respond`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
+  },
+
+  async getIntroStatusWith(token, otherUserId) {
+    const response = await fetch(
+      `${API_BASE_URL}/api/roommate-intros/status-with/${encodeURIComponent(otherUserId)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
   },
 
   async createUser(userData, token) {

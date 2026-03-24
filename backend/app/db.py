@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # Load the .env file from the app directory
-env_path = Path(__file__).parent.parent / '.env'
+env_path = Path(__file__).parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
 # Environment variables
