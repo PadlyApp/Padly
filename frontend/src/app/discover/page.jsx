@@ -12,6 +12,46 @@ import { SwipeCard } from '../components/SwipeCard';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
+// ── dummy cards shown during the guided tour ────────────────────────────────
+const TOUR_DUMMY_LISTINGS = [
+  {
+    listing_id: 'tour-dummy-1',
+    title: 'Sunny Studio near Campus',
+    city: 'San Francisco',
+    number_of_bedrooms: 1,
+    number_of_bathrooms: 1,
+    area_sqft: 550,
+    furnished: true,
+    price_per_month: 1850,
+    match_percent: '92%',
+    images: ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
+  },
+  {
+    listing_id: 'tour-dummy-2',
+    title: 'Cozy 2BR with Rooftop Access',
+    city: 'Los Angeles',
+    number_of_bedrooms: 2,
+    number_of_bathrooms: 1,
+    area_sqft: 850,
+    furnished: false,
+    price_per_month: 2400,
+    match_percent: '87%',
+    images: ['https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
+  },
+  {
+    listing_id: 'tour-dummy-3',
+    title: 'Modern Loft Downtown',
+    city: 'New York',
+    number_of_bedrooms: 1,
+    number_of_bathrooms: 1,
+    area_sqft: 700,
+    furnished: true,
+    price_per_month: 2100,
+    match_percent: '95%',
+    images: ['https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
+  },
+];
+
 // ── session helpers ─────────────────────────────────────────────────────────
 
 const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
@@ -44,6 +84,7 @@ export default function DiscoverPage() {
 function DiscoverContent() {
   const { user, authState } = useAuth();
   const { tourPhase } = usePadlyTour();
+  const isTourDiscover = tourPhase === 'discover';
   const userId = user?.profile?.id;
   const router = useRouter();
 
@@ -144,8 +185,15 @@ function DiscoverContent() {
   }, [userId, authState?.accessToken]);
 
   useEffect(() => {
+    if (isTourDiscover) {
+      setListings(TOUR_DUMMY_LISTINGS);
+      setCurrentIndex(0);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     fetchRecommendations();
-  }, [fetchRecommendations]);
+  }, [fetchRecommendations, isTourDiscover]);
 
   const persistSwipeEvent = useCallback(async ({ listing, action, position, startedAt }) => {
     if (!authState?.accessToken || !userId || !listing?.listing_id) return;
@@ -192,23 +240,27 @@ function DiscoverContent() {
   }, [authState?.accessToken, userId]);
 
   const handleSwipe = useCallback((direction, listing) => {
-    const action = direction === 'right' ? 'like' : 'pass';
-    if (action === 'like') saveLikedListing(listing);
+    const isDummy = listing?.listing_id?.startsWith('tour-dummy');
 
-    // Feed position must match the card index in this session's stack (0-based).
-    const top = listings[currentIndex];
-    const position =
-      top && listing?.listing_id === top.listing_id
-        ? currentIndex
-        : listings.findIndex((item) => item.listing_id === listing?.listing_id);
-    const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
+    if (!isDummy) {
+      const action = direction === 'right' ? 'like' : 'pass';
+      if (action === 'like') saveLikedListing(listing);
 
-    void persistSwipeEvent({
-      listing,
-      action,
-      position: position >= 0 ? position : currentIndex,
-      startedAt,
-    });
+      // Feed position must match the card index in this session's stack (0-based).
+      const top = listings[currentIndex];
+      const position =
+        top && listing?.listing_id === top.listing_id
+          ? currentIndex
+          : listings.findIndex((item) => item.listing_id === listing?.listing_id);
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
+
+      void persistSwipeEvent({
+        listing,
+        action,
+        position: position >= 0 ? position : currentIndex,
+        startedAt,
+      });
+    }
 
     setCurrentIndex((prev) => prev + 1);
 

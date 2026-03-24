@@ -197,7 +197,7 @@ export default function GroupDetailPage() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${validToken}`
           },
-          body: JSON.stringify({ email: inviteEmail })
+          body: JSON.stringify({ user_email: inviteEmail })
         }
       );
 
@@ -272,7 +272,7 @@ export default function GroupDetailPage() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${validToken}`
           },
-          body: JSON.stringify({ email: userEmail })
+          body: JSON.stringify({ user_email: userEmail })
         }
       );
 

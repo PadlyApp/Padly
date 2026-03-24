@@ -890,8 +890,14 @@ async def invite_to_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    inviter_id = user_response.user.id
-    
+    auth_user_id = user_response.user.id
+
+    # Resolve auth UUID → app profile UUID
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    inviter_id = user_record.data[0]['id']
+
     # Check if group exists and user is a member
     group_response = supabase.table('roommate_groups')\
         .select('*')\
@@ -922,13 +928,12 @@ async def invite_to_group(
     invited_user_response = supabase.table('users')\
         .select('id, email, full_name')\
         .eq('email', invite_data.user_email)\
-        .single()\
         .execute()
     
     if not invited_user_response.data:
         raise HTTPException(status_code=404, detail=f"User with email {invite_data.user_email} not found")
     
-    invited_user_id = invited_user_response.data['id']
+    invited_user_id = invited_user_response.data[0]['id']
     
     # Check if user is already a member or has pending invite
     existing_member = supabase.table('group_members')\
@@ -980,7 +985,7 @@ async def invite_to_group(
         "data": {
             "group_id": group_id,
             "invited_user_email": invite_data.user_email,
-            "invited_user_name": invited_user_response.data.get('full_name'),
+            "invited_user_name": invited_user_response.data[0].get('full_name'),
             "status": "pending"
         }
     }
