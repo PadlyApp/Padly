@@ -24,7 +24,7 @@ const NEXT_STEPS = [
     color: 'teal',
     label: 'Set Preferences',
     desc: 'Budget, city, move-in date',
-    path: '/preferences',
+    path: '/account?tab=preferences',
   },
   {
     icon: IconSwipe,
