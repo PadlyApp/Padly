@@ -101,14 +101,13 @@ export const api = {
     return response.json();
   },
 
-  /** Ranked roommate suggestions (Phase 2); requires target_city on seeker prefs. */
+  /** Roommate suggestions; requires target_city on seeker prefs. */
   async getRoommateSuggestions(token, options = {}) {
     const params = new URLSearchParams();
     const limit = options.limit ?? 20;
     params.append('limit', String(limit));
-    if (options.blendEmbedding) {
-      params.append('blend_embedding', 'true');
-    }
+    const mode = options.mode === 'hard_filter' ? 'hard_filter' : 'ml';
+    params.append('mode', mode);
     const response = await fetch(
       `${API_BASE_URL}/api/matches/roommate-suggestions?${params.toString()}`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -234,4 +233,3 @@ export const api = {
     return data;
   },
 };
-

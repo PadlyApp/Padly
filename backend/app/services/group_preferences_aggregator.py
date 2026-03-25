@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import date, datetime
 from collections import Counter
 from decimal import Decimal
+from app.services.preferences_contract import normalize_lease_type
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -195,9 +196,15 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
             if p.get("target_furnished") is not None
         ]
         if furnished_prefs:
-            aggregated["furnished_preference"] = "required"
-            aggregated["target_furnished"] = any(furnished_prefs)
-            aggregated["furnished_is_hard"] = any(furnished_prefs)
+            # Legacy bool=True meant "wants furnished", not necessarily hard-required.
+            if any(bool(v) for v in furnished_prefs):
+                aggregated["furnished_preference"] = "preferred"
+                aggregated["target_furnished"] = True
+                aggregated["furnished_is_hard"] = False
+            else:
+                aggregated["furnished_preference"] = "no_preference"
+                aggregated["target_furnished"] = None
+                aggregated["furnished_is_hard"] = False
         else:
             aggregated["furnished_preference"] = group_prefs.get("furnished_preference")
             aggregated["target_furnished"] = group_prefs.get("target_furnished")
@@ -223,15 +230,15 @@ def calculate_aggregate_group_preferences(group_id: str) -> Dict[str, Any]:
         aggregated["target_deposit_amount"] = _to_float(group_prefs.get("target_deposit_amount"))
 
     # Lease Type: MOST COMMON (excluding 'any')
-    lease_types = [
-        p.get("target_lease_type")
-        for p in all_member_prefs
-        if p.get("target_lease_type") and p.get("target_lease_type") != "any"
-    ]
+    lease_types: List[str] = []
+    for prefs in all_member_prefs:
+        normalized = normalize_lease_type(prefs.get("target_lease_type"))
+        if normalized and normalized != "any":
+            lease_types.append(normalized)
     if lease_types:
         aggregated["target_lease_type"] = Counter(lease_types).most_common(1)[0][0]
     else:
-        aggregated["target_lease_type"] = group_prefs.get("target_lease_type")
+        aggregated["target_lease_type"] = normalize_lease_type(group_prefs.get("target_lease_type"))
 
     # Lease Duration: MEDIAN
     durations: List[int] = []

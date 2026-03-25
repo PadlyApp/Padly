@@ -11,11 +11,18 @@ from decimal import Decimal
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import (
-    PersonalPreferencesUpdate, 
-    PersonalPreferencesResponse
+    PersonalPreferencesUpdate,
 )
-import json
 from app.services.controlled_vocab import validate_location, validate_neighborhoods
+from app.services.preferences_contract import (
+    FRONTEND_FURNISHED_PREFERENCES,
+    FRONTEND_GENDER_POLICIES,
+    FRONTEND_LEASE_TYPES,
+    normalize_gender_policy,
+    normalize_lease_type,
+    resolve_furnished_preference,
+    target_furnished_from_preference,
+)
 
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
@@ -66,27 +73,27 @@ def serialize_preferences(prefs_data: dict) -> dict:
     
     # Database fields match the model directly
     db_data = {
-        # Hard Constraints
+        # Frontend hard constraints (PreferencesForm contract)
         "target_country": prefs_data.get("target_country"),
         "target_city": prefs_data.get("target_city"),
         "target_state_province": prefs_data.get("target_state_province"),
         "budget_min": prefs_data.get("budget_min"),
         "budget_max": prefs_data.get("budget_max"),
         "required_bedrooms": prefs_data.get("required_bedrooms"),
+        "target_bathrooms": prefs_data.get("target_bathrooms"),
+        "target_deposit_amount": prefs_data.get("target_deposit_amount"),
+        "furnished_preference": prefs_data.get("furnished_preference"),
+        "gender_policy": prefs_data.get("gender_policy"),
         "move_in_date": prefs_data.get("move_in_date"),
         "target_lease_type": prefs_data.get("target_lease_type"),
         "target_lease_duration_months": prefs_data.get("target_lease_duration_months"),
-        "gender_policy": prefs_data.get("gender_policy"),
-        # Soft Preferences
-        "target_bathrooms": prefs_data.get("target_bathrooms"),
-        "target_furnished": prefs_data.get("target_furnished"),
-        "furnished_preference": prefs_data.get("furnished_preference"),
-        "target_utilities_included": prefs_data.get("target_utilities_included"),
-        "target_deposit_amount": prefs_data.get("target_deposit_amount"),
+        # Frontend soft constraints
         "target_house_rules": prefs_data.get("target_house_rules"),
-        # Generic fields
+        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods"),
         "lifestyle_preferences": prefs_data.get("lifestyle_preferences"),
-        "preferred_neighborhoods": prefs_data.get("preferred_neighborhoods")
+        # Legacy compatibility fields
+        "target_furnished": prefs_data.get("target_furnished"),
+        "target_utilities_included": prefs_data.get("target_utilities_included"),
     }
     
     # Remove None values
@@ -101,30 +108,39 @@ def deserialize_preferences(db_data: dict) -> dict:
     if not db_data:
         return db_data
     
+    # Resolve canonical frontend values from a mix of new + legacy columns.
+    furnished_preference = resolve_furnished_preference(
+        db_data.get("furnished_preference"),
+        db_data.get("target_furnished"),
+    ) or "no_preference"
+    target_furnished = target_furnished_from_preference(furnished_preference)
+    gender_policy = normalize_gender_policy(db_data.get("gender_policy")) or "mixed_ok"
+    lease_type = normalize_lease_type(db_data.get("target_lease_type"))
+
     # Database structure matches API response structure
     result = {
         "user_id": db_data.get("user_id"),
-        # Hard Constraints
+        # Frontend hard constraints
         "target_country": db_data.get("target_country"),
         "target_city": db_data.get("target_city"),
         "target_state_province": db_data.get("target_state_province"),
         "budget_min": db_data.get("budget_min"),
         "budget_max": db_data.get("budget_max"),
         "required_bedrooms": db_data.get("required_bedrooms"),
-        "move_in_date": db_data.get("move_in_date"),
-        "target_lease_type": db_data.get("target_lease_type"),
-        "target_lease_duration_months": db_data.get("target_lease_duration_months"),
-        "gender_policy": db_data.get("gender_policy"),
-        # Soft Preferences
         "target_bathrooms": db_data.get("target_bathrooms"),
-        "target_furnished": db_data.get("target_furnished"),
-        "furnished_preference": db_data.get("furnished_preference"),
-        "target_utilities_included": db_data.get("target_utilities_included"),
         "target_deposit_amount": db_data.get("target_deposit_amount"),
+        "target_furnished": target_furnished,
+        "furnished_preference": furnished_preference,
+        "gender_policy": gender_policy,
+        "move_in_date": db_data.get("move_in_date"),
+        "target_lease_type": lease_type,
+        "target_lease_duration_months": db_data.get("target_lease_duration_months"),
+        # Frontend soft constraints
         "target_house_rules": db_data.get("target_house_rules"),
-        # Generic fields
-        "lifestyle_preferences": db_data.get("lifestyle_preferences"),
         "preferred_neighborhoods": db_data.get("preferred_neighborhoods"),
+        "lifestyle_preferences": db_data.get("lifestyle_preferences"),
+        # Legacy compatibility field (not shown in current frontend form)
+        "target_utilities_included": db_data.get("target_utilities_included"),
         "updated_at": db_data.get("updated_at")
     }
     
@@ -156,27 +172,27 @@ async def get_user_preferences(
             "status": "success",
             "data": {
                 "user_id": user_id,
-                # Hard Constraints
+                # Frontend hard constraints
                 "target_country": None,
                 "target_city": None,
                 "target_state_province": None,
                 "budget_min": None,
                 "budget_max": None,
                 "required_bedrooms": None,
+                "target_bathrooms": None,
+                "target_deposit_amount": None,
+                "target_furnished": None,
+                "furnished_preference": "no_preference",
+                "gender_policy": "mixed_ok",
                 "move_in_date": None,
                 "target_lease_type": None,
                 "target_lease_duration_months": None,
-                "gender_policy": "mixed_ok",
-                # Soft Preferences
-                "target_bathrooms": None,
-                "target_furnished": None,
-                "furnished_preference": "no_preference",
-                "target_utilities_included": None,
-                "target_deposit_amount": None,
+                # Frontend soft constraints
                 "target_house_rules": None,
-                # Generic fields
+                "preferred_neighborhoods": None,
                 "lifestyle_preferences": None,
-                "preferred_neighborhoods": None
+                # Legacy compatibility field
+                "target_utilities_included": None,
             }
         }
         return JSONResponse(content=make_json_serializable(response_data))
@@ -258,29 +274,35 @@ async def update_user_preferences(
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
 
-        gender_policy = prefs_data.get("gender_policy")
-        if gender_policy is not None:
-            allowed = {"same_gender_only", "mixed_ok"}
-            if str(gender_policy) not in allowed:
-                raise HTTPException(status_code=422, detail="gender_policy must be one of: same_gender_only, mixed_ok")
+        if "gender_policy" in prefs_data:
+            normalized_gender_policy = normalize_gender_policy(prefs_data.get("gender_policy"))
+            if normalized_gender_policy is None:
+                allowed = ", ".join(sorted(FRONTEND_GENDER_POLICIES))
+                raise HTTPException(status_code=422, detail=f"gender_policy must be one of: {allowed}")
+            prefs_data["gender_policy"] = normalized_gender_policy
 
-        furnished_preference = prefs_data.get("furnished_preference")
-        if furnished_preference is not None:
-            allowed = {"required", "preferred", "no_preference"}
-            if str(furnished_preference) not in allowed:
-                raise HTTPException(status_code=422, detail="furnished_preference must be one of: required, preferred, no_preference")
-            # Keep legacy boolean aligned with new tri-state preference.
-            if furnished_preference in {"required", "preferred"}:
-                prefs_data["target_furnished"] = True
-            else:
-                prefs_data["target_furnished"] = None
+        if "target_lease_type" in prefs_data:
+            normalized_lease_type = normalize_lease_type(prefs_data.get("target_lease_type"))
+            if normalized_lease_type is None:
+                # Keep accepting known frontend values only.
+                allowed = ", ".join(sorted(FRONTEND_LEASE_TYPES))
+                raise HTTPException(status_code=422, detail=f"target_lease_type must be one of: {allowed}")
+            prefs_data["target_lease_type"] = normalized_lease_type
+
+        # Keep tri-state furnished preference as source-of-truth.
+        if "furnished_preference" in prefs_data or "target_furnished" in prefs_data:
+            resolved_furnished_preference = resolve_furnished_preference(
+                prefs_data.get("furnished_preference"),
+                prefs_data.get("target_furnished"),
+            )
+            if resolved_furnished_preference is None:
+                allowed = ", ".join(sorted(FRONTEND_FURNISHED_PREFERENCES))
+                raise HTTPException(status_code=422, detail=f"furnished_preference must be one of: {allowed}")
+            prefs_data["furnished_preference"] = resolved_furnished_preference
+            prefs_data["target_furnished"] = target_furnished_from_preference(resolved_furnished_preference)
         
         # Convert to DB format
         db_data = serialize_preferences(prefs_data)
-
-        # Ensure no_preference explicitly clears legacy boolean column.
-        if prefs_data.get("furnished_preference") == "no_preference":
-            db_data["target_furnished"] = None
         
         if existing:
             # Update existing preferences

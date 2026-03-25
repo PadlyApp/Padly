@@ -10,6 +10,11 @@ from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
 from app.services.controlled_vocab import validate_city_name, validate_neighborhoods
 from app.services.behavior_features import build_group_behavior_vector
+from app.services.preferences_contract import (
+    normalize_lease_type,
+    resolve_furnished_preference,
+    target_furnished_from_preference,
+)
 from app.ai.recommender import score_listings
 from pydantic import BaseModel
 from datetime import datetime
@@ -57,15 +62,20 @@ def _normalize_group_preference_payload(payload: Dict[str, Any]) -> Dict[str, An
         out["required_bedrooms"] = out["target_bedrooms"]
 
     # Furnished tri-state alignment.
-    furnished_pref = out.get("furnished_preference")
-    if furnished_pref in {"required", "preferred"} and out.get("target_furnished") is None:
-        out["target_furnished"] = True
-    if furnished_pref == "no_preference":
-        out["target_furnished"] = None
-    if furnished_pref == "required" and out.get("furnished_is_hard") is None:
-        out["furnished_is_hard"] = True
-    if furnished_pref in {"preferred", "no_preference"} and out.get("furnished_is_hard") is None:
-        out["furnished_is_hard"] = False
+    furnished_pref = resolve_furnished_preference(
+        out.get("furnished_preference"),
+        out.get("target_furnished"),
+    )
+    if furnished_pref is not None:
+        out["furnished_preference"] = furnished_pref
+        out["target_furnished"] = target_furnished_from_preference(furnished_pref)
+        out["furnished_is_hard"] = furnished_pref == "required"
+
+    # Lease-type alignment (frontend canonical values).
+    if "target_lease_type" in out and out.get("target_lease_type") is not None:
+        normalized_lease_type = normalize_lease_type(out.get("target_lease_type"))
+        if normalized_lease_type is not None:
+            out["target_lease_type"] = normalized_lease_type
 
     # Keep arrays/dicts clean.
     if out.get("preferred_neighborhoods") is not None:

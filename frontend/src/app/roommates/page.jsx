@@ -48,11 +48,12 @@ function initials(name) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function SuggestionCard({ item, myId, blendEmbedding, onExpress, expressing, expressedSet }) {
+function SuggestionCard({ item, myId, useMlRanking, onExpress, expressing, expressedSet }) {
   const [opened, { toggle }] = useDisclosure(false);
   const profile = item.profile || {};
   const scores = item.scores || {};
   const uid = item.user_id;
+  const hardFilterMode = !useMlRanking || scores.behavior_confidence === 'hard_filter';
   const pct = Math.round((scores.final ?? 0) * 100);
   const sent = expressedSet.has(uid);
 
@@ -81,14 +82,20 @@ function SuggestionCard({ item, myId, blendEmbedding, onExpress, expressing, exp
             )}
           </div>
         </Group>
-        <Stack gap={4} align="flex-end">
-          <Text fw={700} size="xl" c="teal">
-            {pct}%
-          </Text>
-          <Text size="xs" c="dimmed">
-            match
-          </Text>
-        </Stack>
+        {hardFilterMode ? (
+          <Badge color="teal" variant="light">
+            Hard-pass
+          </Badge>
+        ) : (
+          <Stack gap={4} align="flex-end">
+            <Text fw={700} size="xl" c="teal">
+              {pct}%
+            </Text>
+            <Text size="xs" c="dimmed">
+              match
+            </Text>
+          </Stack>
+        )}
       </Group>
 
       {Array.isArray(item.reasons) && item.reasons.length > 0 && (
@@ -101,36 +108,38 @@ function SuggestionCard({ item, myId, blendEmbedding, onExpress, expressing, exp
         </Stack>
       )}
 
-      <Button
-        variant="subtle"
-        size="xs"
-        mt="sm"
-        px={0}
-        rightSection={opened ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-        onClick={toggle}
-      >
-        Score details
-      </Button>
-      <Collapse in={opened}>
-        <Stack gap={6} mt="xs">
-          <Text size="sm">
-            Lifestyle: {scores.lifestyle != null ? `${Math.round(scores.lifestyle * 100)}%` : '—'}
-          </Text>
-          <Text size="sm">
-            Behavior:{' '}
-            {scores.behavior != null ? `${Math.round(scores.behavior * 100)}%` : '— (cold start)'}
-          </Text>
-          {blendEmbedding && (
-            <Text size="sm">
-              Taste embedding:{' '}
-              {scores.embedding != null ? `${Math.round(scores.embedding * 100)}%` : '—'}
-            </Text>
-          )}
-          <Text size="xs" c="dimmed">
-            Behavior confidence: {scores.behavior_confidence || '—'}
-          </Text>
-        </Stack>
-      </Collapse>
+      {!hardFilterMode && (
+        <>
+          <Button
+            variant="subtle"
+            size="xs"
+            mt="sm"
+            px={0}
+            rightSection={opened ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+            onClick={toggle}
+          >
+            Score details
+          </Button>
+          <Collapse in={opened}>
+            <Stack gap={6} mt="xs">
+              <Text size="sm">
+                Lifestyle: {scores.lifestyle != null ? `${Math.round(scores.lifestyle * 100)}%` : '—'}
+              </Text>
+              <Text size="sm">
+                Behavior:{' '}
+                {scores.behavior != null ? `${Math.round(scores.behavior * 100)}%` : '— (cold start)'}
+              </Text>
+              <Text size="sm">
+                Taste embedding:{' '}
+                {scores.embedding != null ? `${Math.round(scores.embedding * 100)}%` : '—'}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Behavior confidence: {scores.behavior_confidence || '—'}
+              </Text>
+            </Stack>
+          </Collapse>
+        </>
+      )}
 
       <Divider my="md" />
 
@@ -208,14 +217,18 @@ function RoommatesContent() {
   const token = authState?.accessToken;
   const myId = user?.profile?.id;
   const queryClient = useQueryClient();
-  const [blendEmbedding, setBlendEmbedding] = useState(false);
+  const [useMlRanking, setUseMlRanking] = useState(true);
   const [expressedIds, setExpressedIds] = useState(() => new Set());
   const [funnelBanner, setFunnelBanner] = useState(null);
   const [respondingId, setRespondingId] = useState(null);
 
   const suggestionsQuery = useQuery({
-    queryKey: ['roommateSuggestions', token, blendEmbedding],
-    queryFn: () => api.getRoommateSuggestions(token, { limit: 20, blendEmbedding }),
+    queryKey: ['roommateSuggestions', token, useMlRanking],
+    queryFn: () =>
+      api.getRoommateSuggestions(token, {
+        limit: 20,
+        mode: useMlRanking ? 'ml' : 'hard_filter',
+      }),
     enabled: !!token,
   });
 
@@ -350,16 +363,18 @@ function RoommatesContent() {
                   <Group justify="space-between" align="center" wrap="wrap">
                     <div>
                       <Text size="sm" fw={500}>
-                        Taste embedding (beta)
+                        Ranking mode
                       </Text>
                       <Text size="xs" c="dimmed">
-                        Blend neural listing taste into lifestyle when the model is available.
+                        Toggle between ML ranking and showing all users who pass hard constraints.
                       </Text>
                     </div>
                     <Switch
-                      checked={blendEmbedding}
-                      onChange={(e) => setBlendEmbedding(e.currentTarget.checked)}
+                      checked={useMlRanking}
+                      onChange={(e) => setUseMlRanking(e.currentTarget.checked)}
                       color="teal"
+                      onLabel="ML"
+                      offLabel="Hard"
                     />
                   </Group>
                 </Card>
@@ -392,12 +407,13 @@ function RoommatesContent() {
                   suggestions.length === 0 && (
                     <Alert color="gray" title="No matches yet">
                       <Text size="sm" mb="sm">
-                        We didn’t find other members in your city with overlapping preferences. Try
-                        inviting friends, or swipe on{' '}
+                        {useMlRanking
+                          ? 'We didn’t find strong ranked matches right now. Try inviting friends, or swipe on '
+                          : 'No users currently meet your hard constraints. You can relax constraints in preferences or swipe on '}
                         <Text component={Link} href="/discover" c="teal" inherit span fw={500}>
                           Discover
                         </Text>{' '}
-                        so your taste signal improves.
+                        {useMlRanking ? 'so your taste signal improves.' : 'to improve data coverage.'}
                       </Text>
                     </Alert>
                   )}
@@ -407,7 +423,7 @@ function RoommatesContent() {
                     key={item.user_id}
                     item={item}
                     myId={myId}
-                    blendEmbedding={blendEmbedding}
+                    useMlRanking={useMlRanking}
                     onExpress={(uid) => expressMutation.mutate(uid)}
                     expressing={expressMutation.isPending && expressMutation.variables === item.user_id}
                     expressedSet={expressedIds}
