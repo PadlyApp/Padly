@@ -10,10 +10,11 @@ Users should join/create a group first, then get group→listing matches.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional
+from typing import Literal, Optional
 from app.dependencies.auth import get_user_token, require_user_token
 from app.dependencies.supabase import get_admin_client
 from app.services.user_group_matching import find_compatible_groups, calculate_user_group_compatibility
+from app.services.preferences_contract import FRONTEND_LEASE_TYPES, normalize_lease_type
 from app.services.roommate_suggestions import (
     DEFAULT_BEHAVIOR_PREFILTER_K,
     DEFAULT_CANDIDATE_POOL_CAP,
@@ -84,7 +85,11 @@ async def discover_compatible_groups(
         user_prefs['move_in_date'] = move_in_date
     # NEW: Override with new preference query params
     if target_lease_type is not None:
-        user_prefs['target_lease_type'] = target_lease_type
+        normalized_lease_type = normalize_lease_type(target_lease_type)
+        if normalized_lease_type is None:
+            allowed = ", ".join(sorted(FRONTEND_LEASE_TYPES))
+            raise HTTPException(status_code=422, detail=f"target_lease_type must be one of: {allowed}")
+        user_prefs['target_lease_type'] = normalized_lease_type
     if target_lease_duration_months is not None:
         user_prefs['target_lease_duration_months'] = target_lease_duration_months
     if target_furnished is not None:
@@ -137,22 +142,24 @@ async def roommate_suggestions(
         le=MAX_BEHAVIOR_PREFILTER_K,
         description="Top lifestyle matches to run behavior fingerprint on",
     ),
-    blend_embedding: bool = Query(
-        False,
-        description="When true, blend two-tower mean taste embeddings into the lifestyle term (Phase 3.2); no-op if model or likes missing",
-    ),
     embedding_like_cap: int = Query(
         DEFAULT_EMBEDDING_LIKE_CAP,
         ge=1,
         le=MAX_EMBEDDING_LIKE_CAP,
         description="Max distinct liked listings per user when building mean taste embedding",
     ),
+    mode: Literal["ml", "hard_filter"] = Query(
+        "ml",
+        description="`ml`: neural + behavior ranking. `hard_filter`: show all users that satisfy hard constraints only.",
+    ),
     token: str = Depends(require_user_token),
 ):
     """
-    Ranked individual roommate candidates: hard gates (city, optional state, budget, gender policy,
-    incompatible active group), then lifestyle similarity plus behavioral fingerprint fusion.
-    Optional blend_embedding adds item-tower taste similarity (mean of recent like embeddings).
+    Ranked individual roommate candidates: hard gates from PreferencesForm
+    (country/state/city, budget, bedrooms, bathrooms, deposit, furnished preference, gender policy,
+    move-in date, lease type/duration, and incompatible active group), then lifestyle similarity
+    plus behavioral fingerprint fusion when `mode=ml`.
+    With `mode=hard_filter`, returns all users who pass hard constraints without ML ranking.
     """
     supabase = get_admin_client()
 
@@ -179,8 +186,9 @@ async def roommate_suggestions(
             limit=limit,
             candidate_pool_cap=candidate_pool_cap,
             behavior_prefilter_k=behavior_prefilter_k,
-            blend_embedding=blend_embedding,
+            blend_embedding=True,
             embedding_like_cap=embedding_like_cap,
+            mode=mode,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -267,4 +275,3 @@ async def get_user_group_status(
             "discover_groups": "/api/matches/groups?city={city}"
         }
     }
-

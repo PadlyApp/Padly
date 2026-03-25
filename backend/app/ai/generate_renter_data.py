@@ -53,6 +53,20 @@ STATES = [
 # ── helpers ───────────────────────────────────────────────────────────────
 
 
+FRONTEND_FURNISHED_PREFERENCES = ["required", "preferred", "no_preference"]
+FRONTEND_GENDER_POLICIES = ["same_gender_only", "mixed_ok"]
+FRONTEND_LEASE_TYPES = ["fixed", "month_to_month", "sublet", "any"]
+
+
+def _type_feature_col(prefix: str, value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    normalized = normalized.replace("/", "_").replace(" ", "_")
+    return f"{prefix}_{normalized}"
+
+
+TYPE_PREF_COLS = [_type_feature_col("type_pref", t) for t in LISTING_TYPES]
+
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6_371.0
     dlat = math.radians(lat2 - lat1)
@@ -148,6 +162,29 @@ def _generate_renters(
     # move-in urgency: 0 = flexible, 1 = soon, 2 = urgent
     move_urgency = rng.choice([0, 1, 2], n, p=[0.35, 0.45, 0.20])
 
+    # Frontend preference-contract fields
+    gender_policy = rng.choice(
+        FRONTEND_GENDER_POLICIES, size=n, p=[0.30, 0.70]
+    )
+    target_lease_type = rng.choice(
+        FRONTEND_LEASE_TYPES, size=n, p=[0.30, 0.30, 0.10, 0.30]
+    )
+    target_lease_duration_months = rng.choice(
+        [1, 3, 6, 9, 12, 18], size=n, p=[0.18, 0.10, 0.20, 0.12, 0.30, 0.10]
+    )
+    target_lease_duration_months = np.where(
+        target_lease_type == "month_to_month",
+        1,
+        target_lease_duration_months,
+    )
+    target_deposit_amount = np.clip(budget_max * rng.uniform(0.40, 1.25, n), 0, 8_000)
+
+    furnished_preference = np.where(
+        wants_furnished,
+        np.where(rng.random(n) < 0.50, "required", "preferred"),
+        np.where(rng.random(n) < 0.15, "preferred", "no_preference"),
+    )
+
     renters = pd.DataFrame({
         "renter_id": np.arange(n),
         "age": age,
@@ -171,10 +208,22 @@ def _generate_renters(
         "laundry_pref": laundry_pref,
         "parking_pref": parking_pref,
         "move_urgency": move_urgency,
+        "target_deposit_amount": target_deposit_amount.round(0),
+        "target_lease_duration_months": target_lease_duration_months.astype(int),
+        "gender_policy": gender_policy,
+        "target_lease_type": target_lease_type,
+        "furnished_preference": furnished_preference,
     })
 
-    for j, t in enumerate(LISTING_TYPES):
-        renters[f"type_pref_{t.replace('/', '_').replace(' ', '_')}"] = type_prefs[:, j].astype(int)
+    for j, col in enumerate(TYPE_PREF_COLS):
+        renters[col] = type_prefs[:, j].astype(int)
+
+    for value in FRONTEND_GENDER_POLICIES:
+        renters[f"gender_policy_{value}"] = (renters["gender_policy"] == value).astype(int)
+    for value in FRONTEND_LEASE_TYPES:
+        renters[f"target_lease_type_{value}"] = (renters["target_lease_type"] == value).astype(int)
+    for value in FRONTEND_FURNISHED_PREFERENCES:
+        renters[f"furnished_pref_{value}"] = (renters["furnished_preference"] == value).astype(int)
 
     return renters
 
@@ -261,18 +310,34 @@ def _match_score(renter: pd.Series, listing: pd.Series) -> float:
     # furnished
     w = 0.8
     total_weight += w
-    if renter["wants_furnished"] == 1 and listing["comes_furnished"] == 1:
-        score += w
+    furnished_pref = str(renter.get("furnished_preference") or "").strip().lower()
+    if furnished_pref == "required":
+        score += w if listing["comes_furnished"] == 1 else 0
+    elif furnished_pref == "preferred":
+        score += w if listing["comes_furnished"] == 1 else 0.3 * w
     elif renter["wants_furnished"] == 0:
         score += w
     else:
         score += 0.3 * w
 
+    # deposit affordability (deposit approximated as one month of rent)
+    w = 0.8
+    total_weight += w
+    target_deposit = float(renter.get("target_deposit_amount", 0) or 0)
+    if target_deposit <= 0:
+        score += 0.7 * w
+    else:
+        est_deposit = float(listing["price"])
+        if est_deposit <= target_deposit:
+            score += w
+        else:
+            score += w * max(0, 1 - (est_deposit - target_deposit) / 1_000)
+
     # type preference
     w = 1.5
     total_weight += w
     ltype = listing["type"]
-    type_col = f"type_pref_{ltype.replace('/', '_').replace(' ', '_')}"
+    type_col = _type_feature_col("type_pref", ltype)
     if type_col in renter.index and renter[type_col] == 1:
         score += w
     else:
@@ -341,6 +406,46 @@ LIKED_LISTING_TYPES = [
 ]
 
 
+LIKED_TYPE_COLS = [_type_feature_col("liked_type", t) for t in LIKED_LISTING_TYPES]
+LIKED_NUMERIC_COLS = ["liked_mean_price", "liked_mean_beds", "liked_mean_sqfeet"]
+
+
+def _assert_unique_columns(columns: List[str], label: str) -> None:
+    seen = set()
+    duplicates = []
+    for col in columns:
+        if col in seen and col not in duplicates:
+            duplicates.append(col)
+        seen.add(col)
+    if duplicates:
+        raise ValueError(f"{label} has duplicated columns: {duplicates}")
+
+
+def _build_user_feature_schema(renters: pd.DataFrame) -> List[str]:
+    base_cols = [
+        "age", "household_size", "income", "credit_score",
+        "budget_min", "budget_max",
+        "desired_beds", "desired_baths", "desired_sqft_min",
+        "target_deposit_amount", "target_lease_duration_months",
+        "has_cats", "has_dogs", "is_smoker",
+        "needs_wheelchair", "has_ev", "wants_furnished",
+        "pref_lat", "pref_lon", "max_distance_km",
+        "laundry_pref", "parking_pref", "move_urgency",
+    ]
+    categorical_cols = (
+        TYPE_PREF_COLS
+        + [f"gender_policy_{v}" for v in FRONTEND_GENDER_POLICIES]
+        + [f"target_lease_type_{v}" for v in FRONTEND_LEASE_TYPES]
+        + [f"furnished_pref_{v}" for v in FRONTEND_FURNISHED_PREFERENCES]
+    )
+    schema = base_cols + categorical_cols
+    has_liked = all(c in renters.columns for c in LIKED_NUMERIC_COLS)
+    if has_liked:
+        schema += LIKED_NUMERIC_COLS + LIKED_TYPE_COLS
+    _assert_unique_columns(schema, "user feature schema")
+    return schema
+
+
 def aggregate_liked_listings(liked_df: pd.DataFrame) -> pd.DataFrame:
     """
     For each renter, collapse their liked listings into a single fixed-size
@@ -353,15 +458,28 @@ def aggregate_liked_listings(liked_df: pd.DataFrame) -> pd.DataFrame:
         liked_mean_price, liked_mean_beds, liked_mean_sqfeet,
         liked_type_<type> x len(LIKED_LISTING_TYPES)
     """
-    # one-hot encode listing_type then average per renter
-    type_dummies = pd.get_dummies(
-        liked_df["listing_type"].fillna(""), prefix="liked_type"
+    normalized_listing_types = (
+        liked_df["listing_type"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
     )
-    # ensure all known type columns are present even if some types never appear
-    for t in LIKED_LISTING_TYPES:
-        col = f"liked_type_{t.replace('/', '_').replace(' ', '_')}"
+    normalized_listing_types = normalized_listing_types.where(
+        normalized_listing_types.isin(LIKED_LISTING_TYPES),
+        "",
+    )
+    liked_type_feature = normalized_listing_types.map(
+        lambda t: _type_feature_col("liked_type", t) if t else ""
+    )
+    type_dummies = pd.get_dummies(liked_type_feature)
+    if "" in type_dummies.columns:
+        type_dummies = type_dummies.drop(columns=[""])
+    for col in LIKED_TYPE_COLS:
         if col not in type_dummies.columns:
             type_dummies[col] = 0.0
+    type_dummies = type_dummies[LIKED_TYPE_COLS]
+    _assert_unique_columns(type_dummies.columns.tolist(), "liked_type feature block")
 
     liked_df = liked_df[["renter_id", "listing_price", "listing_beds", "listing_sqfeet"]].copy()
     liked_df = pd.concat([liked_df, type_dummies], axis=1)
@@ -375,45 +493,36 @@ def aggregate_liked_listings(liked_df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
-def encode_renter_features(renters: pd.DataFrame) -> np.ndarray:
+def encode_renter_features(renters: pd.DataFrame) -> Tuple[np.ndarray, List[str]]:
     """Numeric matrix ready for the user tower.
 
     Uses raw renter profile features. If the DataFrame contains liked-listing
     aggregate columns (liked_mean_price, liked_mean_beds, etc.) they are
     appended as additional features — no category-derived columns anywhere.
     """
-    numeric_cols = [
+    cols = _build_user_feature_schema(renters)
+    frame = renters.copy()
+    for col in cols:
+        if col not in frame.columns:
+            frame[col] = 0.0
+    mat = frame[cols].fillna(0).values.astype(np.float32)
+
+    zscore_cols = [
         "age", "household_size", "income", "credit_score",
         "budget_min", "budget_max",
         "desired_beds", "desired_baths", "desired_sqft_min",
-        "has_cats", "has_dogs", "is_smoker",
-        "needs_wheelchair", "has_ev", "wants_furnished",
-        "pref_lat", "pref_lon", "max_distance_km",
-        "laundry_pref", "parking_pref", "move_urgency",
+        "target_deposit_amount", "target_lease_duration_months",
+        "liked_mean_price", "liked_mean_beds", "liked_mean_sqfeet",
     ]
-    type_cols = [c for c in renters.columns if c.startswith("type_pref_")]
-    cols = numeric_cols + sorted(type_cols)
-    mat = renters[cols].values.astype(np.float32)
+    col_to_idx = {col: idx for idx, col in enumerate(cols)}
+    for col in zscore_cols:
+        idx = col_to_idx.get(col)
+        if idx is None:
+            continue
+        mu, sigma = mat[:, idx].mean(), mat[:, idx].std() + 1e-8
+        mat[:, idx] = (mat[:, idx] - mu) / sigma
 
-    # z-score continuous features (first 9 columns)
-    for i in range(9):
-        mu, sigma = mat[:, i].mean(), mat[:, i].std() + 1e-8
-        mat[:, i] = (mat[:, i] - mu) / sigma
-
-    # ── append averaged liked listing features if present ─────────────
-    liked_numeric_cols = ["liked_mean_price", "liked_mean_beds", "liked_mean_sqfeet"]
-    liked_type_cols = sorted([c for c in renters.columns if c.startswith("liked_type_")])
-    liked_cols = liked_numeric_cols + liked_type_cols
-
-    if all(c in renters.columns for c in liked_numeric_cols):
-        liked_mat = renters[liked_cols].fillna(0).values.astype(np.float32)
-        # z-score the 3 continuous liked-listing features
-        for i in range(3):
-            mu, sigma = liked_mat[:, i].mean(), liked_mat[:, i].std() + 1e-8
-            liked_mat[:, i] = (liked_mat[:, i] - mu) / sigma
-        mat = np.hstack([mat, liked_mat])
-
-    return mat
+    return mat, cols
 
 
 def encode_listing_features(listings: pd.DataFrame) -> np.ndarray:
@@ -514,7 +623,7 @@ def main() -> None:
               f"(+{len(liked_agg.columns) - 1} columns)")
 
     print("Encoding features ...")
-    user_features = encode_renter_features(renter_rows)
+    user_features, user_feature_cols = encode_renter_features(renter_rows)
     item_features = encode_listing_features(listing_rows)
 
     print(f"  user_features shape: {user_features.shape}")
@@ -528,20 +637,32 @@ def main() -> None:
     )
     print(f"  saved training pairs -> {args.out_npz}")
 
+    _assert_unique_columns(user_feature_cols, "saved user feature schema")
+    item_type_cols = sorted(
+        pd.get_dummies(listing_rows["type"].fillna(""), prefix="type").columns.tolist()
+    )
+    item_laundry_cols = sorted(
+        pd.get_dummies(listing_rows["laundry_options"].fillna(""), prefix="laundry").columns.tolist()
+    )
+    item_parking_cols = sorted(
+        pd.get_dummies(listing_rows["parking_options"].fillna(""), prefix="parking").columns.tolist()
+    )
+    _assert_unique_columns(item_type_cols, "item type schema")
+    _assert_unique_columns(item_laundry_cols, "item laundry schema")
+    _assert_unique_columns(item_parking_cols, "item parking schema")
+
     # ── save feature column names for inference alignment ─────────────
     feature_meta = {
         "user_dim": int(user_features.shape[1]),
         "item_dim": int(item_features.shape[1]),
-        "item_type_cols": sorted(
-            pd.get_dummies(listing_rows["type"].fillna(""), prefix="type").columns.tolist()
-        ),
-        "item_laundry_cols": sorted(
-            pd.get_dummies(listing_rows["laundry_options"].fillna(""), prefix="laundry").columns.tolist()
-        ),
-        "item_parking_cols": sorted(
-            pd.get_dummies(listing_rows["parking_options"].fillna(""), prefix="parking").columns.tolist()
-        ),
-        "has_liked_listings": all(c in renter_rows.columns for c in ["liked_mean_price"]),
+        "schema_version": 2,
+        "strict_user_feature_schema": True,
+        "user_feature_cols": user_feature_cols,
+        "item_type_cols": item_type_cols,
+        "item_laundry_cols": item_laundry_cols,
+        "item_parking_cols": item_parking_cols,
+        "liked_type_cols": LIKED_TYPE_COLS,
+        "has_liked_listings": all(c in renter_rows.columns for c in LIKED_NUMERIC_COLS),
     }
     meta_path = args.out_npz.parent / "feature_meta.json"
     with open(meta_path, "w") as f:

@@ -105,8 +105,20 @@ function DiscoverContent() {
       const body = {
         budget_min:      prefs.budget_min     ?? undefined,
         budget_max:      prefs.budget_max     ?? undefined,
+        target_country: prefs.target_country ?? undefined,
+        target_state_province: prefs.target_state_province ?? undefined,
+        target_city: prefs.target_city ?? undefined,
+        required_bedrooms: prefs.required_bedrooms ?? undefined,
+        target_bathrooms: prefs.target_bathrooms ?? undefined,
         desired_beds:    prefs.required_bedrooms ?? undefined,
         desired_baths:   prefs.target_bathrooms  ?? undefined,
+        target_deposit_amount: prefs.target_deposit_amount ?? undefined,
+        furnished_preference: prefs.furnished_preference ?? undefined,
+        gender_policy: prefs.gender_policy ?? undefined,
+        target_lease_type: prefs.target_lease_type ?? undefined,
+        target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+        move_in_date: prefs.move_in_date ?? undefined,
+        target_furnished: prefs.target_furnished ?? undefined,
         wants_furnished:
           prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
             ? 1

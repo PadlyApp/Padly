@@ -123,29 +123,29 @@ class UserResponse(UserBase):
 
 class PersonalPreferencesBase(BaseModel):
     """Base personal preferences model matching database schema"""
-    # Hard Constraints (Non-Negotiables)
+    # Frontend hard constraints (Preferences page source-of-truth).
     target_country: Optional[str] = None  # ISO alpha-2 code (US/CA)
     target_city: Optional[str] = None
     target_state_province: Optional[str] = None
     budget_min: Optional[float] = None  # Accept float from frontend
     budget_max: Optional[float] = None  # Accept float from frontend
     required_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[float] = None  # Accept float from frontend
+    target_deposit_amount: Optional[float] = None  # Accept float from frontend
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
     move_in_date: Optional[str] = None  # Accept ISO string from frontend
     target_lease_type: Optional[str] = None
     target_lease_duration_months: Optional[int] = None
-    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
-    
-    # Soft Preferences (Nice-to-Haves)
-    target_bathrooms: Optional[float] = None  # Accept float from frontend
-    target_furnished: Optional[bool] = None
-    furnished_preference: Optional[str] = None  # required | preferred | no_preference
-    target_utilities_included: Optional[bool] = None
-    target_deposit_amount: Optional[float] = None  # Accept float from frontend
+
+    # Frontend soft constraints.
     target_house_rules: Optional[str] = None
-    
-    # Generic preferences field for future extensibility
-    lifestyle_preferences: Optional[dict] = None  # JSONB field for flexible preferences
     preferred_neighborhoods: Optional[list] = None  # Array field
+    lifestyle_preferences: Optional[dict] = None  # JSONB field for flexible preferences
+    
+    # Legacy compatibility fields (not directly edited by current frontend form).
+    target_furnished: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
     
     model_config = ConfigDict(extra='forbid')
 

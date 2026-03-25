@@ -1,22 +1,24 @@
 """
 User-Group Matching - Compatibility scoring between users and roommate groups.
-Score: 0-100 pts. Weights: budget(20), date(15), lease(15), amenity(10), 
-company(10), verification(10), lifestyle(20).
+Score: 0-100 pts. Weights: budget(20), date(15), lease(15),
+company(10), verification(10), lifestyle(30).
 """
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+from app.services.preferences_contract import (
+    lease_types_compatible,
+)
 
 # Scoring weights (100 pts total)
 SCORING_WEIGHTS = {
     'budget_fit': 20,           # Budget range alignment
     'date_fit': 15,             # Move-in date proximity
     'lease_preferences': 15,    # Lease type/duration match
-    'amenity_preferences': 10,  # Furnished, utilities
     'company_school_match': 10, # Same company/school
     'verification': 10,         # User verification status
-    'lifestyle': 20             # Lifestyle compatibility
+    'lifestyle': 30             # UI soft constraints compatibility
 }
 
 DATE_FLEXIBILITY_DAYS = 60  # Max days apart for date matching
@@ -167,9 +169,9 @@ def calculate_user_group_compatibility(
     group_lease_type = group.get('target_lease_type')
     
     if user_lease_type and group_lease_type:
-        if user_lease_type.lower() == group_lease_type.lower():
+        if lease_types_compatible(user_lease_type, group_lease_type):
             lease_score += 8
-            reasons.append(f'Lease type match: {user_lease_type}')
+            reasons.append(f'Lease type compatible: {user_lease_type}')
         else:
             lease_score += 3
     else:
@@ -191,34 +193,6 @@ def calculate_user_group_compatibility(
     else:
         lease_score += 3
     score += lease_score
-    
-    # Amenity Preferences (10 pts)
-    amenity_score = 0
-    user_furnished = user_prefs.get('target_furnished')
-    group_furnished = group.get('target_furnished')
-    
-    if user_furnished is not None and group_furnished is not None:
-        if user_furnished == group_furnished:
-            amenity_score += 5
-            reasons.append('Both prefer furnished' if user_furnished else 'Both prefer unfurnished')
-        else:
-            amenity_score += 1
-    else:
-        amenity_score += 2
-    
-    user_utilities = user_prefs.get('target_utilities_included')
-    group_utilities = group.get('target_utilities_included')
-    
-    if user_utilities is not None and group_utilities is not None:
-        if user_utilities == group_utilities:
-            amenity_score += 5
-            if user_utilities:
-                reasons.append('Both prefer utilities included')
-        else:
-            amenity_score += 1
-    else:
-        amenity_score += 2
-    score += amenity_score
     
     # Company/School Match (10 pts)
     user_company = (user.get('company_name') or '').lower().strip()
@@ -247,17 +221,23 @@ def calculate_user_group_compatibility(
         verification_score = 3
     score += verification_score
     
-    # Lifestyle Compatibility (20 pts)
+    # Lifestyle Compatibility (scaled to 30 pts, using UI soft fields only)
     group_lifestyle = group.get('lifestyle_preferences') or {}
-    
-    lifestyle_score = int(calculate_lifestyle_compatibility(user_lifestyle, group_lifestyle, user_prefs=user_prefs, group=group))
+
+    raw_lifestyle = calculate_lifestyle_compatibility(
+        user_lifestyle,
+        group_lifestyle,
+        user_prefs=user_prefs,
+        group=group,
+    )  # 0-20
+    lifestyle_score = int(round((raw_lifestyle / 20.0) * SCORING_WEIGHTS['lifestyle']))
     score += lifestyle_score
     
-    if lifestyle_score >= 16:
+    if lifestyle_score >= 24:
         reasons.append('Excellent lifestyle match')
-    elif lifestyle_score >= 12:
+    elif lifestyle_score >= 18:
         reasons.append('Good lifestyle match')
-    elif lifestyle_score >= 8:
+    elif lifestyle_score >= 12:
         reasons.append('Moderate lifestyle match')
     
     # --- FINAL RESULT ---
@@ -292,7 +272,10 @@ def calculate_lifestyle_compatibility(
     group: Optional[Dict[str, Any]] = None,
 ) -> float:
     """
-    Compare lifestyle and group-soft preferences.
+    Compare lifestyle and group-soft preferences using the UI contract fields:
+    preferred_neighborhoods, cleanliness_level, social_preference,
+    cooking_frequency, gender_identity, amenity_priorities,
+    building_type_preferences, target_house_rules.
     Returns 0-20 score.
     """
     if not user_lifestyle and not group_lifestyle:
@@ -300,25 +283,25 @@ def calculate_lifestyle_compatibility(
 
     score = 0.0
 
-    # Cleanliness (0-4)
+    # Cleanliness (0-3)
     cleanliness_order = ['low', 'moderate', 'high']
-    user_clean = _norm(user_lifestyle.get('cleanliness_level') or user_lifestyle.get('cleanliness'))
-    group_clean = _norm(group_lifestyle.get('cleanliness_level') or group_lifestyle.get('cleanliness'))
+    user_clean = _norm(user_lifestyle.get('cleanliness_level'))
+    group_clean = _norm(group_lifestyle.get('cleanliness_level'))
     if user_clean and group_clean and user_clean in cleanliness_order and group_clean in cleanliness_order:
         diff = abs(cleanliness_order.index(user_clean) - cleanliness_order.index(group_clean))
-        score += max(0.0, 4.0 - (diff * 2.0))
+        score += 3.0 if diff == 0 else (1.5 if diff == 1 else 0.0)
     else:
-        score += 2.0
+        score += 1.5
 
-    # Quiet vs social (0-4)
+    # Quiet vs social (0-3)
     social_order = ['quiet', 'balanced', 'social']
     user_social = _norm(user_lifestyle.get('social_preference'))
     group_social = _norm(group_lifestyle.get('social_preference'))
     if user_social and group_social and user_social in social_order and group_social in social_order:
         diff = abs(social_order.index(user_social) - social_order.index(group_social))
-        score += max(0.0, 4.0 - (diff * 2.0))
+        score += 3.0 if diff == 0 else (1.5 if diff == 1 else 0.0)
     else:
-        score += 2.0
+        score += 1.5
 
     # Cooking frequency (0-3)
     cooking_order = ['rarely', 'sometimes', 'often']
@@ -326,50 +309,59 @@ def calculate_lifestyle_compatibility(
     group_cook = _norm(group_lifestyle.get('cooking_frequency'))
     if user_cook and group_cook and user_cook in cooking_order and group_cook in cooking_order:
         diff = abs(cooking_order.index(user_cook) - cooking_order.index(group_cook))
-        score += max(0.0, 3.0 - (diff * 1.5))
+        score += 3.0 if diff == 0 else (1.5 if diff == 1 else 0.0)
     else:
         score += 1.5
 
-    # Commute preference alignment (0-3)
-    user_commute = user_lifestyle.get('commute_max_minutes')
-    group_commute = group_lifestyle.get('commute_max_minutes')
-    if user_commute is not None and group_commute is not None:
-        try:
-            diff = abs(float(user_commute) - float(group_commute))
-            if diff <= 10:
-                score += 3.0
-            elif diff <= 20:
-                score += 2.0
-            else:
-                score += 1.0
-        except (TypeError, ValueError):
-            score += 1.5
+    # Gender identity soft alignment (0-2)
+    user_gender = _norm(user_lifestyle.get('gender_identity'))
+    group_gender = _norm(group_lifestyle.get('gender_identity'))
+    if user_gender and group_gender:
+        score += 2.0 if user_gender == group_gender else 0.0
     else:
-        score += 1.5
+        score += 1.0
 
     # Neighborhood overlap (0-3)
     user_neighborhoods = { _norm(v) for v in ((user_prefs or {}).get('preferred_neighborhoods') or []) if _norm(v) }
     group_neighborhoods = { _norm(v) for v in ((group or {}).get('_preferred_neighborhoods') or []) if _norm(v) }
     if user_neighborhoods and group_neighborhoods:
         overlap = len(user_neighborhoods.intersection(group_neighborhoods))
-        score += 3.0 if overlap >= 2 else (2.0 if overlap == 1 else 0.5)
+        score += 3.0 if overlap >= 2 else (2.0 if overlap == 1 else 0.0)
     else:
         score += 1.5
 
-    # Amenity priorities overlap (0-2)
+    # Amenity priorities overlap (0-3)
     user_amenities = { _norm(v) for v in (user_lifestyle.get('amenity_priorities') or []) if _norm(v) }
     group_amenities = { _norm(v) for v in (group_lifestyle.get('amenity_priorities') or []) if _norm(v) }
     if user_amenities and group_amenities:
         overlap = len(user_amenities.intersection(group_amenities))
-        score += 2.0 if overlap >= 2 else (1.0 if overlap == 1 else 0.0)
+        score += 3.0 if overlap >= 2 else (1.5 if overlap == 1 else 0.0)
     else:
-        score += 1.0
+        score += 1.5
 
-    # Building type preference overlap (0-1)
+    # Building type preference overlap (0-2)
     user_building_types = { _norm(v) for v in (user_lifestyle.get('building_type_preferences') or []) if _norm(v) }
     group_building_types = { _norm(v) for v in (group_lifestyle.get('building_type_preferences') or []) if _norm(v) }
     if user_building_types and group_building_types:
-        score += 1.0 if user_building_types.intersection(group_building_types) else 0.0
+        score += 2.0 if user_building_types.intersection(group_building_types) else 0.0
+    else:
+        score += 1.0
+
+    # House rules alignment (0-1)
+    user_rules = _norm((user_prefs or {}).get('target_house_rules'))
+    group_rules = _norm((group or {}).get('target_house_rules'))
+    if user_rules and group_rules:
+        if user_rules == group_rules:
+            score += 1.0
+        else:
+            conflicts = 0
+            if 'no smoking' in group_rules and 'smoking' in user_rules and 'no smoking' not in user_rules:
+                conflicts += 1
+            if 'no pets' in group_rules and 'pet' in user_rules and 'no pet' not in user_rules:
+                conflicts += 1
+            if 'no parties' in group_rules and 'parties' in user_rules and 'no parties' not in user_rules:
+                conflicts += 1
+            score += 0.0 if conflicts else 0.5
     else:
         score += 0.5
 
@@ -377,26 +369,26 @@ def calculate_lifestyle_compatibility(
 
 
 def aggregate_group_lifestyle(members_preferences: List[Dict]) -> Dict:
-    """Aggregate lifestyle from members using most restrictive approach."""
+    """Aggregate UI soft-constraint lifestyle fields from group members."""
     
     if not members_preferences:
         return {}
     
     aggregated = {}
     
-    # Cleanliness: Take highest standard
+    # Cleanliness: median tendency on UI scale.
     cleanliness_order = ['low', 'moderate', 'high']
     all_cleanliness = [
-        lp.get('cleanliness_level') or lp.get('cleanliness')
+        _norm(lp.get('cleanliness_level') or lp.get('cleanliness'))
         for lp in members_preferences
-        if (lp.get('cleanliness_level') or lp.get('cleanliness'))
+        if _norm(lp.get('cleanliness_level') or lp.get('cleanliness')) in cleanliness_order
     ]
     if all_cleanliness:
-        aggregated['cleanliness'] = max(
-            all_cleanliness, 
-            key=lambda x: cleanliness_order.index(x) if x in cleanliness_order else 0
-        )
-        aggregated['cleanliness_level'] = aggregated['cleanliness']
+        sorted_vals = sorted(all_cleanliness, key=lambda x: cleanliness_order.index(x))
+        median = sorted_vals[len(sorted_vals) // 2]
+        aggregated['cleanliness_level'] = median
+        # Backward compatibility for older readers.
+        aggregated['cleanliness'] = median
 
     # Social preference: middle-ground consensus (quiet/balanced/social)
     social_order = ['quiet', 'balanced', 'social']
@@ -407,35 +399,6 @@ def aggregate_group_lifestyle(members_preferences: List[Dict]) -> Dict:
             all_social_sorted = sorted(all_social, key=lambda x: social_order.index(x))
             aggregated['social_preference'] = all_social_sorted[len(all_social_sorted) // 2]
 
-    # Smoking: If anyone says no_smoking, group is no_smoking
-    all_smoking = [lp.get('smoking') for lp in members_preferences if lp.get('smoking')]
-    if 'no_smoking' in all_smoking:
-        aggregated['smoking'] = 'no_smoking'
-    elif 'outdoor_only' in all_smoking:
-        aggregated['smoking'] = 'outdoor_only'
-    elif all_smoking:
-        aggregated['smoking'] = all_smoking[0]
-    
-    # Pets: If anyone says no_pets, group is no_pets
-    all_pets = [lp.get('pets') for lp in members_preferences if lp.get('pets')]
-    if 'no_pets' in all_pets:
-        aggregated['pets'] = 'no_pets'
-    elif all_pets:
-        aggregated['pets'] = 'pets_ok'
-    
-    # Guests: Take most restrictive
-    guests_order = ['frequently', 'occasionally', 'rarely']
-    all_guests = [
-        lp.get('guests_frequency') 
-        for lp in members_preferences 
-        if lp.get('guests_frequency')
-    ]
-    if all_guests:
-        aggregated['guests_frequency'] = max(
-            all_guests, 
-            key=lambda x: guests_order.index(x) if x in guests_order else 0
-        )
-
     # Cooking frequency: median tendency.
     cooking_order = ['rarely', 'sometimes', 'often']
     all_cooking = [lp.get('cooking_frequency') for lp in members_preferences if lp.get('cooking_frequency')]
@@ -445,26 +408,13 @@ def aggregate_group_lifestyle(members_preferences: List[Dict]) -> Dict:
             all_cooking_sorted = sorted(all_cooking, key=lambda x: cooking_order.index(x))
             aggregated['cooking_frequency'] = all_cooking_sorted[len(all_cooking_sorted) // 2]
 
-    # Commute preferences: median thresholds.
-    commute_minutes = []
-    commute_km = []
-    for lp in members_preferences:
-        try:
-            if lp.get('commute_max_minutes') is not None:
-                commute_minutes.append(float(lp.get('commute_max_minutes')))
-        except (TypeError, ValueError):
-            pass
-        try:
-            if lp.get('commute_max_distance_km') is not None:
-                commute_km.append(float(lp.get('commute_max_distance_km')))
-        except (TypeError, ValueError):
-            pass
-    if commute_minutes:
-        commute_minutes.sort()
-        aggregated['commute_max_minutes'] = int(round(commute_minutes[len(commute_minutes) // 2]))
-    if commute_km:
-        commute_km.sort()
-        aggregated['commute_max_distance_km'] = round(commute_km[len(commute_km) // 2], 1)
+    # Gender identity: majority vote when present.
+    all_genders = [_norm(lp.get('gender_identity')) for lp in members_preferences if _norm(lp.get('gender_identity'))]
+    if all_genders:
+        counts: Dict[str, int] = {}
+        for g in all_genders:
+            counts[g] = counts.get(g, 0) + 1
+        aggregated['gender_identity'] = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[0][0]
 
     # Amenity / building preferences: majority picks.
     amenity_counter: Dict[str, int] = {}

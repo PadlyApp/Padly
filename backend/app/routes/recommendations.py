@@ -26,11 +26,23 @@ class UserPreferences(BaseModel):
     # Budget
     budget_min: Optional[float] = None
     budget_max: Optional[float] = None
+    target_country: Optional[str] = None
+    target_state_province: Optional[str] = None
+    target_city: Optional[str] = None
 
     # Housing preferences
     desired_beds: Optional[float] = None
     desired_baths: Optional[float] = None
     desired_sqft_min: Optional[float] = None
+    required_bedrooms: Optional[float] = None
+    target_bathrooms: Optional[float] = None
+    target_deposit_amount: Optional[float] = None
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    gender_policy: Optional[str] = None         # same_gender_only | mixed_ok
+    target_lease_type: Optional[str] = None     # fixed | month_to_month | sublet | any
+    target_lease_duration_months: Optional[int] = None
+    move_in_date: Optional[str] = None
+    target_furnished: Optional[bool] = None
     wants_furnished: Optional[int] = None  # 1 = yes, 0 = no
 
     # Location
