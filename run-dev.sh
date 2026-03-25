@@ -32,10 +32,18 @@ else
   source "$PROJECT_ROOT/backend/venv/bin/activate"
 fi
 
-# Check if frontend node_modules exists
-if [ ! -d "$PROJECT_ROOT/frontend/node_modules" ]; then
+# Check if frontend dependencies need to be installed or refreshed
+FRONTEND_DIR="$PROJECT_ROOT/frontend"
+FRONTEND_INSTALL_STATE="$FRONTEND_DIR/node_modules/.package-lock.json"
+
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   echo -e "${YELLOW}Frontend dependencies not found. Installing...${NC}"
-  cd "$PROJECT_ROOT/frontend"
+  cd "$FRONTEND_DIR"
+  npm install
+  cd "$PROJECT_ROOT"
+elif [ ! -f "$FRONTEND_INSTALL_STATE" ] || [ "$FRONTEND_DIR/package.json" -nt "$FRONTEND_INSTALL_STATE" ] || [ "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_STATE" ]; then
+  echo -e "${YELLOW}Frontend dependency files changed. Refreshing install...${NC}"
+  cd "$FRONTEND_DIR"
   npm install
   cd "$PROJECT_ROOT"
 fi

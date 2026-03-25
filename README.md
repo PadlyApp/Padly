@@ -1,259 +1,118 @@
-# Padly (full-stack)
+# Padly
 
-Padly is a housing and roommate matching platform for students, interns, and early-career professionals.  
-This branch contains an actively developed full-stack app:
+Padly is a roommate-first housing platform for students, interns, and early-career professionals.
 
-- Frontend: Next.js + Mantine (`frontend/`)
-- Backend: FastAPI + Supabase (`backend/`)
-- Matching stack: user-to-group compatibility + neural-first group-to-listing ranking
+Most rental apps start with listings. Padly starts with people.
 
-## What Is Implemented Now
+## What The App Does
 
-### Frontend Product Flows
+Padly helps users:
 
-- Auth and session management (signup, signin, signout, token refresh, protected routes)
-- Onboarding flow and profile completion
-- Group discovery, creation, editing, and detail management
-- Group invitations and join-request review/approval flows
-- Preferences form (housing constraints + soft preferences)
-- Discover swipe experience for listing recommendations
-- Matches page (liked listings from Discover)
-- Listing detail page and account/profile editing
-
-Main route files are under `frontend/src/app/`, including:
+- define what they need in a home and roommate setup
+- find compatible roommates and groups
+- discover listings that fit the group, not just one person
+- get recommendations that improve with usage
 
-- `page.jsx` (home)
-- `login/page.jsx`, `signup/page.jsx`
-- `onboarding/page.jsx`
-- `groups/page.jsx`, `groups/create/page.jsx`, `groups/[id]/page.jsx`, `groups/[id]/edit/page.jsx`
-- `invitations/page.jsx`
-- `preferences/page.jsx`
-- `discover/page.jsx`
-- `matches/page.jsx`
-- `listings/[id]/page.jsx`
-- `account/page.jsx`
+## Why Padly Is Different
 
-### Backend API Domains
+Traditional marketplaces focus on individual renter -> listing matching.
 
-The FastAPI app mounts routers in `backend/app/main.py`:
-
-- `auth` (`/api/auth/*`)
-- `users` (`/api/users*`)
-- `listings` (`/api/listings*`)
-- `roommates` (`/api/roommate-posts*`)
-- `roommate-groups` (`/api/roommate-groups*`)
-- `preferences` (`/api/preferences*`)
-- `matches` (`/api/matches*`)
-- `stable-matches` (`/api/stable-matches*`)
-- `recommendations` (`/api/recommendations`)
-- `interactions` (`/api/interactions/*`)
-- `admin` (`/api/admin/*`)
+Padly is built around:
 
-## Matching and Recommendation System
+- compatibility between people
+- shared constraints across a household
+- group-aware housing recommendations
 
-### 1) User -> Group Compatibility
+This household-first approach reduces the common failure case where a listing looks good on paper but the roommate setup does not work in real life.
 
-`backend/app/services/user_group_matching.py` ranks groups for a user using:
+## Core Features
 
-- Hard filters: city, budget overlap, move-in date window, open group slots
-- Soft scoring (0-100): budget fit, date fit, lease prefs, amenities, affiliation, verification, lifestyle
+### 1) Personal Onboarding and Preferences
 
-Used by:
+Users create a profile and set:
 
-- `GET /api/matches/groups`
-- `GET /api/roommate-groups/discover`
+- hard requirements (must-have constraints)
+- soft preferences (ranking signals and lifestyle preferences)
 
-### 2) Group -> Listing Neural Ranking (Phase 3B)
+### 2) Roommate and Group Discovery
 
-Live serving uses:
+Padly helps users discover compatible groups and candidates using:
 
-- `GET /api/roommate-groups/{group_id}/neural-ranked-listings` (primary)
-- `GET /api/roommate-groups/{group_id}/ranked-listings` (deterministic fallback)
-- `GET /api/roommate-groups/{group_id}/matches` (compatibility alias; neural-backed in Phase 3B)
+- hard compatibility gates
+- lifestyle alignment
+- trust and fit signals
 
-Stable matching endpoints remain for historical/audit reads; write operations are disabled by default in Phase 3B.
+### 3) Group Formation and Management
 
-### 3) Listing Recommendations Endpoint
+Groups can:
 
-`POST /api/recommendations` (in `backend/app/routes/recommendations.py`) scores active listings and returns ranked recommendations for the Discover UI.
+- accept members
+- maintain shared preferences
+- evolve as members join or leave
 
-## Tech Stack (Current)
+Padly continuously keeps the group profile aligned with member preferences.
 
-### Frontend (`frontend/package.json`)
+### 4) Group-to-Listing Recommendations
 
-- Next.js `15.5.4`
-- React `19.1.0`
-- Mantine `7.17.8`
-- TanStack Query `5.90.x`
-- Supabase JS `2.58.0`
-- TypeScript + ESLint
+Listings are shown only after feasibility checks, then ranked by blended intelligence:
 
-### Backend (`backend/requirements.txt`)
+- preference fit
+- behavior patterns
+- neural affinity
 
-- FastAPI `0.118.0`
-- Uvicorn `0.37.0`
-- Supabase Python client `2.21.1`
-- Pydantic `2.12.3`
-- python-dotenv `1.0.0`
-- TensorFlow `2.20.0` (for AI/recommender experiments under `backend/app/ai/`)
+Users get an explainable ranking, not a black box.
 
-## Project Structure
+### 5) Discover Feedback Loop
 
-```text
-Padly/
-├── frontend/
-│   ├── src/app/                 # Next.js App Router pages/components/providers
-│   ├── lib/                     # API + auth clients
-│   └── package.json
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI entrypoint
-│   │   ├── routes/              # API route modules
-│   │   ├── services/            # Matching/business services
-│   │   ├── ai/                  # Recommender + model artifacts/docs
-│   │   ├── schemas/             # SQL schema + ERD
-│   │   └── db.py                # Supabase env + clients
-│   ├── migrations/              # SQL migrations
-│   └── requirements.txt
-└── run-dev.sh                   # Starts backend + frontend
-```
-
-## Local Setup
-
-### Prerequisites
-
-- Node.js 18+
-- npm
-- Python 3.10+
-- Supabase project (URL + keys)
-
-### 1) Backend Setup
-
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate   # Windows: .\venv\Scripts\activate
-pip install -r requirements.txt
-cp app/.env.example app/.env
-```
-
-Update `backend/app/.env` with:
-
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_KEY`
-- Optional: `VERIFY_JWT` (`true`/`false`)
-- Optional: `SUPABASE_JWT_SECRET`
-
-Then run:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Backend URLs:
-
-- API: `http://localhost:8000`
-- Swagger docs: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-### 2) Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend URL:
-
-- App: `http://localhost:3000`
-
-### 3) Start Both Services (Recommended)
-
-From repo root:
-
-```bash
-chmod +x run-dev.sh
-./run-dev.sh
-```
-
-## Database and Schema Artifacts
-
-- Main schema SQL: `backend/app/schemas/padly_schema.sql`
-- ERD: `backend/app/schemas/padly_erd.pdf` and `.drawio`
-- Migrations:
-  - `backend/migrations/001_dynamic_group_sizing.sql`
-  - `backend/migrations/002_solo_user_groups.sql`
-  - `backend/migrations/003_expand_personal_preferences.sql`
-  - `backend/migrations/003_match_confirmation.sql`
-  - `backend/migrations/add_group_members_status.sql`
-
-## Useful API Surface (Quick Reference)
-
-### Auth
-
-- `POST /api/auth/signup`
-- `POST /api/auth/signin`
-- `POST /api/auth/refresh`
-- `POST /api/auth/signout`
-- `GET /api/auth/me`
-
-### Preferences / Matching
-
-- `GET /api/preferences/{user_id}`
-- `PUT /api/preferences/{user_id}`
-- `GET /api/matches/groups`
-- `GET /api/stable-matches/active`
-- `GET /api/stable-matches/stats`
-
-### Groups
-
-- `GET /api/roommate-groups`
-- `POST /api/roommate-groups`
-- `GET /api/roommate-groups/{group_id}`
-- `PUT /api/roommate-groups/{group_id}`
-- `DELETE /api/roommate-groups/{group_id}`
-- `POST /api/roommate-groups/{group_id}/request-join`
-- `POST /api/roommate-groups/{group_id}/join`
-- `POST /api/roommate-groups/{group_id}/reject`
-- `POST /api/roommate-groups/{group_id}/accept-request/{user_id}`
-- `POST /api/roommate-groups/{group_id}/reject-request/{user_id}`
-- `GET /api/roommate-groups/{group_id}/neural-ranked-listings` (primary Group->Listing feed)
-- `GET /api/roommate-groups/{group_id}/matches` (legacy-compatible alias, neural-backed)
-
-### Listings / Recommendations
-
-- `GET /api/listings`
-- `GET /api/listings/{listing_id}`
-- `POST /api/listings`
-- `PUT /api/listings/{listing_id}`
-- `DELETE /api/listings/{listing_id}`
-- `POST /api/recommendations`
-
-### Discover Interactions (Phase 2A)
-
-- `POST /api/interactions/swipes`
-- `GET /api/interactions/swipes/me`
-- `GET /api/interactions/behavior/me`
-- `GET /api/interactions/behavior/groups/{group_id}`
-- `GET /api/interactions/behavior/health`
-
-## Notes for Contributors
-
-- Frontend currently uses `http://localhost:8000` directly in many pages; `NEXT_PUBLIC_API_URL` is only used in `frontend/lib/api.js`.
-- `backend/app/.env.example` currently includes `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`; add `SUPABASE_ANON_KEY` manually because backend startup requires it (`backend/app/db.py`).
-- Phase 3B Group->Listing controls:
-  - `PADLY_GROUP_NEURAL_RANKING_ENABLED=true` to enable
-  - `PADLY_GROUP_NEURAL_KILL_SWITCH=true` to hard-disable
-  - `PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED=false` keeps stable matching write paths disabled (default)
-- Legacy mock auth pages/routes still exist under `frontend/src/app/auth/*` and `frontend/src/app/api/auth/*`; primary app auth flow uses `frontend/src/app/login/page.jsx` and `frontend/src/app/signup/page.jsx` with backend `/api/auth/*`.
-- `GET /api/preferences/me` is currently a placeholder returning `501` by design.
-
-## Additional Docs In Repo
-
-- `backend/MATCHING_ALGORITHM.md`
-- `TWO_TOWER_EXPLAINER.md`
-- `DATASET_REQUIREMENTS.md`
-- `SOURCE_OF_TRUTH.md`
-- `COMPLETION_SUMMARY.md`
+As users interact with recommendations, Padly learns from behavior and improves future ranking quality over time.
+
+## End-to-End Product Flow
+
+Padly follows a clear journey:
+
+1. User onboarding and preference setup.
+2. User discovers compatible roommates/groups.
+3. User joins or forms a group.
+4. Group preferences become the source of truth.
+5. Group receives ranked listing recommendations.
+6. Ongoing interactions improve recommendation quality.
+
+## Matching Intelligence (In Plain Language)
+
+Padly combines three layers:
+
+- Rules: clear preference and constraint alignment.
+- Behavior: learning from what users engage with.
+- Neural modeling: deeper similarity and affinity scoring.
+
+The same intelligence that improves listing recommendations is also used to strengthen roommate suggestions.
+
+## Two-Tower Architecture (Technical Overview)
+
+Padly’s neural layer uses a two-tower model:
+
+- Preference tower: encodes a user (or group preference profile) into an embedding.
+- Listing tower: encodes each listing into an embedding in the same vector space.
+
+Recommendations are produced by comparing these embeddings:
+
+- closer vectors = higher predicted affinity
+- farther vectors = lower predicted affinity
+
+Padly blends this neural affinity with rules and behavior signals, so ranking stays robust in both cold-start and mature-data scenarios.
+
+For roommate suggestions, Padly reuses listing-taste embeddings from interaction history to estimate similarity between people with similar housing tastes.
+
+## Who Padly Is For
+
+- students moving for school terms
+- interns relocating temporarily
+- new grads and early-career professionals moving to new cities
+- anyone who needs both a home and compatible roommates
+
+## Product Direction
+
+Padly is focused on making shared-living decisions faster, safer, and more compatible by solving both sides of the problem together:
+
+- **Who should I live with?**
+- **Where should we live?**

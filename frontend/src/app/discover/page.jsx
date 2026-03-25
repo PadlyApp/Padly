@@ -12,49 +12,12 @@ import { SwipeCard } from '../components/SwipeCard';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
-// ── dummy cards shown during the guided tour ────────────────────────────────
-const TOUR_DUMMY_LISTINGS = [
-  {
-    listing_id: 'tour-dummy-1',
-    title: 'Sunny Studio near Campus',
-    city: 'San Francisco',
-    number_of_bedrooms: 1,
-    number_of_bathrooms: 1,
-    area_sqft: 550,
-    furnished: true,
-    price_per_month: 1850,
-    match_percent: '92%',
-    images: ['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
-  },
-  {
-    listing_id: 'tour-dummy-2',
-    title: 'Cozy 2BR with Rooftop Access',
-    city: 'Los Angeles',
-    number_of_bedrooms: 2,
-    number_of_bathrooms: 1,
-    area_sqft: 850,
-    furnished: false,
-    price_per_month: 2400,
-    match_percent: '87%',
-    images: ['https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
-  },
-  {
-    listing_id: 'tour-dummy-3',
-    title: 'Modern Loft Downtown',
-    city: 'New York',
-    number_of_bedrooms: 1,
-    number_of_bathrooms: 1,
-    area_sqft: 700,
-    furnished: true,
-    price_per_month: 2100,
-    match_percent: '95%',
-    images: ['https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800'],
-  },
-];
-
 // ── session helpers ─────────────────────────────────────────────────────────
 
 const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
+
+/** Stable client label for swipe telemetry (backend requires algorithm_version). */
+const DISCOVER_ALGORITHM_VERSION = 'discover-v1';
 
 function getOrCreateSwipeSessionId() {
   if (typeof window === 'undefined') return 'server-session';
@@ -81,7 +44,6 @@ export default function DiscoverPage() {
 function DiscoverContent() {
   const { user, authState } = useAuth();
   const { tourPhase } = usePadlyTour();
-  const isTourDiscover = tourPhase === 'discover';
   const userId = user?.profile?.id;
   const router = useRouter();
 
@@ -143,8 +105,20 @@ function DiscoverContent() {
       const body = {
         budget_min:      prefs.budget_min     ?? undefined,
         budget_max:      prefs.budget_max     ?? undefined,
+        target_country: prefs.target_country ?? undefined,
+        target_state_province: prefs.target_state_province ?? undefined,
+        target_city: prefs.target_city ?? undefined,
+        required_bedrooms: prefs.required_bedrooms ?? undefined,
+        target_bathrooms: prefs.target_bathrooms ?? undefined,
         desired_beds:    prefs.required_bedrooms ?? undefined,
         desired_baths:   prefs.target_bathrooms  ?? undefined,
+        target_deposit_amount: prefs.target_deposit_amount ?? undefined,
+        furnished_preference: prefs.furnished_preference ?? undefined,
+        gender_policy: prefs.gender_policy ?? undefined,
+        target_lease_type: prefs.target_lease_type ?? undefined,
+        target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+        move_in_date: prefs.move_in_date ?? undefined,
+        target_furnished: prefs.target_furnished ?? undefined,
         wants_furnished:
           prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
             ? 1
@@ -182,22 +156,20 @@ function DiscoverContent() {
   }, [userId, authState?.accessToken]);
 
   useEffect(() => {
-    if (isTourDiscover) {
-      setListings(TOUR_DUMMY_LISTINGS);
-      setCurrentIndex(0);
-      setLoading(false);
-      setError(null);
-      return;
-    }
     fetchRecommendations();
-  }, [fetchRecommendations, isTourDiscover]);
+  }, [fetchRecommendations]);
 
-  const persistSwipeEvent = useCallback(async ({ listing, action, position }) => {
+  const persistSwipeEvent = useCallback(async ({ listing, action, position, startedAt }) => {
     if (!authState?.accessToken || !userId || !listing?.listing_id) return;
 
     if (!swipeSessionIdRef.current) {
       swipeSessionIdRef.current = getOrCreateSwipeSessionId();
     }
+
+    const algorithmVersion =
+      listing?.algorithm_version != null && String(listing.algorithm_version).trim()
+        ? String(listing.algorithm_version).trim()
+        : DISCOVER_ALGORITHM_VERSION;
 
     try {
       const response = await fetch('http://localhost:8000/api/interactions/swipes', {
@@ -212,9 +184,13 @@ function DiscoverContent() {
           surface: 'discover',
           session_id: swipeSessionIdRef.current,
           position_in_feed: position,
-          algorithm_version: listing?.algorithm_version || 'phase2b-cold-no-ml',
+          algorithm_version: algorithmVersion,
           model_version: listing?.ml_score != null ? 'recommender-v1' : null,
           city_filter: listing.city ?? null,
+          latency_ms:
+            startedAt != null && typeof performance !== 'undefined'
+              ? Math.max(0, Math.round(performance.now() - startedAt))
+              : undefined,
         }),
       });
 
@@ -228,19 +204,23 @@ function DiscoverContent() {
   }, [authState?.accessToken, userId]);
 
   const handleSwipe = useCallback((direction, listing) => {
-    const isDummy = listing?.listing_id?.startsWith('tour-dummy');
+    const action = direction === 'right' ? 'like' : 'pass';
+    if (action === 'like') saveLikedListing(listing);
 
-    if (!isDummy) {
-      const action = direction === 'right' ? 'like' : 'pass';
-      if (action === 'like') saveLikedListing(listing);
+    // Feed position must match the card index in this session's stack (0-based).
+    const top = listings[currentIndex];
+    const position =
+      top && listing?.listing_id === top.listing_id
+        ? currentIndex
+        : listings.findIndex((item) => item.listing_id === listing?.listing_id);
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
 
-      const position = listings.findIndex((item) => item.listing_id === listing?.listing_id);
-      void persistSwipeEvent({
-        listing,
-        action,
-        position: position >= 0 ? position : currentIndex,
-      });
-    }
+    void persistSwipeEvent({
+      listing,
+      action,
+      position: position >= 0 ? position : currentIndex,
+      startedAt,
+    });
 
     setCurrentIndex((prev) => prev + 1);
 
@@ -305,7 +285,7 @@ function DiscoverContent() {
               <Text c="dimmed" ta="center" maw={320}>
                 Check your liked listings in Matches, or reload for a fresh batch.
               </Text>
-              <Group gap="md">
+              <Group gap="md" justify="center">
                 <Button
                   leftSection={<IconRefresh size={16} />}
                   onClick={fetchRecommendations}
@@ -315,6 +295,9 @@ function DiscoverContent() {
                 </Button>
                 <Button variant="light" color="teal" onClick={() => router.push('/matches')}>
                   View Matches
+                </Button>
+                <Button variant="outline" color="teal" onClick={() => router.push('/roommates')}>
+                  Find roommate matches
                 </Button>
               </Group>
             </Stack>
