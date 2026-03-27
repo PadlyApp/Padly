@@ -14,6 +14,7 @@ import {
   Center,
   Paper,
   Divider,
+  SimpleGrid,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -212,8 +213,8 @@ export function InvitationsPanel({ user, authState }) {
 
             <Divider />
 
-            <Group grow>
-              <Paper p="sm" withBorder>
+            <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+              <Paper p="sm" radius="lg" shadow="xs">
                 <Group gap="xs">
                   <IconMapPin size={16} />
                   <div>
@@ -223,7 +224,7 @@ export function InvitationsPanel({ user, authState }) {
                 </Group>
               </Paper>
 
-              <Paper p="sm" withBorder>
+              <Paper p="sm" radius="lg" shadow="xs">
                 <Group gap="xs">
                   <IconUsers size={16} />
                   <div>
@@ -234,7 +235,7 @@ export function InvitationsPanel({ user, authState }) {
               </Paper>
 
               {invitation.budget_per_person_min && invitation.budget_per_person_max && (
-                <Paper p="sm" withBorder>
+                <Paper p="sm" radius="lg" shadow="xs">
                   <Group gap="xs">
                     <IconCurrencyDollar size={16} />
                     <div>
@@ -248,7 +249,7 @@ export function InvitationsPanel({ user, authState }) {
               )}
 
               {invitation.target_move_in_date && (
-                <Paper p="sm" withBorder>
+                <Paper p="sm" radius="lg" shadow="xs">
                   <Group gap="xs">
                     <IconCalendar size={16} />
                     <div>
@@ -260,7 +261,7 @@ export function InvitationsPanel({ user, authState }) {
                   </Group>
                 </Paper>
               )}
-            </Group>
+            </SimpleGrid>
 
             <Group gap="sm" mt="md">
               <Button

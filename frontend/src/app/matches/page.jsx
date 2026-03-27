@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box } from '@mantine/core';
+import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, ThemeIcon } from '@mantine/core';
+import { IconHeart } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -49,17 +50,17 @@ function MatchesPageContent() {
 
         {/* Empty state */}
         {listings.length === 0 && (
-          <Stack align="center" gap="lg" mt={64}>
-            <Text style={{ fontSize: '3rem' }}>💚</Text>
-            <Title order={3} style={{ color: '#111' }}>No matches yet</Title>
-            <Text size="lg" c="dimmed" ta="center" maw={400}>
-              Head over to Discover and swipe right on listings you like — they'll show up here.
-            </Text>
-            <Button
-              size="lg"
-              style={{ backgroundColor: '#20c997' }}
-              onClick={() => router.push('/discover')}
-            >
+          <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
+            <ThemeIcon size={72} radius="xl" variant="light" color="teal">
+              <IconHeart size={36} />
+            </ThemeIcon>
+            <Stack align="center" gap="xs">
+              <Title order={3} style={{ color: '#212529' }}>No liked listings yet</Title>
+              <Text size="md" c="dimmed" ta="center" maw={380}>
+                Head to Discover and swipe right on listings you like — they'll appear here.
+              </Text>
+            </Stack>
+            <Button size="md" color="teal" onClick={() => router.push('/discover')}>
               Start Discovering
             </Button>
           </Stack>
@@ -76,21 +77,13 @@ function MatchesPageContent() {
               return (
                 <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
                   <Card
+                    className="card-lift"
                     shadow="sm"
                     radius="lg"
                     style={{
                       overflow: 'hidden',
-                      border: '1px solid #f1f1f1',
-                      transition: 'all 0.3s ease',
+                      border: '1px solid #f1f3f5',
                       cursor: 'pointer',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.boxShadow =
-                        '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.boxShadow =
-                        '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)';
                     }}
                   >
                     <Card.Section style={{ position: 'relative' }}>
@@ -101,18 +94,14 @@ function MatchesPageContent() {
                           style={{
                             position: 'absolute', top: 0, left: 0,
                             width: '100%', height: '100%', objectFit: 'cover',
-                            transition: 'transform 0.5s ease',
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                         />
                       </Box>
                       {listing.match_percent && (
                         <Badge
-                          style={{
-                            position: 'absolute', top: 12, right: 12,
-                            backgroundColor: '#20c997', color: '#fff',
-                          }}
+                          variant="filled"
+                          color="teal"
+                          style={{ position: 'absolute', top: 12, right: 12 }}
                         >
                           {listing.match_percent} match
                         </Badge>
@@ -135,14 +124,14 @@ function MatchesPageContent() {
 
                       <Text size="md" c="dimmed" style={{ color: '#666', minHeight: '24px' }}>
                         {[
-                          listing.number_of_bedrooms != null && `${listing.number_of_bedrooms} Bed`,
+                          listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
                           listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
                           listing.area_sqft && `${listing.area_sqft} sq ft`,
                         ].filter(Boolean).join(' • ')}
                       </Text>
 
                       {listing.price_per_month && (
-                        <Text fw={600} size="xl" style={{ color: '#20c997', minHeight: '32px' }}>
+                        <Text fw={600} size="xl" c="teal.6" style={{ minHeight: '32px' }}>
                           ${Number(listing.price_per_month).toLocaleString()}/mo
                         </Text>
                       )}
@@ -153,10 +142,8 @@ function MatchesPageContent() {
                         fullWidth
                         radius="md"
                         size="md"
-                        style={{ backgroundColor: '#20c997', transition: 'background-color 0.2s ease' }}
+                        color="teal"
                         onClick={() => router.push(`/listings/${listing.listing_id}`)}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#12b886'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#20c997'; }}
                       >
                         View Details
                       </Button>

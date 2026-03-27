@@ -2,20 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Container, 
-  Title, 
-  Text, 
-  Button, 
-  Stack, 
-  Card, 
+import {
+  Container,
+  Title,
+  Text,
+  Button,
+  Stack,
+  Card,
   TextInput,
   Textarea,
   NumberInput,
   Select,
   Group,
   Paper,
-  Stepper
+  Stepper,
+  Box
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
@@ -165,7 +166,7 @@ export default function CreateGroupPage() {
   const prevStep = () => setActive((current) => (current > 0 ? current - 1 : current));
 
   return (
-    <>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
       <Container size="md" py="xl">
         <Stack gap="xl">
@@ -258,7 +259,7 @@ export default function CreateGroupPage() {
                 />
 
                 {budgetMin && budgetMax && (
-                  <Paper p="md" withBorder bg="blue.0">
+                  <Paper p="md" bg="teal.0" style={{ backgroundColor: '#e6fcf5' }}>
                     <Text size="sm" fw={500}>
                       Total Budget Range: ${budgetMin * groupSize} - ${budgetMax * groupSize}
                     </Text>
@@ -359,6 +360,6 @@ export default function CreateGroupPage() {
         </Group>
       </Stack>
     </Container>
-    </>
+    </Box>
   );
 }

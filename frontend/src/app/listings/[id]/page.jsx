@@ -43,7 +43,17 @@ export default function ListingDetailPage() {
     images: ['https://images.unsplash.com/photo-1610123172763-1f587473048f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'],
   };
 
-  const listing = listingData?.data || sampleListing;
+  const rawListing = listingData?.data || sampleListing;
+  // images may arrive as a JSON string from the DB — parse it to an array
+  const parsedImages = (() => {
+    const imgs = rawListing.images;
+    if (Array.isArray(imgs)) return imgs;
+    if (typeof imgs === 'string') {
+      try { return JSON.parse(imgs); } catch { return []; }
+    }
+    return [];
+  })();
+  const listing = { ...rawListing, images: parsedImages };
 
   if (isLoading) {
     return (
@@ -87,8 +97,8 @@ export default function ListingDetailPage() {
                 {listing.title}
               </Title>
 
-              <Text size="xl" fw={600} style={{ color: '#20c997' }}>
-                ${listing.price_per_month?.toLocaleString()}/month
+              <Text size="xl" fw={600} c="teal.6">
+                ${Number(listing.price_per_month || 0).toLocaleString()}/month
               </Text>
 
               <Group gap="md">
@@ -159,16 +169,8 @@ export default function ListingDetailPage() {
                 fullWidth
                 size="lg"
                 radius="md"
-                style={{
-                  backgroundColor: '#20c997',
-                  marginTop: '1rem',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#12b886';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#20c997';
-                }}
+                color="teal"
+                mt="md"
               >
                 Contact Host
               </Button>
