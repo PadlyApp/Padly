@@ -79,7 +79,7 @@ export default function AccountPage() {
 
 function AccountPageContent() {
   return (
-    <Box style={{ minHeight: '100vh', backgroundColor: '#fafafa' }}>
+    <Box style={{ minHeight: '100vh' }}>
       <Navigation />
 
       <Container size="lg" py="xl">
@@ -277,20 +277,26 @@ function ProfilePanel() {
 
   return (
     <Stack gap="xl">
-      {/* Avatar & verification */}
-      <Stack align="center" gap="md">
-        <Avatar
-          src={userData.profile_picture_url}
-          size={100}
-          radius="50%"
-          color="blue"
-        >
-          {userData.full_name?.charAt(0)?.toUpperCase() || 'U'}
-        </Avatar>
-        <Group gap="xs">
-          {getVerificationBadge()}
+      {/* Profile header card */}
+      <Card mb="lg" style={{ background: 'linear-gradient(120deg, #e6fcf5 0%, #ffffff 100%)', border: '1px solid #e9ecef' }}>
+        <Group gap="xl" align="center" wrap="wrap">
+          <Avatar
+            src={userData.profile_picture_url}
+            size={80}
+            radius="xl"
+            color="teal"
+          >
+            {userData.full_name?.charAt(0)?.toUpperCase() || 'U'}
+          </Avatar>
+          <Stack gap={4} style={{ flex: 1 }}>
+            <Title order={3} style={{ color: '#212529' }}>{userData.full_name || 'Your Profile'}</Title>
+            <Text size="sm" c="dimmed">{userData.email}</Text>
+            <Group gap="xs">
+              {getVerificationBadge()}
+            </Group>
+          </Stack>
         </Group>
-      </Stack>
+      </Card>
 
       {error && (
         <Alert icon={<IconAlertCircle size={16} />} color="red" title="Error">
@@ -368,11 +374,12 @@ function ProfilePanel() {
         </Stack>
       </Card>
 
-      <Group justify="center">
+      <Group justify="flex-end">
         <Button
           size="lg"
           onClick={handleSave}
           loading={saving}
+          color="teal"
           leftSection={<IconCheck size={18} />}
         >
           Save Changes

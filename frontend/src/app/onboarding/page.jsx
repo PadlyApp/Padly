@@ -214,17 +214,31 @@ export default function OnboardingPage() {
   const progress = ((active + 1) / 5) * 100;
 
   return (
-    <Container size={500} my={40}>
-      <Title ta="center" fw={900}>
-        Complete Your Profile
-      </Title>
-      <Text c="dimmed" size="sm" ta="center" mt={5} mb={30}>
-        Tell us a bit more about yourself to help find better roommate matches
-      </Text>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {/* Hairline progress at top */}
+      <Progress value={progress} size="xs" color="teal" radius={0} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }} />
 
-      <Progress value={progress} size="sm" mb="xl" color="teal" />
+      {/* Logo-only top bar */}
+      <Box style={{ borderBottom: '1px solid #e9ecef', padding: '1rem 2rem' }}>
+        <Group gap="xs" align="center">
+          <Box style={{ width: 28, height: 28, borderRadius: 8, background: '#20c997', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconHome size={16} color="white" />
+          </Box>
+          <Text size="lg" fw={700} style={{ color: '#212529' }}>Padly</Text>
+        </Group>
+      </Box>
 
-      <Paper withBorder shadow="md" p={30} radius="md">
+      {/* Existing content */}
+      <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Container size={500} my={40}>
+          <Title ta="center" fw={900}>
+            Complete Your Profile
+          </Title>
+          <Text c="dimmed" size="sm" ta="center" mt={5} mb={30}>
+            Tell us a bit more about yourself to help find better roommate matches
+          </Text>
+
+          <Paper shadow="sm" radius="lg" style={{ border: '1px solid #e9ecef' }} p={30}>
           <Stepper active={active} size="sm" mb="xl" allowNextStepsSelect={false}>
             <Stepper.Step label="Role" icon={<IconHome size={18} />}>
               <Stack mt="md" gap="lg">
@@ -378,7 +392,9 @@ export default function OnboardingPage() {
               </Button>
             )}
           </Group>
-      </Paper>
-    </Container>
+          </Paper>
+        </Container>
+      </Box>
+    </Box>
   );
 }

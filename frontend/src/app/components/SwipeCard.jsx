@@ -1,12 +1,13 @@
 'use client';
 
 import { useRef, useState, useEffect } from 'react';
-import { Text, Badge, Box } from '@mantine/core';
+import { Text, Badge, Box, Group, Button } from '@mantine/core';
+import { IconInfoCircle } from '@tabler/icons-react';
 import { ImageWithFallback } from './ImageWithFallback';
 
 const SWIPE_THRESHOLD = 100;
 
-export function SwipeCard({ listing, onSwipe, isTop, stackOffset }) {
+export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
   const [dragging, setDragging] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [leaving, setLeaving] = useState(null); // 'left' | 'right' | null
@@ -75,8 +76,14 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset }) {
   const likeOpacity = leaving === 'right' ? 1 : Math.max(0, Math.min(offsetX / SWIPE_THRESHOLD, 1));
   const nopeOpacity = leaving === 'left'  ? 1 : Math.max(0, Math.min(-offsetX / SWIPE_THRESHOLD, 1));
 
+  const images = (() => {
+    const imgs = listing.images;
+    if (Array.isArray(imgs)) return imgs;
+    if (typeof imgs === 'string') { try { return JSON.parse(imgs); } catch { return []; } }
+    return [];
+  })();
   const image =
-    listing.images?.[0] ||
+    images[0] ||
     'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800';
 
   return (
@@ -117,11 +124,11 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset }) {
         {/* Match badge */}
         {listing.match_percent && (
           <Badge
-            style={{
-              position: 'absolute', top: 14, right: 14,
-              backgroundColor: '#20c997', color: '#fff',
-              fontSize: '0.8rem', fontWeight: 700, padding: '4px 10px',
-            }}
+            variant="filled"
+            color="teal"
+            size="md"
+            radius="sm"
+            style={{ position: 'absolute', top: 14, right: 14, fontWeight: 700 }}
           >
             {listing.match_percent} match
           </Badge>
@@ -167,7 +174,7 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset }) {
           )}
           <Text size="sm" c="dimmed">
             {[
-              listing.number_of_bedrooms != null && `${listing.number_of_bedrooms} bed`,
+              listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} bed`),
               listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} bath`,
               listing.area_sqft && `${listing.area_sqft} sqft`,
               listing.furnished && 'Furnished',
@@ -175,11 +182,36 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset }) {
           </Text>
         </Box>
 
+        {listing.amenities && typeof listing.amenities === 'object' && (
+          <Group gap="xs" mt={6}>
+            {Object.entries(listing.amenities)
+              .filter(([, v]) => v)
+              .slice(0, 2)
+              .map(([key]) => (
+                <Badge key={key} variant="light" size="xs">{key}</Badge>
+              ))}
+          </Group>
+        )}
+
         {listing.price_per_month != null && (
-          <Text fw={700} size="xl" style={{ color: '#20c997' }}>
+          <Text fw={700} size="xl" c="teal.6">
             ${Number(listing.price_per_month).toLocaleString()}/mo
           </Text>
         )}
+
+        <Box style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            leftSection={<IconInfoCircle size={14} />}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onExpand && onExpand(listing); }}
+            style={{ fontSize: 12, color: '#868e96' }}
+          >
+            View details
+          </Button>
+        </Box>
       </Box>
     </Box>
   );
