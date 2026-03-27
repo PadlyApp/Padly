@@ -237,14 +237,13 @@ function GroupsPageContent() {
   const [statusFilter, setStatusFilter] = useState('active');
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(
-    tabFromUrl === 'invitations' ? 'invitations' : tabFromUrl === 'people' ? 'people' : 'all'
+    tabFromUrl === 'invitations' ? 'invitations' : tabFromUrl === 'people' ? 'people' : tabFromUrl === 'my-groups' ? 'my-groups' : 'all'
   );
   const [userGroupIds, setUserGroupIds] = useState(new Set()); // Non-solo groups user is in (for "My Group" badge)
   const [userInAnyGroup, setUserInAnyGroup] = useState(false); // True if user is in ANY group (including solo)
   const [pendingRequestIds, setPendingRequestIds] = useState(new Set()); // Groups where user has pending join request
   const [joiningGroupId, setJoiningGroupId] = useState(null);
-  const [recommendedGroups, setRecommendedGroups] = useState([]);
-  const [loadingRecommended, setLoadingRecommended] = useState(false);
+  const [recommendedGroupIds, setRecommendedGroupIds] = useState(new Set());
 
   // --- People tab state ---
   const queryClient = useQueryClient();
@@ -255,15 +254,11 @@ function GroupsPageContent() {
   const myId = user?.profile?.id;
 
   useEffect(() => {
-    if (activeTab === 'invitations') return;
-    if (activeTab === 'people') return;
-    if (activeTab === 'recommended' && authState?.accessToken) {
-      fetchRecommendedGroups();
-    } else {
-      fetchGroups();
-    }
+    if (activeTab === 'invitations' || activeTab === 'people') return;
+    fetchGroups();
     if (authState?.accessToken) {
       fetchUserMemberships();
+      fetchRecommendedIds();
     }
   }, [statusFilter, activeTab, authState]);
 
@@ -337,39 +332,20 @@ function GroupsPageContent() {
 
   // --- End People tab queries ---
 
-  const fetchRecommendedGroups = async () => {
+  const fetchRecommendedIds = async () => {
     if (!authState?.accessToken) return;
-
-    setLoadingRecommended(true);
     try {
-      // Use a default city or get from user preferences
-      const city = searchCity || 'San Francisco'; // Default city
+      const city = searchCity || 'San Francisco';
       const response = await fetch(
         `http://localhost:8000/api/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
-        {
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`
-          }
-        }
+        { headers: { 'Authorization': `Bearer ${authState.accessToken}` } }
       );
       const data = await response.json();
-
       if (response.ok && data.status === 'success') {
-        // Add current_member_count for consistency with other views
-        const groupsWithCount = data.groups.map(g => ({
-          ...g,
-          current_member_count: g.current_member_count || 0
-        }));
-        setRecommendedGroups(groupsWithCount);
-      } else {
-        console.error('Error fetching recommended groups:', data);
-        setRecommendedGroups([]);
+        setRecommendedGroupIds(new Set(data.groups.map(g => g.group_id || g.id)));
       }
-    } catch (error) {
-      console.error('Error fetching recommended groups:', error);
-      setRecommendedGroups([]);
-    } finally {
-      setLoadingRecommended(false);
+    } catch {
+      // best-effort — flags are optional
     }
   };
 
@@ -468,11 +444,8 @@ function GroupsPageContent() {
   };
 
   const handleSearch = () => {
-    if (activeTab === 'recommended') {
-      fetchRecommendedGroups();
-    } else {
-      fetchGroups();
-    }
+    fetchGroups();
+    if (authState?.accessToken) fetchRecommendedIds();
   };
 
   const handleJoinGroup = async (groupId, e) => {
@@ -580,11 +553,6 @@ function GroupsPageContent() {
         {/* Tabs */}
         <Tabs value={activeTab} onChange={setActiveTab} data-tour="groups-tabs">
           <Tabs.List>
-            {authState?.accessToken && (
-              <Tabs.Tab value="recommended" leftSection={<IconSparkles size={16} />}>
-                Recommended For You
-              </Tabs.Tab>
-            )}
             <Tabs.Tab value="all" leftSection={<IconUsers size={16} />}>
               All Groups
             </Tabs.Tab>
@@ -744,7 +712,7 @@ function GroupsPageContent() {
 
         {/* Groups Grid */}
         <div data-tour="groups-list">
-        {(activeTab === 'recommended' ? loadingRecommended : loading) ? (
+        {loading ? (
           <Grid>
             {[1,2,3,4,5,6].map(i => (
               <Grid.Col key={i} span={{ base: 12, sm: 6, md: 4 }}>
@@ -760,7 +728,7 @@ function GroupsPageContent() {
               </Grid.Col>
             ))}
           </Grid>
-        ) : (activeTab === 'recommended' ? recommendedGroups : groups).length === 0 ? (
+        ) : groups.length === 0 ? (
           <Card withBorder p="xl">
             <Stack align="center" gap="md" py="xl">
               <ThemeIcon size={64} variant="light" color="teal"><IconUsers size={32} /></ThemeIcon>
@@ -768,8 +736,6 @@ function GroupsPageContent() {
               <Text c="dimmed" ta="center">
                 {activeTab === 'my-groups'
                   ? "You haven't joined any groups yet. Create one or browse all groups to join."
-                  : activeTab === 'recommended'
-                  ? "No compatible groups found. Try searching a different city or adjusting your preferences."
                   : "No groups match your search criteria. Try adjusting your filters."}
               </Text>
               {activeTab === 'all' && (
@@ -781,7 +747,7 @@ function GroupsPageContent() {
           </Card>
         ) : (
           <Grid>
-            {(activeTab === 'recommended' ? recommendedGroups : groups).map((group) => (
+            {groups.map((group) => (
               <Grid.Col key={group.id} span={{ base: 12, sm: 6, md: 4 }}>
                 <Card
                   className="card-lift"
@@ -812,14 +778,9 @@ function GroupsPageContent() {
                             Solo
                           </Badge>
                         )}
-                        {/* Compatibility score for recommended groups */}
-                        {group.compatibility?.score && (
-                          <Badge
-                            color={group.compatibility.score >= 80 ? 'green' : group.compatibility.score >= 60 ? 'teal' : 'yellow'}
-                            variant="filled"
-                            leftSection={<IconStar size={12} />}
-                          >
-                            {Math.round(group.compatibility.score)}% Match
+                        {recommendedGroupIds.has(group.id) && (
+                          <Badge color="teal" variant="light" leftSection={<IconSparkles size={12} />}>
+                            Recommended
                           </Badge>
                         )}
                       </Group>
