@@ -1,5 +1,5 @@
 {
-  "user_dim": 50,
+  "user_dim": 33,
   "item_dim": 38,
   "item_type_cols": [
     "type_apartment",
@@ -33,5 +33,6 @@
     "parking_street parking",
     "parking_valet parking"
   ],
-  "has_liked_listings": true
+  "has_liked_listings": false,
+  "has_category_labels": true
 }

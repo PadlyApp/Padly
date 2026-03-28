@@ -73,6 +73,13 @@ export function Navigation() {
                       </Text>
                     </UnstyledButton>
                   </Link>
+                  <Link href="/evaluation" style={{ textDecoration: 'none' }}>
+                    <UnstyledButton>
+                      <Text size="md" c="#666" style={{ transition: 'color 0.2s' }}>
+                        Evaluation
+                      </Text>
+                    </UnstyledButton>
+                  </Link>
                   {isTourPaused && (
                     <Button
                       variant="light"
@@ -178,7 +185,14 @@ export function Navigation() {
                     </Text>
                   </UnstyledButton>
                 </Link>
-                
+                <Link href="/evaluation" style={{ textDecoration: 'none' }} onClick={handleLinkClick}>
+                  <UnstyledButton style={{ width: '100%' }}>
+                    <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
+                      Evaluation
+                    </Text>
+                  </UnstyledButton>
+                </Link>
+
                 <Divider />
 
                 {isTourPaused && (

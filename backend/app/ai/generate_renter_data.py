@@ -23,6 +23,8 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 
+from app.ai.categorize_and_map import categorize_listings
+
 # ── catalogue of every categorical value in the listing data ──────────────
 
 LISTING_TYPES = [
@@ -303,14 +305,16 @@ def _build_pairs(
     pairs_per_renter: int,
     rng: np.random.Generator,
     pos_threshold: float = 0.65,
-) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray]:
     """
     For each renter, sample listings and compute match labels.
-    Returns aligned (renter_rows, listing_rows, labels) arrays.
+    Returns aligned (renter_rows, listing_rows, labels, raw_scores) arrays.
+    raw_scores holds the continuous _match_score value before binarisation.
     """
     all_renter_rows: List[pd.Series] = []
     all_listing_rows: List[pd.Series] = []
     all_labels: List[float] = []
+    all_raw_scores: List[float] = []
 
     listing_idx = np.arange(len(listings))
 
@@ -321,12 +325,14 @@ def _build_pairs(
             s = _match_score(renter, listing)
             all_renter_rows.append(renter)
             all_listing_rows.append(listing)
+            all_raw_scores.append(s)
             all_labels.append(1.0 if s >= pos_threshold else 0.0)
 
     return (
         pd.DataFrame(all_renter_rows).reset_index(drop=True),
         pd.DataFrame(all_listing_rows).reset_index(drop=True),
         np.array(all_labels, dtype=np.float32),
+        np.array(all_raw_scores, dtype=np.float32),
     )
 
 
@@ -449,6 +455,57 @@ def encode_listing_features(listings: pd.DataFrame) -> np.ndarray:
     ])
 
 
+# ── category helpers ──────────────────────────────────────────────────────
+
+def _compute_user_primary_cats(renters: pd.DataFrame) -> np.ndarray:
+    """
+    Vectorized equivalent of argmax(compute_user_category_affinity) for every
+    renter row.  Mirrors the per-row logic in categorize_and_map.py so the
+    user→category assignment is consistent with training-data generation.
+
+    Returns an int8 array of shape (n_renters,) with values 0-5:
+        0  Budget Compact
+        1  Spacious Family
+        2  Pet-Friendly
+        3  Premium / Luxury
+        4  Urban Convenience
+        5  Accessible Modern
+    """
+    n = len(renters)
+    aff = np.full((n, 6), 0.05, dtype=np.float64)
+
+    bmax = renters["budget_max"].values
+
+    # 0 – Budget Compact
+    aff[bmax < 900,  0] += 0.8
+    aff[(bmax >= 900) & (bmax < 1100), 0] += 0.3
+
+    # 1 – Spacious Family
+    aff[renters["desired_beds"].values >= 3,       1] += 0.7
+    aff[renters["household_size"].values >= 3,     1] += 0.4
+    aff[renters["desired_sqft_min"].values > 1100, 1] += 0.3
+
+    # 2 – Pet-Friendly
+    aff[renters["has_cats"].values == 1, 2] += 0.5
+    aff[renters["has_dogs"].values == 1, 2] += 0.5
+
+    # 3 – Premium / Luxury
+    aff[bmax > 1500,                            3] += 0.6
+    aff[renters["wants_furnished"].values == 1, 3] += 0.5
+    aff[renters["income"].values > 80_000,      3] += 0.3
+
+    # 4 – Urban Convenience
+    if "type_pref_apartment" in renters.columns:
+        aff[renters["type_pref_apartment"].values == 1, 4] += 0.6
+    aff[(bmax >= 900) & (bmax <= 1500), 4] += 0.4
+
+    # 5 – Accessible Modern
+    aff[renters["needs_wheelchair"].values == 1, 5] += 1.0
+    aff[renters["has_ev"].values == 1,           5] += 0.8
+
+    return np.argmax(aff, axis=1).astype(np.int8)
+
+
 # ── main ─────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -496,12 +553,21 @@ def main() -> None:
     print(f"  saved renter profiles -> {args.out_renters_csv}")
 
     print(f"Building pairs ({args.pairs_per_renter} per renter) ...")
-    renter_rows, listing_rows, labels = _build_pairs(
+    renter_rows, listing_rows, labels, raw_scores = _build_pairs(
         renters, listings, args.pairs_per_renter, rng, args.pos_threshold,
     )
     print(f"  total pairs: {len(labels):,}  "
           f"(pos={labels.sum():,.0f}  neg={len(labels) - labels.sum():,.0f}  "
           f"ratio={labels.mean():.2%})")
+
+    # ── compute category labels for evaluation (not used as model features) ──
+    # user_cats: each renter's primary category (0-5) broadcast across their pairs
+    user_cats_per_renter = _compute_user_primary_cats(renters)
+    user_cats = np.repeat(user_cats_per_renter, args.pairs_per_renter).astype(np.int8)
+    # item_cats: each listing's category (0-5) from the deterministic rule cascade
+    item_cats = categorize_listings(listing_rows).values.astype(np.int8)
+    print(f"  user_cats distribution: { {i: int((user_cats==i).sum()) for i in range(6)} }")
+    print(f"  item_cats distribution: { {i: int((item_cats==i).sum()) for i in range(6)} }")
 
     # ── load and join liked listings aggregate onto renter pair rows ──
     if args.liked_listings_csv and args.liked_listings_csv.exists():
@@ -525,6 +591,9 @@ def main() -> None:
         user_features=user_features,
         item_features=item_features,
         labels=labels,
+        raw_scores=raw_scores,
+        user_cats=user_cats,
+        item_cats=item_cats,
     )
     print(f"  saved training pairs -> {args.out_npz}")
 
@@ -542,6 +611,7 @@ def main() -> None:
             pd.get_dummies(listing_rows["parking_options"].fillna(""), prefix="parking").columns.tolist()
         ),
         "has_liked_listings": all(c in renter_rows.columns for c in ["liked_mean_price"]),
+        "has_category_labels": True,
     }
     meta_path = args.out_npz.parent / "feature_meta.json"
     with open(meta_path, "w") as f:
