@@ -8,6 +8,7 @@ from typing import Optional
 import os
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
+from app.services.listing_payloads import hydrate_listing_image_collection, hydrate_listing_images
 from app.models import ListingCreate, ListingUpdate
 
 router = APIRouter(prefix="/api", tags=["listings"])
@@ -67,11 +68,13 @@ async def list_listings(
     
     listings = await client.select(
         table="listings",
+        columns="*,listing_photos(photo_url,sort_order)",
         filters=filters,
         limit=limit,
         offset=offset,
         order="created_at.desc"
     )
+    listings = hydrate_listing_image_collection(listings)
     
     return {
         "status": "success",
@@ -93,7 +96,8 @@ async def get_listing(
     
     listing = await client.select_one(
         table="listings",
-        id_value=listing_id
+        id_value=listing_id,
+        columns="*,listing_photos(photo_url,sort_order)",
     )
     
     if not listing:
@@ -101,7 +105,7 @@ async def get_listing(
     
     return {
         "status": "success",
-        "data": listing
+        "data": hydrate_listing_images(listing)
     }
 
 

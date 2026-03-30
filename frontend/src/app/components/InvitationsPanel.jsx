@@ -229,7 +229,9 @@ export function InvitationsPanel({ user, authState }) {
                   <IconUsers size={16} />
                   <div>
                     <Text size="xs" c="dimmed">Group Size</Text>
-                    <Text size="sm" fw={500}>{invitation.target_group_size} people</Text>
+                    <Text size="sm" fw={500}>
+                      {invitation.target_group_size != null ? `${invitation.target_group_size} people` : 'Unlimited'}
+                    </Text>
                   </div>
                 </Group>
               </Paper>

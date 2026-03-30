@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Container, Title, Text, Grid, Card, Badge, Button, Group, Stack, Box, ThemeIcon } from '@mantine/core';
-import { IconHeart } from '@tabler/icons-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ImageWithFallback } from '../components/ImageWithFallback';
+import { useAuth } from '../contexts/AuthContext';
 import { getLikedListings } from '../discover/likedListings';
 
 export default function MatchesPage() {
@@ -19,55 +20,160 @@ export default function MatchesPage() {
 
 function MatchesPageContent() {
   const router = useRouter();
-  const [listings, setListings] = useState([]);
+  const { user, authState } = useAuth();
+  const userId = user?.profile?.id;
 
-  // Read from localStorage on mount (and whenever the page gains focus)
-  const loadLiked = () => setListings(getLikedListings());
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const fetchMatches = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      let prefs = {};
+      let behaviorSampleSize;
+      const liked = getLikedListings();
+      const likedExtras = {};
+
+      if (userId && authState?.accessToken) {
+        const prefRes = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
+          headers: { Authorization: `Bearer ${authState.accessToken}` },
+        });
+        if (prefRes.ok) {
+          const prefData = await prefRes.json();
+          prefs = prefData.data || prefData || {};
+        }
+
+        try {
+          const behaviorRes = await fetch('http://localhost:8000/api/interactions/behavior/me?days=180', {
+            headers: { Authorization: `Bearer ${authState.accessToken}` },
+          });
+          if (behaviorRes.ok) {
+            const behaviorPayload = await behaviorRes.json();
+            const behavior = behaviorPayload?.data || {};
+            if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
+            if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
+            if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
+            if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
+          }
+        } catch {
+          // Behavior vector is optional.
+        }
+      }
+
+      if (liked.length > 0) {
+        const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
+        if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
+        if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
+        if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
+      }
+
+      const body = {
+        budget_min: prefs.budget_min ?? undefined,
+        budget_max: prefs.budget_max ?? undefined,
+        target_country: prefs.target_country ?? undefined,
+        target_state_province: prefs.target_state_province ?? undefined,
+        target_city: prefs.target_city ?? undefined,
+        required_bedrooms: prefs.required_bedrooms ?? undefined,
+        target_bathrooms: prefs.target_bathrooms ?? undefined,
+        desired_beds: prefs.required_bedrooms ?? undefined,
+        desired_baths: prefs.target_bathrooms ?? undefined,
+        target_deposit_amount: prefs.target_deposit_amount ?? undefined,
+        furnished_preference: prefs.furnished_preference ?? undefined,
+        gender_policy: prefs.gender_policy ?? undefined,
+        target_lease_type: prefs.target_lease_type ?? undefined,
+        target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+        move_in_date: prefs.move_in_date ?? undefined,
+        target_furnished: prefs.target_furnished ?? undefined,
+        wants_furnished:
+          prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
+            ? 1
+            : prefs.target_furnished === true
+              ? 1
+              : undefined,
+        pref_lat: prefs.target_latitude ?? undefined,
+        pref_lon: prefs.target_longitude ?? undefined,
+        top_n: 100,
+        offset: 0,
+        behavior_sample_size: behaviorSampleSize,
+        ...likedExtras,
+      };
+
+      const res = await fetch('http://localhost:8000/api/recommendations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) throw new Error('Failed to fetch ranked matches');
+
+      const data = await res.json();
+      setListings(data.recommendations || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, authState?.accessToken]);
 
   useEffect(() => {
-    loadLiked();
-    window.addEventListener('focus', loadLiked);
-    return () => window.removeEventListener('focus', loadLiked);
-  }, []);
+    fetchMatches();
+    window.addEventListener('focus', fetchMatches);
+    return () => window.removeEventListener('focus', fetchMatches);
+  }, [fetchMatches]);
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
 
       <Container size="xl" style={{ padding: '4rem 3rem' }} data-tour="matches-content">
-        {/* Header */}
         <Stack align="center" gap="lg" mb={64}>
           <Title
             order={1}
             style={{ fontSize: '2.5rem', fontWeight: 500, color: '#111', textAlign: 'center' }}
           >
-            Your Matches
+            Your Top Matches
           </Title>
           <Text size="lg" c="dimmed" style={{ maxWidth: '42rem', textAlign: 'center', color: '#666' }}>
-            Listings you've liked while browsing Discover
+            Top 100 listings ranked from your preferences and recent swipe history
           </Text>
         </Stack>
 
-        {/* Empty state */}
-        {listings.length === 0 && (
+        {loading && (
           <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
-            <ThemeIcon size={72} radius="xl" variant="light" color="teal">
-              <IconHeart size={36} />
-            </ThemeIcon>
-            <Stack align="center" gap="xs">
-              <Title order={3} style={{ color: '#212529' }}>No liked listings yet</Title>
-              <Text size="md" c="dimmed" ta="center" maw={380}>
-                Head to Discover and swipe right on listings you like — they'll appear here.
-              </Text>
-            </Stack>
-            <Button size="md" color="teal" onClick={() => router.push('/discover')}>
-              Start Discovering
+            <Text size="md" c="dimmed">Loading your ranked matches…</Text>
+          </Stack>
+        )}
+
+        {!loading && error && (
+          <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
+            <Text size="md" c="red">{error}</Text>
+            <Button size="md" color="teal" onClick={fetchMatches}>
+              Retry
             </Button>
           </Stack>
         )}
 
-        {/* Listings grid */}
-        {listings.length > 0 && (
+        {!loading && !error && listings.length === 0 && (
+          <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
+            <ThemeIcon size={72} radius="xl" variant="light" color="teal">
+              <IconSparkles size={36} />
+            </ThemeIcon>
+            <Stack align="center" gap="xs">
+              <Title order={3} style={{ color: '#212529' }}>No ranked matches yet</Title>
+              <Text size="md" c="dimmed" ta="center" maw={420}>
+                Update your preferences or broaden a hard constraint to surface more listings.
+              </Text>
+            </Stack>
+            <Button size="md" color="teal" onClick={() => router.push('/discover')}>
+              Go To Discover
+            </Button>
+          </Stack>
+        )}
+
+        {!loading && !error && listings.length > 0 && (
           <Grid gutter="xl">
             {listings.map((listing) => {
               const image =

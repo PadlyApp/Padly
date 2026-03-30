@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 from app.ai.recommender import score_listings
+from app.services.listing_payloads import hydrate_listing_image_collection
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
 
@@ -71,6 +72,7 @@ class UserPreferences(BaseModel):
 
     # How many results to return (default 20, max 100)
     top_n: Optional[int] = 20
+    offset: Optional[int] = 0
 
 
 class RecommendedListing(BaseModel):
@@ -96,11 +98,15 @@ class RecommendedListing(BaseModel):
     longitude: Optional[float] = None
     available_from: Optional[str] = None
     amenities: Optional[Dict[str, Any]] = None
+    images: Optional[List[str]] = None
 
 
 class RecommendationsResponse(BaseModel):
     status: str
     count: int
+    offset: int
+    total_available: int
+    has_more: bool
     recommendations: List[RecommendedListing]
 
 
@@ -132,27 +138,39 @@ async def get_recommendations(preferences: UserPreferences):
         client = SupabaseHTTPClient()
         listings = await client.select(
             table="listings",
+            columns="*,listing_photos(photo_url,sort_order)",
             filters={"status": "eq.active"},
-            limit=500,
+            limit=5000,
         )
+        listings = hydrate_listing_image_collection(listings)
     except Exception as e:
         print(f"[recommendations] listings fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch listings: {str(e)}")
 
     if not listings:
-        return RecommendationsResponse(status="success", count=0, recommendations=[])
+        return RecommendationsResponse(
+            status="success",
+            count=0,
+            offset=0,
+            total_available=0,
+            has_more=False,
+            recommendations=[],
+        )
 
-    user = preferences.model_dump(exclude={"top_n"})
+    user = preferences.model_dump(exclude={"top_n", "offset"})
     top_n = min(preferences.top_n or 20, 100)
+    offset = max(preferences.offset or 0, 0)
 
     try:
-        scored = score_listings(user, listings, top_n=top_n)
+        scored = score_listings(user, listings, top_n=len(listings))
     except Exception as e:
         print(f"[recommendations] scoring error: {e}")
         raise HTTPException(status_code=500, detail=f"Scoring failed: {str(e)}")
 
+    paged = scored[offset:offset + top_n]
+
     recommendations = []
-    for item in scored:
+    for item in paged:
         recommendations.append(RecommendedListing(
             listing_id=str(item.get("id", "")),
             match_score=item["match_score"],
@@ -175,10 +193,14 @@ async def get_recommendations(preferences: UserPreferences):
             longitude=float(item["longitude"]) if item.get("longitude") else None,
             available_from=str(item["available_from"]) if item.get("available_from") else None,
             amenities=item.get("amenities"),
+            images=item.get("images"),
         ))
 
     return RecommendationsResponse(
         status="success",
         count=len(recommendations),
+        offset=offset,
+        total_available=len(scored),
+        has_more=(offset + len(recommendations)) < len(scored),
         recommendations=recommendations,
     )

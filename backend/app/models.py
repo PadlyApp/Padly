@@ -184,6 +184,7 @@ class ListingBase(BaseModel):
     area_sqft: Optional[int] = None
     furnished: bool = False
     price_per_month: Decimal
+    price_per_room: Optional[Decimal] = None
     utilities_included: bool = False
     deposit_amount: Optional[Decimal] = None
     address_line_1: Optional[str] = None
@@ -219,6 +220,7 @@ class ListingUpdate(BaseModel):
     area_sqft: Optional[int] = None
     furnished: Optional[bool] = None
     price_per_month: Optional[Decimal] = None
+    price_per_room: Optional[Decimal] = None
     utilities_included: Optional[bool] = None
     deposit_amount: Optional[Decimal] = None
     address_line_1: Optional[str] = None
@@ -351,7 +353,7 @@ class RoommateGroupBase(BaseModel):
 
     move_in_date: Optional[date] = None
     target_move_in_date: Optional[date] = None
-    target_group_size: int = 2
+    target_group_size: Optional[int] = None
 
     # Personal-aligned hard/soft fields
     required_bedrooms: Optional[int] = None
