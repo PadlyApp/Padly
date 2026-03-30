@@ -787,7 +787,7 @@ function GroupsPageContent() {
                       <Group gap={4}>
                         <IconUsers size={16} color="gray" />
                         <Text size="sm" c="dimmed">
-                          {group.target_group_size}
+                          {group.target_group_size ?? 'Unlimited'}
                         </Text>
                       </Group>
                     </Group>

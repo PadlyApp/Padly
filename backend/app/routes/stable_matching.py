@@ -24,6 +24,7 @@ import os
 
 from app.dependencies.supabase import get_admin_client
 from app.models import ListingResponse, RoommateGroupResponse
+from app.services.location_matching import cities_match, filter_listings_for_location
 from app.services.stable_matching import (
     # Phase 1: Filters
     get_eligible_listings,
@@ -45,6 +46,52 @@ from app.services.stable_matching import (
 
 router = APIRouter(prefix="/api/stable-matches", tags=["Stable Matching"])
 logger = logging.getLogger(__name__)
+
+
+def _fetch_all_active_listings(supabase) -> List[Dict]:
+    page_size = 1000
+    page = 0
+    listings: List[Dict] = []
+    while True:
+        batch = (
+            supabase.table("listings")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        listings.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return listings
+
+
+def _fetch_all_active_groups(supabase) -> List[Dict]:
+    page_size = 1000
+    page = 0
+    groups: List[Dict] = []
+    while True:
+        batch = (
+            supabase.table("roommate_groups")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        groups.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return groups
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -210,8 +257,15 @@ async def run_matching(request: RunMatchingRequest):
         
         # Fetch all data from database
         logger.info("Fetching data from database...")
-        listings_response = supabase.table('listings').select('*').eq('city', request.city).eq('status', 'active').execute()
-        groups_response = supabase.table('roommate_groups').select('*').eq('target_city', request.city).eq('status', 'active').execute()
+        listings_response_data = filter_listings_for_location(
+            _fetch_all_active_listings(supabase),
+            target_city=request.city,
+        )
+        groups_response_data = [
+            group
+            for group in _fetch_all_active_groups(supabase)
+            if cities_match(request.city, group.get("target_city"))
+        ]
         
         # Parse data using Pydantic models for type safety and validation
         logger.info("Parsing data with Pydantic models...")
@@ -232,11 +286,11 @@ async def run_matching(request: RunMatchingRequest):
         # Parse with Pydantic for validation, then convert Decimals to floats
         all_listings_raw = [
             convert_decimals_to_float(ListingResponse(**listing).model_dump())
-            for listing in listings_response.data
+            for listing in listings_response_data
         ]
         all_groups_raw = [
             convert_decimals_to_float(RoommateGroupResponse(**group).model_dump())
-            for group in groups_response.data
+            for group in groups_response_data
         ]
         
         # 🔥 OPTION 3: Exclude confirmed groups and listings from matching pool

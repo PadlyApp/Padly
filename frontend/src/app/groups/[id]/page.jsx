@@ -605,7 +605,7 @@ export default function GroupDetailPage() {
   const acceptedMemberCount = acceptedMembers.length;
   
   // Check if group is full (only if we have a valid target size)
-  const isGroupFull = group.target_group_size > 0 && acceptedMemberCount >= group.target_group_size;
+  const isGroupFull = group.target_group_size != null && acceptedMemberCount >= group.target_group_size;
 
   const statusColor = {
     active: 'blue',
@@ -745,7 +745,9 @@ export default function GroupDetailPage() {
                   <div>
                     <Text size="xs" c="dimmed">Group Size</Text>
                     <Text fw={500}>
-                      {acceptedMemberCount}/{group.target_group_size || '?'}
+                      {group.target_group_size != null
+                        ? `${acceptedMemberCount}/${group.target_group_size}`
+                        : `${acceptedMemberCount} members`}
                     </Text>
                   </div>
                 </Group>

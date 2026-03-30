@@ -7,6 +7,7 @@ Triggers: member join/leave, preference updates.
 
 from typing import Dict, Any
 from datetime import datetime
+from app.services.location_matching import filter_listings_for_location
 
 
 async def trigger_group_rematching(group_id: str) -> Dict[str, Any]:
@@ -105,7 +106,33 @@ async def trigger_group_rematching(group_id: str) -> Dict[str, Any]:
     min_bedrooms = agg_prefs.get('target_bedrooms', group.get('current_member_count', 2))
     
     try:
-        listings = supabase.table('listings').select('*').eq('status', 'active').ilike('city', city).gte('number_of_bedrooms', min_bedrooms).execute().data
+        page_size = 1000
+        page = 0
+        listings = []
+        while True:
+            batch = (
+                supabase.table('listings')
+                .select('*')
+                .eq('status', 'active')
+                .gte('number_of_bedrooms', min_bedrooms)
+                .range(page * page_size, page * page_size + page_size - 1)
+                .execute()
+                .data
+                or []
+            )
+            if not batch:
+                break
+            listings.extend(batch)
+            if len(batch) < page_size:
+                break
+            page += 1
+
+        listings = filter_listings_for_location(
+            listings,
+            target_city=group.get('target_city'),
+            target_state=group.get('target_state_province'),
+            target_country=group.get('target_country'),
+        )
     except Exception as e:
         return {'status': 'error', 'group_id': group_id, 'message': f'Fetch listings failed: {e}', 'matches_found': 0, 'old_matches_deleted': old_count}
     

@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 from datetime import datetime
 import re
 import logging
+from app.services.location_matching import locations_match, normalize_city_name, normalize_state
 from app.services.preferences_contract import lease_types_compatible
 
 logger = logging.getLogger(__name__)
@@ -28,17 +29,21 @@ MAX_SCORE = 100
 
 def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[str]]:
     """Check all hard constraints. Returns (passes, rejection_reason)."""
-    
-    # City match
-    group_city = (group.get('target_city') or '').strip().lower()
-    listing_city = (listing.get('city') or '').strip().lower()
-    if group_city != listing_city:
-        return False, f"city_mismatch_{group_city}_vs_{listing_city}"
-    
-    # State match (if both specified)
-    group_state = (group.get('target_state_province') or '').strip().lower()
-    listing_state = (listing.get('state_province') or '').strip().lower()
-    if group_state and listing_state and group_state != listing_state:
+
+    group_city = normalize_city_name(group.get("target_city"))
+    listing_city = normalize_city_name(listing.get("city"))
+    group_state = normalize_state(group.get("target_state_province"))
+    listing_state = normalize_state(listing.get("state_province"))
+    if not locations_match(
+        target_city=group.get("target_city"),
+        listing_city=listing.get("city"),
+        target_state=group.get("target_state_province"),
+        listing_state=listing.get("state_province"),
+        target_country=group.get("target_country", "USA"),
+        listing_country=listing.get("country", "USA"),
+    ):
+        if group_city != listing_city:
+            return False, f"city_mismatch_{group_city}_vs_{listing_city}"
         return False, f"state_mismatch_{group_state}_vs_{listing_state}"
     
     # Budget range

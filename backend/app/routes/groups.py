@@ -10,6 +10,7 @@ from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
 from app.services.controlled_vocab import validate_city_name, validate_neighborhoods
 from app.services.behavior_features import build_group_behavior_vector
+from app.services.location_matching import filter_listings_for_location
 from app.services.preferences_contract import (
     normalize_lease_type,
     resolve_furnished_preference,
@@ -21,6 +22,37 @@ from datetime import datetime
 import os
 
 router = APIRouter(prefix="/api/roommate-groups", tags=["Roommate Groups"])
+
+
+def _fetch_active_listings_for_group_location(supabase: Any, group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Load all active listings, then apply metro-aware location matching in Python."""
+    page_size = 1000
+    page = 0
+    listings: List[Dict[str, Any]] = []
+
+    while True:
+        batch = (
+            supabase.table("listings")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        listings.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+
+    return filter_listings_for_location(
+        listings,
+        target_city=group.get("target_city"),
+        target_state=group.get("target_state_province"),
+        target_country=group.get("target_country"),
+    )
 
 
 # =============================================================================
@@ -219,7 +251,7 @@ class GroupWithMembers(BaseModel):
     budget_per_person_min: Optional[float]
     budget_per_person_max: Optional[float]
     target_move_in_date: Optional[str]
-    target_group_size: int
+    target_group_size: Optional[int]
     status: str
     created_at: datetime
     updated_at: datetime
@@ -1102,7 +1134,8 @@ async def request_join_group(
         .eq('status', 'accepted')\
         .execute()
     
-    if len(current_members.data) >= group['target_group_size']:
+    target_size = group.get('target_group_size')
+    if target_size is not None and len(current_members.data) >= target_size:
         raise HTTPException(status_code=400, detail="Group is already full")
     
     # Create join request (pending invitation)
@@ -2004,14 +2037,7 @@ async def get_eligible_listings_for_group(
             detail="Group must have a target city to find eligible listings"
         )
     
-    # Get active listings in the same city
-    listings_response = supabase.table('listings')\
-        .select('*')\
-        .eq('city', target_city)\
-        .eq('status', 'active')\
-        .execute()
-    
-    all_listings = listings_response.data if listings_response.data else []
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
     
     if not all_listings:
         return {
@@ -2113,13 +2139,7 @@ async def get_ranked_listings_for_group(
     if not target_city:
         raise HTTPException(status_code=400, detail="Group must have a target city")
 
-    listings_response = supabase.table('listings')\
-        .select('*')\
-        .eq('city', target_city)\
-        .eq('status', 'active')\
-        .execute()
-
-    all_listings = listings_response.data if listings_response.data else []
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
     if not all_listings:
         return {
             "status": "success",
@@ -2247,14 +2267,7 @@ async def get_neural_ranked_listings_for_group(
     if not target_city:
         raise HTTPException(status_code=400, detail="Group must have a target city")
 
-    listings_response = (
-        supabase.table("listings")
-        .select("*")
-        .eq("city", target_city)
-        .eq("status", "active")
-        .execute()
-    )
-    all_listings = listings_response.data or []
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
     if not all_listings:
         return {
             "status": "success",

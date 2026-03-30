@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from app.services.location_matching import (
+    cities_match as _shared_cities_match,
+    normalize_country as _shared_normalize_country,
+    normalize_state as _shared_normalize_state,
+)
 from app.services.preferences_contract import (
     lease_types_compatible,
     normalize_gender_policy,
@@ -507,14 +512,26 @@ def _encode_listing(listing: Dict) -> np.ndarray:
 # ── hard constraint filter ─────────────────────────────────────────────────
 
 def _normalize_country(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw in {"us", "usa", "united states", "united states of america"}:
-        return "us"
-    return raw
+    return _shared_normalize_country(value)
 
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _normalize_state(value: Any) -> str:
+    return _shared_normalize_state(value)
+
+
+def _normalize_city(value: Any) -> str:
+    raw = _normalize_text(value)
+    if " (" in raw:
+        raw = raw.split(" (", 1)[0].strip()
+    return raw
+
+
+def _city_matches(target: str, listing: str) -> bool:
+    return _shared_cities_match(target, listing)
 
 
 def _parse_iso_date(value: Any) -> Optional[date]:
@@ -550,11 +567,11 @@ def _passes_hard_constraints(user: Dict, listing: Dict) -> bool:
     # Location hard constraints
     target_city = _normalize_text(user.get("target_city"))
     listing_city = _normalize_text(listing.get("city"))
-    if target_city and listing_city and target_city != listing_city:
+    if target_city and listing_city and not _city_matches(target_city, listing_city):
         return False
 
-    target_state = _normalize_text(user.get("target_state_province"))
-    listing_state = _normalize_text(listing.get("state_province"))
+    target_state = _normalize_state(user.get("target_state_province"))
+    listing_state = _normalize_state(listing.get("state_province"))
     if target_state and listing_state and target_state != listing_state:
         return False
 
@@ -583,13 +600,11 @@ def _passes_hard_constraints(user: Dict, listing: Dict) -> bool:
     if target_bathrooms > 0 and listing_bathrooms > 0 and listing_bathrooms < target_bathrooms:
         return False
 
-    # Deposit hard cap (fallback to rent when explicit deposit is absent)
+    # Deposit hard cap only when an explicit deposit is known.
     target_deposit = _safe_float(user.get("target_deposit_amount"))
     if target_deposit > 0:
         listing_deposit = _safe_float(listing.get("deposit_amount"))
-        if listing_deposit <= 0:
-            listing_deposit = price
-        if listing_deposit > target_deposit:
+        if listing_deposit > 0 and listing_deposit > target_deposit:
             return False
 
     # Furnished is hard only when explicitly required

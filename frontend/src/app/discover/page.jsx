@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group, Progress, Modal, Badge, Divider } from '@mantine/core';
 import { useHotkeys } from '@mantine/hooks';
-import { IconX, IconHeart, IconRefresh, IconInfoCircle } from '@tabler/icons-react';
+import { IconX, IconHeart, IconRefresh, IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
@@ -54,15 +54,19 @@ function DiscoverContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedListing, setExpandedListing] = useState(null);
+  const [expandedImageIndex, setExpandedImageIndex] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const swipeSessionIdRef = useRef(null);
+  const nextOffsetRef = useRef(0);
 
-  const fetchRecommendations = useCallback(async () => {
+  const fetchRecommendations = useCallback(async ({ append = false } = {}) => {
     setLoading(true);
     setError(null);
 
     try {
       // Fetch user preferences
       let prefs = {};
+      const swipedIds = new Set();
       if (userId && authState?.accessToken) {
         const prefRes = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
           headers: { Authorization: `Bearer ${authState.accessToken}` },
@@ -70,6 +74,20 @@ function DiscoverContent() {
         if (prefRes.ok) {
           const prefData = await prefRes.json();
           prefs = prefData.data || prefData || {};
+        }
+
+        try {
+          const swipesRes = await fetch('http://localhost:8000/api/interactions/swipes/me?limit=500', {
+            headers: { Authorization: `Bearer ${authState.accessToken}` },
+          });
+          if (swipesRes.ok) {
+            const swipesPayload = await swipesRes.json();
+            for (const event of swipesPayload?.data || []) {
+              if (event?.listing_id) swipedIds.add(event.listing_id);
+            }
+          }
+        } catch {
+          // Swipe history fetch is optional; fall back to local liked cache only.
         }
       }
 
@@ -130,7 +148,8 @@ function DiscoverContent() {
               : undefined,
         pref_lat:        prefs.target_latitude   ?? undefined,
         pref_lon:        prefs.target_longitude  ?? undefined,
-        top_n: 30,
+        top_n: 50,
+        offset: append ? nextOffsetRef.current : 0,
         behavior_sample_size: behaviorSampleSize,
         ...likedExtras,
       };
@@ -145,12 +164,22 @@ function DiscoverContent() {
 
       const data = await res.json();
 
-      // Filter out listings already liked
+      // Filter out listings already seen via swipes or saved likes.
       const likedIds = new Set(getLikedListings().map((l) => l.listing_id));
-      const fresh = (data.recommendations || []).filter((l) => !likedIds.has(l.listing_id));
+      const fresh = (data.recommendations || []).filter(
+        (l) => !likedIds.has(l.listing_id) && !swipedIds.has(l.listing_id)
+      );
 
-      setListings(fresh);
-      setCurrentIndex(0);
+      setHasMore(Boolean(data.has_more));
+      nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
+
+      if (append) {
+        setListings((prev) => [...prev, ...fresh]);
+      } else {
+        setListings(fresh);
+        setCurrentIndex(0);
+        nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -161,6 +190,17 @@ function DiscoverContent() {
   useEffect(() => {
     fetchRecommendations();
   }, [fetchRecommendations]);
+
+  useEffect(() => {
+    setExpandedImageIndex(0);
+  }, [expandedListing?.listing_id]);
+
+  useEffect(() => {
+    const remaining = listings.length - currentIndex;
+    if (!loading && !error && hasMore && remaining === 0) {
+      fetchRecommendations({ append: true });
+    }
+  }, [currentIndex, listings.length, loading, error, hasMore, fetchRecommendations]);
 
   const persistSwipeEvent = useCallback(async ({ listing, action, position, startedAt }) => {
     if (!authState?.accessToken || !userId || !listing?.listing_id) return;
@@ -245,7 +285,7 @@ function DiscoverContent() {
   };
 
   const remaining = listings.length - currentIndex;
-  const isDone = !loading && !error && remaining === 0;
+  const isDone = !loading && !error && remaining === 0 && !hasMore;
 
   useHotkeys([
     ['ArrowLeft', () => handleButton('left')],
@@ -406,7 +446,10 @@ function DiscoverContent() {
             if (typeof i === 'string') { try { return JSON.parse(i); } catch { return []; } }
             return [];
           })();
-          const heroImage = imgs[0] || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+          const safeImageIndex = imgs.length > 0
+            ? Math.min(expandedImageIndex, imgs.length - 1)
+            : 0;
+          const heroImage = imgs[safeImageIndex] || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
 
           const amenities = expandedListing.amenities && typeof expandedListing.amenities === 'object'
             ? expandedListing.amenities
@@ -427,6 +470,49 @@ function DiscoverContent() {
                   alt={expandedListing.title || 'Listing'}
                   style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                 />
+
+                {imgs.length > 1 && (
+                  <>
+                    <Box
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: 12,
+                        transform: 'translateY(-50%)',
+                      }}
+                    >
+                      <ActionIcon
+                        variant="filled"
+                        color="dark"
+                        radius="xl"
+                        size="lg"
+                        onClick={() => setExpandedImageIndex((prev) => (prev - 1 + imgs.length) % imgs.length)}
+                        style={{ opacity: 0.85 }}
+                      >
+                        <IconChevronLeft size={18} />
+                      </ActionIcon>
+                    </Box>
+                    <Box
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: 12,
+                        transform: 'translateY(-50%)',
+                      }}
+                    >
+                      <ActionIcon
+                        variant="filled"
+                        color="dark"
+                        radius="xl"
+                        size="lg"
+                        onClick={() => setExpandedImageIndex((prev) => (prev + 1) % imgs.length)}
+                        style={{ opacity: 0.85 }}
+                      >
+                        <IconChevronRight size={18} />
+                      </ActionIcon>
+                    </Box>
+                  </>
+                )}
 
                 {/* Close button */}
                 <Box
@@ -461,6 +547,18 @@ function DiscoverContent() {
                   </Badge>
                 )}
 
+                {imgs.length > 1 && (
+                  <Badge
+                    variant="filled"
+                    color="dark"
+                    size="sm"
+                    radius="sm"
+                    style={{ position: 'absolute', bottom: 14, right: 14, fontWeight: 700 }}
+                  >
+                    {safeImageIndex + 1} / {imgs.length}
+                  </Badge>
+                )}
+
                 {/* Bottom gradient + title overlay */}
                 <Box style={{
                   position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -477,6 +575,42 @@ function DiscoverContent() {
                   )}
                 </Box>
               </Box>
+
+              {imgs.length > 1 && (
+                <Group
+                  gap="xs"
+                  wrap="nowrap"
+                  style={{
+                    overflowX: 'auto',
+                    padding: '0.75rem 1rem 0',
+                  }}
+                >
+                  {imgs.map((img, index) => (
+                    <Box
+                      key={`${expandedListing.listing_id || expandedListing.title || 'listing'}-${index}`}
+                      onClick={() => setExpandedImageIndex(index)}
+                      style={{
+                        minWidth: 72,
+                        width: 72,
+                        height: 56,
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        border: index === safeImageIndex ? '2px solid #12b886' : '2px solid transparent',
+                        boxShadow: index === safeImageIndex ? '0 0 0 1px rgba(18,184,134,0.18)' : 'none',
+                        backgroundColor: '#f3f4f6',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ImageWithFallback
+                        src={img}
+                        alt={`${expandedListing.title || 'Listing'} ${index + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    </Box>
+                  ))}
+                </Group>
+              )}
 
               {/* Details section */}
               <Box style={{ padding: '1.5rem' }}>

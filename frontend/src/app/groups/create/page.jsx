@@ -16,7 +16,8 @@ import {
   Group,
   Paper,
   Stepper,
-  Box
+  Box,
+  Switch
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
@@ -39,6 +40,7 @@ export default function CreateGroupPage() {
   const [budgetMin, setBudgetMin] = useState(null);
   const [budgetMax, setBudgetMax] = useState(null);
   const [moveInDate, setMoveInDate] = useState(null);
+  const [hasGroupSizeLimit, setHasGroupSizeLimit] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
 
   useEffect(() => {
@@ -91,6 +93,15 @@ export default function CreateGroupPage() {
       return;
     }
 
+    if (hasGroupSizeLimit && !groupSize) {
+      notifications.show({
+        title: 'Missing Group Size',
+        message: 'Set a group size or turn off the member limit',
+        color: 'red',
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -119,7 +130,7 @@ export default function CreateGroupPage() {
           budget_per_person_min: budgetMin,
           budget_per_person_max: budgetMax,
           target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
-          target_group_size: groupSize,
+          target_group_size: hasGroupSizeLimit ? groupSize : null,
           status: 'active'
         })
       });
@@ -221,14 +232,23 @@ export default function CreateGroupPage() {
                   nothingFoundMessage="No cities found"
                 />
 
-                <NumberInput
-                  label="Group Size"
-                  description="How many people are looking for housing together?"
-                  min={2}
-                  max={10}
-                  value={groupSize}
-                  onChange={setGroupSize}
+                <Switch
+                  label="Set a member limit"
+                  description="Leave this off if the group should stay open with no cap."
+                  checked={hasGroupSizeLimit}
+                  onChange={(event) => setHasGroupSizeLimit(event.currentTarget.checked)}
                 />
+
+                {hasGroupSizeLimit && (
+                  <NumberInput
+                    label="Group Size Limit"
+                    description="How many people are looking for housing together?"
+                    min={2}
+                    max={50}
+                    value={groupSize}
+                    onChange={setGroupSize}
+                  />
+                )}
               </Stack>
             </Card>
           </Stepper.Step>
