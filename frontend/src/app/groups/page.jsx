@@ -29,6 +29,7 @@ import {
   Collapse,
   Divider,
   Progress,
+  SegmentedControl,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar, IconInbox, IconChevronDown, IconChevronUp, IconAlertCircle, IconHome, IconUserSearch } from '@tabler/icons-react';
@@ -236,8 +237,22 @@ function GroupsPageContent() {
   const [searchCity, setSearchCity] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
   const tabFromUrl = searchParams.get('tab');
+  const myTabFromUrl = searchParams.get('myTab');
+  const peopleTabFromUrl = searchParams.get('peopleTab');
   const [activeTab, setActiveTab] = useState(
-    tabFromUrl === 'invitations' ? 'invitations' : tabFromUrl === 'people' ? 'people' : tabFromUrl === 'my-groups' ? 'my-groups' : 'all'
+    tabFromUrl === 'invitations'
+      ? 'my-groups'
+      : tabFromUrl === 'people'
+        ? 'people'
+        : tabFromUrl === 'my-groups'
+          ? 'my-groups'
+          : 'all'
+  );
+  const [myGroupsTab, setMyGroupsTab] = useState(
+    tabFromUrl === 'invitations' || myTabFromUrl === 'invitations' ? 'invitations' : 'groups'
+  );
+  const [peopleTab, setPeopleTab] = useState(
+    peopleTabFromUrl === 'inbox' ? 'inbox' : 'suggested'
   );
   const [userGroupIds, setUserGroupIds] = useState(new Set()); // Non-solo groups user is in (for "My Group" badge)
   const [userInAnyGroup, setUserInAnyGroup] = useState(false); // True if user is in ANY group (including solo)
@@ -254,13 +269,13 @@ function GroupsPageContent() {
   const myId = user?.profile?.id;
 
   useEffect(() => {
-    if (activeTab === 'invitations' || activeTab === 'people') return;
+    if (activeTab === 'people' || (activeTab === 'my-groups' && myGroupsTab === 'invitations')) return;
     fetchGroups();
     if (authState?.accessToken) {
       fetchUserMemberships();
       fetchRecommendedIds();
     }
-  }, [statusFilter, activeTab, authState]);
+  }, [statusFilter, activeTab, myGroupsTab, authState]);
 
   // --- People tab queries ---
   const token = authState?.accessToken;
@@ -482,7 +497,7 @@ function GroupsPageContent() {
 
         notifications.show({
           title: 'Join Request Sent!',
-          message: 'Check the Invitations tab to accept and join the group',
+          message: 'Check My Group > Invitations to accept and join the group',
           color: 'green',
           icon: <IconCheck />,
         });
@@ -558,12 +573,7 @@ function GroupsPageContent() {
             </Tabs.Tab>
             {authState?.accessToken && (
               <Tabs.Tab value="my-groups" leftSection={<IconUsers size={16} />}>
-                My Groups
-              </Tabs.Tab>
-            )}
-            {authState?.accessToken && (
-              <Tabs.Tab value="invitations" leftSection={<IconInbox size={16} />}>
-                Invitations
+                My Group
               </Tabs.Tab>
             )}
             {authState?.accessToken && (
@@ -590,62 +600,69 @@ function GroupsPageContent() {
               </Alert>
             )}
 
-            <Tabs defaultValue="suggested" keepMounted={false}>
-              <Tabs.List>
-                <Tabs.Tab value="suggested" leftSection={<IconUsers size={16} />}>Suggested</Tabs.Tab>
-                <Tabs.Tab value="inbox">Inbox</Tabs.Tab>
-              </Tabs.List>
+            <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }}>
+              <Group justify="flex-end" align="center" wrap="wrap">
+                <SegmentedControl
+                  value={peopleTab}
+                  onChange={setPeopleTab}
+                  data={[
+                    { label: 'Suggested', value: 'suggested' },
+                    { label: 'Inbox', value: 'inbox' },
+                  ]}
+                  color="teal"
+                />
+              </Group>
+            </Card>
 
-              <Tabs.Panel value="suggested" pt="lg">
-                <Stack gap="md">
-                  <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
-                    <Group justify="space-between" align="center" wrap="wrap">
-                      <div>
-                        <Text size="sm" fw={500}>Ranking mode</Text>
-                        <Text size="xs" c="dimmed">Toggle between ML ranking and hard constraints.</Text>
-                      </div>
-                      <Switch checked={useMlRanking} onChange={(e) => setUseMlRanking(e.currentTarget.checked)} color="teal" onLabel="ML" offLabel="Hard" />
-                    </Group>
-                  </Card>
+            {peopleTab === 'suggested' ? (
+              <Stack gap="md">
+                <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
+                  <Group justify="space-between" align="center" wrap="wrap">
+                    <div>
+                      <Text size="sm" fw={500}>Ranking mode</Text>
+                      <Text size="xs" c="dimmed">Toggle between ML ranking and hard constraints.</Text>
+                    </div>
+                    <Switch checked={useMlRanking} onChange={(e) => setUseMlRanking(e.currentTarget.checked)} color="teal" onLabel="ML" offLabel="Hard" />
+                  </Group>
+                </Card>
 
-                  {suggestionsQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
+                {suggestionsQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
 
-                  {prefsError && (
-                    <Alert icon={<IconAlertCircle size={18} />} color="orange" title="Set your city">
-                      <Text size="sm" mb="md">{suggestionsQuery.error.message}</Text>
-                      <Button component={Link} href="/account?tab=preferences" variant="light" color="teal">Open preferences</Button>
-                    </Alert>
-                  )}
+                {prefsError && (
+                  <Alert icon={<IconAlertCircle size={18} />} color="orange" title="Set your city">
+                    <Text size="sm" mb="md">{suggestionsQuery.error.message}</Text>
+                    <Button component={Link} href="/account?tab=preferences" variant="light" color="teal">Open preferences</Button>
+                  </Alert>
+                )}
 
-                  {suggestionsQuery.isError && !prefsError && (
-                    <Alert color="red" title="Could not load suggestions">{suggestionsQuery.error.message}</Alert>
-                  )}
+                {suggestionsQuery.isError && !prefsError && (
+                  <Alert color="red" title="Could not load suggestions">{suggestionsQuery.error.message}</Alert>
+                )}
 
-                  {!suggestionsQuery.isLoading && !suggestionsQuery.isError && suggestions.length === 0 && (
-                    <Alert color="gray" title="No matches yet">
-                      <Text size="sm">
-                        {useMlRanking ? 'No strong ranked matches right now. Swipe on ' : 'No users meet your hard constraints. Swipe on '}
-                        <Text component={Link} href="/discover" c="teal" inherit span fw={500}>Discover</Text>
-                        {useMlRanking ? ' to improve your taste signal.' : ' to improve data coverage.'}
-                      </Text>
-                    </Alert>
-                  )}
+                {!suggestionsQuery.isLoading && !suggestionsQuery.isError && suggestions.length === 0 && (
+                  <Alert color="gray" title="No matches yet">
+                    <Text size="sm">
+                      {useMlRanking ? 'No strong ranked matches right now. Swipe on ' : 'No users meet your hard constraints. Swipe on '}
+                      <Text component={Link} href="/discover" c="teal" inherit span fw={500}>Discover</Text>
+                      {useMlRanking ? ' to improve your taste signal.' : ' to improve data coverage.'}
+                    </Text>
+                  </Alert>
+                )}
 
-                  {suggestions.map((item) => (
-                    <SuggestionCard
-                      key={item.user_id}
-                      item={item}
-                      myId={myId}
-                      useMlRanking={useMlRanking}
-                      onExpress={(uid) => expressMutation.mutate(uid)}
-                      expressing={expressMutation.isPending && expressMutation.variables === item.user_id}
-                      expressedSet={expressedIds}
-                    />
-                  ))}
-                </Stack>
-              </Tabs.Panel>
-
-              <Tabs.Panel value="inbox" pt="lg">
+                {suggestions.map((item) => (
+                  <SuggestionCard
+                    key={item.user_id}
+                    item={item}
+                    myId={myId}
+                    useMlRanking={useMlRanking}
+                    onExpress={(uid) => expressMutation.mutate(uid)}
+                    expressing={expressMutation.isPending && expressMutation.variables === item.user_id}
+                    expressedSet={expressedIds}
+                  />
+                ))}
+              </Stack>
+            ) : (
+              <>
                 {inboxQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
                 {inboxQuery.isError && <Alert color="red">{inboxQuery.error.message}</Alert>}
                 {!inboxQuery.isLoading && !inboxQuery.isError && (
@@ -677,11 +694,230 @@ function GroupsPageContent() {
                     </div>
                   </Stack>
                 )}
-              </Tabs.Panel>
-            </Tabs>
+              </>
+            )}
           </Stack>
-        ) : activeTab === 'invitations' ? (
-          <InvitationsPanel user={user} authState={authState} />
+        ) : activeTab === 'my-groups' ? (
+          <Stack gap="md">
+            <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }}>
+              <Group justify="flex-end" align="center" wrap="wrap">
+                <SegmentedControl
+                  value={myGroupsTab}
+                  onChange={setMyGroupsTab}
+                  data={[
+                    { label: 'Group', value: 'groups' },
+                    { label: 'Invitations', value: 'invitations' },
+                  ]}
+                  color="teal"
+                />
+              </Group>
+            </Card>
+
+            {myGroupsTab === 'invitations' && (
+              <InvitationsPanel user={user} authState={authState} />
+            )}
+            {myGroupsTab === 'groups' && (
+              <>
+                {/* Search and Filters */}
+                <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }} data-tour="groups-search">
+                  <Group gap="md">
+                    <TextInput
+                      placeholder="Search by city..."
+                      leftSection={<IconSearch size={16} />}
+                      value={searchCity}
+                      onChange={(e) => setSearchCity(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                      style={{ flex: 1 }}
+                    />
+                    <Select
+                      placeholder="Status"
+                      data={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
+                        { value: 'matched', label: 'Matched' }
+                      ]}
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      style={{ width: 150 }}
+                    />
+                    <Button onClick={handleSearch}>Search</Button>
+                  </Group>
+                </Card>
+
+                {/* Groups Grid */}
+                <div data-tour="groups-list">
+                  {loading ? (
+                    <Grid>
+                      {[1,2,3,4,5,6].map(i => (
+                        <Grid.Col key={i} span={{ base: 12, sm: 6, md: 4 }}>
+                          <Card radius="lg" shadow="sm" style={{ height: 220 }}>
+                            <Stack gap="md">
+                              <Skeleton height={20} width="60%" />
+                              <Skeleton height={14} width="40%" />
+                              <Skeleton height={14} width="80%" />
+                              <Box style={{ flex: 1 }} />
+                              <Skeleton height={36} />
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  ) : groups.length === 0 ? (
+                    <Card withBorder p="xl">
+                      <Stack align="center" gap="md" py="xl">
+                        <ThemeIcon size={64} variant="light" color="teal"><IconUsers size={32} /></ThemeIcon>
+                        <Title order={3}>No groups found</Title>
+                        <Text c="dimmed" ta="center">
+                          {"You haven't joined any groups yet. Create one or browse all groups to join."}
+                        </Text>
+                      </Stack>
+                    </Card>
+                  ) : (
+                    <Grid>
+                      {groups.map((group) => (
+                        <Grid.Col key={group.id} span={{ base: 12, sm: 6, md: 4 }}>
+                          <Card
+                            className="card-lift"
+                            padding="lg"
+                            radius="lg"
+                            shadow="sm"
+                            style={{
+                              height: '100%',
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => router.push(`/groups/${group.id}`)}
+                          >
+                            <Stack gap="md" style={{ height: '100%' }}>
+                              {/* Header */}
+                              <Group justify="space-between">
+                                <Group gap="xs">
+                                  <Badge color={getStatusColor(group.status)} variant="light">
+                                    {group.status}
+                                  </Badge>
+                                  {/* My Group badge for groups user is a member of */}
+                                  {userGroupIds.has(group.id) && (
+                                    <Badge color="blue" variant="filled">
+                                      My Group
+                                    </Badge>
+                                  )}
+                                  {group.is_solo === true && (
+                                    <Badge color="grape" variant="light">
+                                      Solo
+                                    </Badge>
+                                  )}
+                                  {recommendedGroupIds.has(group.id) && (
+                                    <Badge color="teal" variant="light" leftSection={<IconSparkles size={12} />}>
+                                      Recommended
+                                    </Badge>
+                                  )}
+                                </Group>
+                                <Group gap={4}>
+                                  <IconUsers size={16} color="gray" />
+                                  <Text size="sm" c="dimmed">
+                                    {group.target_group_size}
+                                  </Text>
+                                </Group>
+                              </Group>
+
+                              {/* Title */}
+                              <Title order={4} lineClamp={2}>
+                                {group.group_name}
+                              </Title>
+
+                              {/* Description */}
+                              <Text size="sm" c="dimmed" lineClamp={2} style={{ flex: 1 }}>
+                                {group.description || 'No description provided'}
+                              </Text>
+
+                              {/* Details */}
+                              <Stack gap="xs">
+                                <Group gap="xs">
+                                  <IconMapPin size={16} color="gray" />
+                                  <Text size="sm">{group.target_city}</Text>
+                                </Group>
+
+                                {group.budget_per_person_min && group.budget_per_person_max && (
+                                  <Group gap="xs">
+                                    <IconCurrencyDollar size={16} color="gray" />
+                                    <Text size="sm">
+                                      ${group.budget_per_person_min} - ${group.budget_per_person_max}
+                                    </Text>
+                                  </Group>
+                                )}
+
+                                {group.target_move_in_date && (
+                                  <Group gap="xs">
+                                    <IconCalendar size={16} color="gray" />
+                                    <Text size="sm">
+                                      {new Date(group.target_move_in_date).toLocaleDateString()}
+                                    </Text>
+                                  </Group>
+                                )}
+                              </Stack>
+
+                              {/* Full Group Indicator - only show if we have valid data */}
+                              {group.target_group_size && (group.current_member_count || 0) >= group.target_group_size && (
+                                <Badge color="red" variant="filled" size="lg" fullWidth>
+                                  Group is Full
+                                </Badge>
+                              )}
+
+                              {/* Pending Request Indicator */}
+                              {pendingRequestIds.has(group.id) && (
+                                <Badge color="blue" variant="light" size="lg" fullWidth>
+                                  ✓ Request Sent
+                                </Badge>
+                              )}
+
+                              {/* Footer */}
+                              <Group gap="xs" mt="auto">
+                                {/* Show Join button only if: user is logged in, no pending request, not in this group, group not full, and user not in ANY group (including solo) */}
+                                {!pendingRequestIds.has(group.id) && !userGroupIds.has(group.id) && authState?.accessToken && (!group.target_group_size || (group.current_member_count || 0) < group.target_group_size) && !userInAnyGroup ? (
+                                  <>
+                                    <Button
+                                      variant="filled"
+                                      color="green"
+                                      flex={1}
+                                      leftSection={<IconUserPlus size={16} />}
+                                      onClick={(e) => handleJoinGroup(group.id, e)}
+                                      loading={joiningGroupId === group.id}
+                                    >
+                                      Join
+                                    </Button>
+                                    <Button
+                                      variant="light"
+                                      flex={1}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/groups/${group.id}`);
+                                      }}
+                                    >
+                                      View
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    variant="light"
+                                    fullWidth
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      router.push(`/groups/${group.id}`);
+                                    }}
+                                  >
+                                    View Details
+                                  </Button>
+                                )}
+                              </Group>
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  )}
+                </div>
+              </>
+            )}
+          </Stack>
         ) : (
         <>
         {/* Search and Filters */}
