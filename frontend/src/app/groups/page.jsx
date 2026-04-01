@@ -29,7 +29,6 @@ import {
   Collapse,
   Divider,
   Progress,
-  SegmentedControl,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar, IconInbox, IconChevronDown, IconChevronUp, IconAlertCircle, IconHome, IconUserSearch } from '@tabler/icons-react';
@@ -238,22 +237,14 @@ function GroupsPageContent() {
   const [statusFilter, setStatusFilter] = useState('active');
   const tabFromUrl = searchParams.get('tab');
   const myTabFromUrl = searchParams.get('myTab');
-  const peopleTabFromUrl = searchParams.get('peopleTab');
+  const validTabs = ['all', 'my-groups', 'people'];
   const [activeTab, setActiveTab] = useState(
-    tabFromUrl === 'invitations'
-      ? 'my-groups'
-      : tabFromUrl === 'people'
-        ? 'people'
-        : tabFromUrl === 'my-groups'
-          ? 'my-groups'
-          : 'all'
+    tabFromUrl === 'invitations' ? 'my-groups' : validTabs.includes(tabFromUrl) ? tabFromUrl : 'all'
   );
-  const [myGroupsTab, setMyGroupsTab] = useState(
+  const [myGroupsSubTab, setMyGroupsSubTab] = useState(
     tabFromUrl === 'invitations' || myTabFromUrl === 'invitations' ? 'invitations' : 'groups'
   );
-  const [peopleTab, setPeopleTab] = useState(
-    peopleTabFromUrl === 'inbox' ? 'inbox' : 'suggested'
-  );
+  const [peopleSubTab, setPeopleSubTab] = useState('suggested');
   const [userGroupIds, setUserGroupIds] = useState(new Set()); // Non-solo groups user is in (for "My Group" badge)
   const [userInAnyGroup, setUserInAnyGroup] = useState(false); // True if user is in ANY group (including solo)
   const [pendingRequestIds, setPendingRequestIds] = useState(new Set()); // Groups where user has pending join request
@@ -269,13 +260,13 @@ function GroupsPageContent() {
   const myId = user?.profile?.id;
 
   useEffect(() => {
-    if (activeTab === 'people' || (activeTab === 'my-groups' && myGroupsTab === 'invitations')) return;
+    if (activeTab === 'people' || (activeTab === 'my-groups' && myGroupsSubTab === 'invitations')) return;
     fetchGroups();
     if (authState?.accessToken) {
       fetchUserMemberships();
       fetchRecommendedIds();
     }
-  }, [statusFilter, activeTab, myGroupsTab, authState]);
+  }, [statusFilter, activeTab, myGroupsSubTab, authState]);
 
   // --- People tab queries ---
   const token = authState?.accessToken;
@@ -304,7 +295,7 @@ function GroupsPageContent() {
       }));
       return { ...raw, profiles };
     },
-    enabled: !!token && activeTab === 'people',
+    enabled: !!token && activeTab === 'people' && peopleSubTab === 'inbox',
   });
 
   const expressMutation = useMutation({
@@ -600,21 +591,28 @@ function GroupsPageContent() {
               </Alert>
             )}
 
-            <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }}>
-              <Group justify="flex-end" align="center" wrap="wrap">
-                <SegmentedControl
-                  value={peopleTab}
-                  onChange={setPeopleTab}
-                  data={[
-                    { label: 'Suggested', value: 'suggested' },
-                    { label: 'Inbox', value: 'inbox' },
-                  ]}
-                  color="teal"
-                />
-              </Group>
-            </Card>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                radius="xl"
+                variant={peopleSubTab === 'suggested' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setPeopleSubTab('suggested')}
+              >
+                Suggested
+              </Button>
+              <Button
+                size="xs"
+                radius="xl"
+                variant={peopleSubTab === 'inbox' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setPeopleSubTab('inbox')}
+              >
+                Inbox
+              </Button>
+            </Group>
 
-            {peopleTab === 'suggested' ? (
+            {peopleSubTab === 'suggested' ? (
               <Stack gap="md">
                 <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
                   <Group justify="space-between" align="center" wrap="wrap">
@@ -662,7 +660,7 @@ function GroupsPageContent() {
                 ))}
               </Stack>
             ) : (
-              <>
+              <Stack gap="md">
                 {inboxQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
                 {inboxQuery.isError && <Alert color="red">{inboxQuery.error.message}</Alert>}
                 {!inboxQuery.isLoading && !inboxQuery.isError && (
@@ -694,31 +692,36 @@ function GroupsPageContent() {
                     </div>
                   </Stack>
                 )}
-              </>
+              </Stack>
             )}
           </Stack>
         ) : activeTab === 'my-groups' ? (
           <Stack gap="md">
-            <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }}>
-              <Group justify="flex-end" align="center" wrap="wrap">
-                <SegmentedControl
-                  value={myGroupsTab}
-                  onChange={setMyGroupsTab}
-                  data={[
-                    { label: 'Group', value: 'groups' },
-                    { label: 'Invitations', value: 'invitations' },
-                  ]}
-                  color="teal"
-                />
-              </Group>
-            </Card>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                radius="xl"
+                variant={myGroupsSubTab === 'groups' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setMyGroupsSubTab('groups')}
+              >
+                Group
+              </Button>
+              <Button
+                size="xs"
+                radius="xl"
+                variant={myGroupsSubTab === 'invitations' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setMyGroupsSubTab('invitations')}
+              >
+                Invitations
+              </Button>
+            </Group>
 
-            {myGroupsTab === 'invitations' && (
+            {myGroupsSubTab === 'invitations' ? (
               <InvitationsPanel user={user} authState={authState} />
-            )}
-            {myGroupsTab === 'groups' && (
-              <>
-                {/* Search and Filters */}
+            ) : (
+              <>{/* Search and Filters */}
                 <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }} data-tour="groups-search">
                   <Group gap="md">
                     <TextInput
@@ -915,7 +918,7 @@ function GroupsPageContent() {
                     </Grid>
                   )}
                 </div>
-              </>
+            </>
             )}
           </Stack>
         ) : (
