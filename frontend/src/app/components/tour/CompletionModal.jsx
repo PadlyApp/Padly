@@ -80,27 +80,32 @@ export function CompletionModal({ opened, onClose, onGoTo }) {
               onClick={() => onGoTo(step.path)}
               style={{
                 height: 'auto',
-                padding: '1rem 0.75rem',
+                padding: '0.875rem 0.5rem',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
+                whiteSpace: 'normal',
+                wordBreak: 'break-word',
               }}
               styles={{
                 inner: {
                   flexDirection: 'column',
                   gap: 6,
+                  width: '100%',
                 },
                 label: {
                   flexDirection: 'column',
                   gap: 4,
+                  width: '100%',
+                  overflow: 'visible',
                 },
               }}
             >
               <step.icon size={22} />
-              <Text size="xs" fw={600} ta="center" style={{ lineHeight: 1.3 }}>
+              <Text size="xs" fw={600} ta="center" style={{ lineHeight: 1.3, width: '100%' }}>
                 {step.label}
               </Text>
-              <Text size="xs" c="dimmed" ta="center" style={{ lineHeight: 1.3 }}>
+              <Text size="xs" c="dimmed" ta="center" style={{ lineHeight: 1.3, width: '100%', whiteSpace: 'normal' }}>
                 {step.desc}
               </Text>
             </Button>
