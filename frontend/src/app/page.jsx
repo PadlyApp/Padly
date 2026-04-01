@@ -1,12 +1,184 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Box, Container, Grid, Stack, Group, Title, Text, Badge, Button, Card, ActionIcon } from '@mantine/core';
-import { IconHome, IconHeart, IconX, IconUsers, IconShieldCheck, IconSparkles, IconUser, IconSettings } from '@tabler/icons-react';
+import { IconHeart, IconX, IconUsers, IconShieldCheck, IconSparkles, IconUser, IconSettings } from '@tabler/icons-react';
 import Link from 'next/link';
 import { Navigation } from './components/Navigation';
 import { useAuth } from './contexts/AuthContext';
 import { usePadlyTour } from './contexts/TourContext';
+
+const DEMO_LISTINGS = [
+  {
+    title: 'Modern Studio Loft',
+    city: 'San Francisco, CA',
+    price: 1850,
+    beds: 'Studio',
+    baths: 1,
+    tags: ['Furnished', 'Utilities incl.'],
+    match: 94,
+    image: 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600&q=80',
+  },
+  {
+    title: 'Bright 1BR near Campus',
+    city: 'Toronto, ON',
+    price: 1400,
+    beds: 1,
+    baths: 1,
+    tags: ['Laundry', 'Pet friendly'],
+    match: 88,
+    image: 'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=600&q=80',
+  },
+  {
+    title: 'Cozy 2BR Apartment',
+    city: 'Austin, TX',
+    price: 2100,
+    beds: 2,
+    baths: 2,
+    tags: ['Parking', 'Gym'],
+    match: 91,
+    image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=600&q=80',
+  },
+  {
+    title: 'Charming Heritage Unit',
+    city: 'Montreal, QC',
+    price: 1200,
+    beds: 1,
+    baths: 1,
+    tags: ['Furnished', 'Balcony'],
+    match: 86,
+    image: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=600&q=80',
+  },
+];
+
+function DemoSwipeCard() {
+  const [index, setIndex] = useState(0);
+  const [direction, setDirection] = useState(null); // 'left' | 'right' | null
+  const [entering, setEntering] = useState(false);
+  const dirRef = useRef('right');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const dir = dirRef.current;
+      setDirection(dir);
+      dirRef.current = dir === 'right' ? 'left' : 'right';
+
+      setTimeout(() => {
+        setIndex(i => (i + 1) % DEMO_LISTINGS.length);
+        setDirection(null);
+        setEntering(true);
+        setTimeout(() => setEntering(false), 350);
+      }, 400);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const listing = DEMO_LISTINGS[index];
+  const isLeaving = direction !== null;
+  const isLike = direction === 'right';
+
+  let transform;
+  if (direction === 'right') transform = 'translateX(140%) rotate(22deg)';
+  else if (direction === 'left') transform = 'translateX(-140%) rotate(-22deg)';
+  else if (entering) transform = 'translateX(0) scale(0.96)';
+  else transform = 'translateX(0) scale(1)';
+
+  return (
+    <Box style={{ position: 'relative', maxWidth: 320, margin: '0 auto', height: 460 }}>
+      {/* Stacked cards behind */}
+      <Box style={{
+        position: 'absolute', top: 16, left: 16, right: -16,
+        height: 420, borderRadius: 20,
+        background: 'rgba(32,201,151,0.08)',
+        border: '1px solid rgba(32,201,151,0.2)',
+      }} />
+      <Box style={{
+        position: 'absolute', top: 8, left: 8, right: -8,
+        height: 420, borderRadius: 20,
+        background: 'rgba(32,201,151,0.12)',
+        border: '1px solid rgba(32,201,151,0.25)',
+      }} />
+
+      {/* Animated card */}
+      <Box style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        transform,
+        transition: isLeaving ? 'transform 0.4s ease-in' : entering ? 'none' : 'transform 0.35s ease-out',
+        borderRadius: 20,
+        overflow: 'hidden',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.13)',
+        backgroundColor: '#fff',
+      }}>
+        {/* Colour overlay */}
+        {isLeaving && (
+          <Box style={{
+            position: 'absolute', inset: 0, zIndex: 10, borderRadius: 20, pointerEvents: 'none',
+            backgroundColor: isLike ? 'rgba(32,201,151,0.25)' : 'rgba(255,107,107,0.25)',
+          }} />
+        )}
+
+        {/* LIKE / NOPE stamp */}
+        {isLeaving && (
+          <Box style={{
+            position: 'absolute', top: 24, zIndex: 20, pointerEvents: 'none',
+            ...(isLike ? { left: 20, transform: 'rotate(-12deg)' } : { right: 20, transform: 'rotate(12deg)' }),
+            border: `3px solid ${isLike ? '#20c997' : '#ff6b6b'}`,
+            borderRadius: 8, padding: '2px 10px',
+          }}>
+            <Text fw={800} size="lg" style={{ color: isLike ? '#20c997' : '#ff6b6b', letterSpacing: 3 }}>
+              {isLike ? 'LIKE' : 'NOPE'}
+            </Text>
+          </Box>
+        )}
+
+        {/* Image */}
+        <Box style={{ position: 'relative', height: 210, overflow: 'hidden', backgroundColor: '#f0f0f0' }}>
+          <img
+            src={listing.image}
+            alt={listing.title}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          <Badge
+            variant="filled" color="teal" size="md"
+            style={{ position: 'absolute', top: 12, right: 12, fontWeight: 700 }}
+          >
+            {listing.match}% match
+          </Badge>
+        </Box>
+
+        {/* Info */}
+        <Box p="lg">
+          <Group justify="space-between" align="flex-start" mb="xs">
+            <div>
+              <Text fw={700} size="lg" style={{ color: '#212529' }}>{listing.title}</Text>
+              <Text size="sm" c="dimmed">{listing.city}</Text>
+            </div>
+            <Text fw={700} size="xl" c="teal.6">
+              ${listing.price.toLocaleString()}<Text span size="sm" c="dimmed">/mo</Text>
+            </Text>
+          </Group>
+          <Group gap="xs" mb="md">
+            <Badge variant="light" color="teal" size="sm">
+              {listing.beds === 'Studio' ? 'Studio' : `${listing.beds} bed`}
+            </Badge>
+            <Badge variant="light" color="teal" size="sm">{listing.baths} bath</Badge>
+            {listing.tags.map(t => <Badge key={t} variant="light" size="sm">{t}</Badge>)}
+          </Group>
+          <Group gap="lg" justify="center">
+            <ActionIcon size={52} radius="xl" variant="light" color="red"
+              style={{ boxShadow: '0 4px 16px rgba(255,107,107,0.2)' }}>
+              <IconX size={24} />
+            </ActionIcon>
+            <ActionIcon size={52} radius="xl" variant="filled" color="teal"
+              style={{ boxShadow: '0 4px 16px rgba(32,201,151,0.3)' }}>
+              <IconHeart size={24} />
+            </ActionIcon>
+          </Group>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
 
 export default function Home() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -44,7 +216,20 @@ export default function Home() {
           <Grid align="center" gutter={{ base: 'xl', md: 60 }}>
             <Grid.Col span={{ base: 12, md: 6 }}>
               <Stack gap="xl">
-                <Badge variant="light" color="teal" size="lg" radius="xl" style={{ width: 'fit-content' }}>
+                <Badge
+                  variant="filled"
+                  size="lg"
+                  radius="xl"
+                  style={{
+                    width: 'fit-content',
+                    background: 'linear-gradient(135deg, #099268 0%, #20c997 100%)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    padding: '0.45rem 1.1rem',
+                    boxShadow: '0 2px 12px rgba(32,201,151,0.35)',
+                  }}
+                >
                   Housing. Matched.
                 </Badge>
                 <Title order={1} style={{ fontSize: 'clamp(2.2rem, 5vw, 3.25rem)', lineHeight: 1.1, color: '#212529' }}>
@@ -77,81 +262,11 @@ export default function Home() {
                   )
                 )}
 
-                <Group gap="xl">
-                  <Stack gap={2}>
-                    <Text fw={700} size="xl" style={{ color: '#212529' }}>1,200+</Text>
-                    <Text size="sm" c="dimmed">Active listings</Text>
-                  </Stack>
-                  <Stack gap={2}>
-                    <Text fw={700} size="xl" style={{ color: '#212529' }}>500+</Text>
-                    <Text size="sm" c="dimmed">Matches made</Text>
-                  </Stack>
-                  <Stack gap={2}>
-                    <Text fw={700} size="xl" style={{ color: '#212529' }}>50+</Text>
-                    <Text size="sm" c="dimmed">Cities covered</Text>
-                  </Stack>
-                </Group>
               </Stack>
             </Grid.Col>
 
             <Grid.Col span={{ base: 12, md: 6 }}>
-              {/* Mock swipe card — decorative */}
-              <Box style={{ position: 'relative', maxWidth: 340, margin: '0 auto' }}>
-                {/* Background stacked cards */}
-                <Box style={{
-                  position: 'absolute', top: 16, left: 16, right: -16,
-                  height: 420, borderRadius: 20,
-                  background: 'rgba(32,201,151,0.08)',
-                  border: '1px solid rgba(32,201,151,0.2)',
-                }} />
-                <Box style={{
-                  position: 'absolute', top: 8, left: 8, right: -8,
-                  height: 420, borderRadius: 20,
-                  background: 'rgba(32,201,151,0.12)',
-                  border: '1px solid rgba(32,201,151,0.25)',
-                }} />
-                {/* Main card */}
-                <Card shadow="xl" radius="xl" style={{ overflow: 'hidden', position: 'relative' }}>
-                  {/* Image placeholder */}
-                  <Box style={{
-                    height: 220,
-                    background: 'linear-gradient(135deg, #096e4f 0%, #20c997 50%, #63e6be 100%)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}>
-                    <IconHome size={64} color="rgba(255,255,255,0.6)" />
-                  </Box>
-                  <Badge
-                    variant="filled"
-                    color="teal"
-                    size="md"
-                    style={{ position: 'absolute', top: 14, right: 14, fontWeight: 700 }}
-                  >
-                    94% match
-                  </Badge>
-                  <Box p="lg">
-                    <Group justify="space-between" align="flex-start" mb="xs">
-                      <div>
-                        <Text fw={700} size="lg" style={{ color: '#212529' }}>Modern Studio</Text>
-                        <Text size="sm" c="dimmed">Downtown, San Francisco</Text>
-                      </div>
-                      <Text fw={700} size="xl" c="teal.6">$1,850<Text span size="sm" c="dimmed">/mo</Text></Text>
-                    </Group>
-                    <Group gap="xs">
-                      <Badge variant="light" color="teal" size="sm">1 bed</Badge>
-                      <Badge variant="light" color="teal" size="sm">1 bath</Badge>
-                      <Badge variant="light" size="sm">Furnished</Badge>
-                    </Group>
-                    <Group gap="lg" justify="center" mt="md">
-                      <ActionIcon size={52} radius="xl" variant="light" color="red" style={{ boxShadow: '0 4px 16px rgba(255,107,107,0.2)' }}>
-                        <IconX size={24} />
-                      </ActionIcon>
-                      <ActionIcon size={52} radius="xl" variant="filled" color="teal" style={{ boxShadow: '0 4px 16px rgba(32,201,151,0.3)' }}>
-                        <IconHeart size={24} />
-                      </ActionIcon>
-                    </Group>
-                  </Box>
-                </Card>
-              </Box>
+              <DemoSwipeCard />
             </Grid.Col>
           </Grid>
         </Container>

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon } from '@mantine/core';
-import { IconSparkles } from '@tabler/icons-react';
+import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, ActionIcon, Tooltip } from '@mantine/core';
+import { IconSparkles, IconStar, IconStarFilled } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -26,6 +26,8 @@ function MatchesPageContent() {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [userGroup, setUserGroup] = useState(null);
+  const [savedListingIds, setSavedListingIds] = useState(new Set());
 
   const fetchMatches = useCallback(async () => {
     setLoading(true);
@@ -123,6 +125,68 @@ function MatchesPageContent() {
     window.addEventListener('focus', fetchMatches);
     return () => window.removeEventListener('focus', fetchMatches);
   }, [fetchMatches]);
+
+  useEffect(() => {
+    if (!authState?.accessToken) return;
+    const fetchGroup = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/roommate-groups?my_groups=true&limit=1', {
+          headers: { Authorization: `Bearer ${authState.accessToken}` },
+        });
+        const data = await res.json();
+        console.log('[matches] groups response:', data);
+        const group = data.data?.[0] || null;
+        if (!group) { console.log('[matches] no group found'); return; }
+        setUserGroup(group);
+        console.log('[matches] userGroup set:', group.id, group.group_name);
+
+        const savedRes = await fetch(
+          `http://localhost:8000/api/interactions/swipes/groups/${group.id}/saved`,
+          { headers: { Authorization: `Bearer ${authState.accessToken}` } }
+        );
+        const savedData = await savedRes.json();
+        console.log('[matches] saved listings response:', savedData);
+        setSavedListingIds(new Set(savedData.saved_listing_ids || []));
+      } catch (e) { console.error('[matches] fetchGroup error:', e); }
+    };
+    fetchGroup();
+  }, [authState?.accessToken]);
+
+  const handleGroupSave = async (listing) => {
+    if (!userGroup || !authState?.accessToken) {
+      console.warn('[matches] handleGroupSave blocked — userGroup:', userGroup, 'token:', !!authState?.accessToken);
+      return;
+    }
+    const lid = listing.listing_id || listing.id;
+    const isSaved = savedListingIds.has(lid);
+    console.log('[matches] saving listing', lid, 'to group', userGroup.id, '— currently saved:', isSaved);
+
+    setSavedListingIds(prev => {
+      const next = new Set(prev);
+      isSaved ? next.delete(lid) : next.add(lid);
+      return next;
+    });
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/interactions/swipes/groups/${userGroup.id}/save/${lid}`,
+        {
+          method: isSaved ? 'DELETE' : 'POST',
+          headers: { Authorization: `Bearer ${authState.accessToken}` },
+        }
+      );
+      const result = await res.json();
+      console.log('[matches] save response:', res.status, result);
+      if (!res.ok) throw new Error(result.detail || 'Save failed');
+    } catch (e) {
+      console.error('[matches] save error:', e);
+      setSavedListingIds(prev => {
+        const next = new Set(prev);
+        isSaved ? next.add(lid) : next.delete(lid);
+        return next;
+      });
+    }
+  };
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -244,15 +308,40 @@ function MatchesPageContent() {
 
                       <Box style={{ flex: 1 }} />
 
-                      <Button
-                        fullWidth
-                        radius="md"
-                        size="md"
-                        color="teal"
-                        onClick={() => router.push(`/listings/${listing.listing_id}`)}
-                      >
-                        View Details
-                      </Button>
+                      <Stack gap="xs">
+                        <Button
+                          fullWidth
+                          radius="md"
+                          size="md"
+                          color="teal"
+                          onClick={() => router.push(`/listings/${listing.listing_id}`)}
+                        >
+                          View Details
+                        </Button>
+                        {userGroup && (() => {
+                          const lid = listing.listing_id || listing.id;
+                          const saved = savedListingIds.has(lid);
+                          return (
+                            <Tooltip label={saved ? 'Remove from group' : `Save to ${userGroup.group_name}`} withArrow>
+                              <Button
+                                fullWidth
+                                radius="md"
+                                size="md"
+                                variant={saved ? 'filled' : 'light'}
+                                onClick={() => handleGroupSave(listing)}
+                                leftSection={saved ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                                style={{
+                                  backgroundColor: saved ? '#f59f00' : undefined,
+                                  borderColor: '#ffe066',
+                                  color: saved ? '#fff' : '#f59f00',
+                                }}
+                              >
+                                {saved ? 'Saved to Group' : 'Save to Group'}
+                              </Button>
+                            </Tooltip>
+                          );
+                        })()}
+                      </Stack>
                     </Stack>
                   </Card>
                 </Grid.Col>

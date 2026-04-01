@@ -54,7 +54,8 @@ import {
   IconSmokingNo,
   IconDog,
   IconFriends,
-  IconInbox
+  IconInbox,
+  IconHeart
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
@@ -81,6 +82,8 @@ export default function GroupDetailPage() {
   const [joinRequests, setJoinRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState(null);
+  const [memberLikedListings, setMemberLikedListings] = useState([]);
+  const [loadingLiked, setLoadingLiked] = useState(false);
 
   useEffect(() => {
     if (groupId) {
@@ -173,6 +176,25 @@ export default function GroupDetailPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMemberLikedListings = async () => {
+    setLoadingLiked(true);
+    try {
+      const validToken = await getValidToken();
+      const response = await fetch(
+        `http://localhost:8000/api/interactions/swipes/groups/${groupId}/liked`,
+        { headers: { Authorization: `Bearer ${validToken}` } }
+      );
+      const data = await response.json();
+      if (response.ok && data.status === 'success') {
+        setMemberLikedListings(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching member liked listings:', error);
+    } finally {
+      setLoadingLiked(false);
     }
   };
 
@@ -762,8 +784,12 @@ export default function GroupDetailPage() {
             <Tabs.Tab value="overview" leftSection={<IconUsers size={16} />}>
               Members
             </Tabs.Tab>
-            <Tabs.Tab value="matches" leftSection={<IconHome size={16} />}>
-              Listings ({matches.length})
+            <Tabs.Tab
+              value="interests"
+              leftSection={<IconHeart size={16} />}
+              onClick={() => { if (!loadingLiked) fetchMemberLikedListings(); }}
+            >
+              Member Interests
             </Tabs.Tab>
             {isCreator && (
               <Tabs.Tab 
@@ -839,109 +865,6 @@ export default function GroupDetailPage() {
                 )}
               </Stack>
             </Card>
-          </Tabs.Panel>
-
-          <Tabs.Panel value="matches" pt="xl">
-            {matches.length === 0 ? (
-              <Card withBorder>
-                <Stack align="center" py="xl">
-                  <IconBuildingCommunity size={48} stroke={1.5} color="gray" />
-                  <Text c="dimmed">No listing recommendations found yet</Text>
-                  <Text size="sm" c="dimmed" ta="center">
-                    Listings will appear here after hard filtering and ranking.
-                  </Text>
-                </Stack>
-              </Card>
-            ) : (
-              <Stack gap="md">
-                {matches.map((match, index) => {
-                  const listing = match.listing || match;
-                  const scoreValueRaw = match.match_score ?? match.group_score ?? listing.match_score;
-                  const scoreValue = scoreValueRaw != null ? Number(scoreValueRaw) : null;
-                  const scorePercent = scoreValue == null
-                    ? null
-                    : scoreValue <= 1
-                      ? Math.round(scoreValue * 100)
-                      : Math.round(scoreValue);
-                  const locationText = [
-                    listing.address || listing.address_line_1,
-                    listing.city,
-                  ].filter(Boolean).join(', ');
-
-                  return (
-                    <Card
-                      key={match.id || match.listing_id || listing?.id || index}
-                      withBorder
-                      p="lg"
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => router.push(`/listings/${match.listing_id || match.id || listing?.id}`)}
-                    >
-                      <Stack gap="md">
-                        <Group justify="space-between">
-                          <div>
-                            <Title order={4}>{listing?.title || 'Listing'}</Title>
-                            <Group gap="xs" mt="xs">
-                              <IconMapPin size={16} />
-                              <Text size="sm" c="dimmed">
-                                {locationText || 'Location unavailable'}
-                              </Text>
-                            </Group>
-                          </div>
-                          <Badge color={match.is_stable ? 'green' : 'blue'} size="lg">
-                            {match.is_stable ? 'Stable Match (Legacy)' : 'Neural Ranked'}
-                          </Badge>
-                        </Group>
-
-                        <Grid>
-                          <Grid.Col span={6}>
-                            <Paper p="sm" withBorder bg="blue.0">
-                              <Text size="xs" c="dimmed">Price</Text>
-                              <Text fw={600} size="lg">
-                                ${listing?.price_per_month}/month
-                              </Text>
-                            </Paper>
-                          </Grid.Col>
-                          <Grid.Col span={6}>
-                            <Paper p="sm" withBorder bg="blue.0">
-                              <Text size="xs" c="dimmed">Bedrooms</Text>
-                              <Text fw={600} size="lg">
-                                {listing?.number_of_bedrooms} bed
-                              </Text>
-                            </Paper>
-                          </Grid.Col>
-                        </Grid>
-
-                        <Group gap="xl">
-                          <div>
-                            <Text size="xs" c="dimmed">Rank</Text>
-                            <Text fw={600}>#{match.group_rank || index + 1}</Text>
-                          </div>
-                          {scorePercent != null && (
-                            <div>
-                              <Text size="xs" c="dimmed">Match Score</Text>
-                              <Text fw={600}>{scorePercent}%</Text>
-                            </div>
-                          )}
-                          <div>
-                            <Text size="xs" c="dimmed">Algorithm</Text>
-                            <Text fw={600}>{listing.algorithm_version || 'rule-fallback'}</Text>
-                          </div>
-                        </Group>
-
-                        {listing?.available_from && (
-                          <Group gap="xs">
-                            <IconCalendar size={16} />
-                            <Text size="sm">
-                              Available from: {new Date(listing.available_from).toLocaleDateString()}
-                            </Text>
-                          </Group>
-                        )}
-                      </Stack>
-                    </Card>
-                  );
-                })}
-              </Stack>
-            )}
           </Tabs.Panel>
 
           {/* Join Requests Tab (Creator Only) */}
@@ -1106,6 +1029,81 @@ export default function GroupDetailPage() {
               </Card>
             </Tabs.Panel>
           )}
+
+          {/* Member Interests Tab */}
+          <Tabs.Panel value="interests" pt="xl">
+            <Stack gap="md">
+              <Group justify="space-between">
+                <div>
+                  <Title order={3}>Member Interests</Title>
+                  <Text size="sm" c="dimmed">Listings your group members liked while browsing Discover</Text>
+                </div>
+                <Button variant="light" size="sm" onClick={fetchMemberLikedListings} loading={loadingLiked}>
+                  Refresh
+                </Button>
+              </Group>
+
+              {loadingLiked ? (
+                <Stack gap="sm">
+                  {[1, 2, 3].map(i => <Skeleton key={i} height={100} radius="md" />)}
+                </Stack>
+              ) : memberLikedListings.length === 0 ? (
+                <Card withBorder>
+                  <Stack align="center" py="xl">
+                    <ThemeIcon size="xl" variant="light" color="pink">
+                      <IconHeart size={24} />
+                    </ThemeIcon>
+                    <Text c="dimmed" ta="center">No liked listings yet</Text>
+                    <Text size="sm" c="dimmed" ta="center">
+                      When group members like listings in Discover, they'll appear here.
+                    </Text>
+                  </Stack>
+                </Card>
+              ) : (
+                <Stack gap="md">
+                  {memberLikedListings.map((listing) => (
+                    <Card
+                      key={listing.id}
+                      withBorder
+                      p="lg"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => router.push(`/listings/${listing.id}`)}
+                    >
+                      <Group justify="space-between" align="flex-start">
+                        <div style={{ flex: 1 }}>
+                          <Title order={4}>{listing.title || 'Listing'}</Title>
+                          <Group gap="xs" mt={4}>
+                            <IconMapPin size={14} />
+                            <Text size="sm" c="dimmed">{listing.city || 'Location unavailable'}</Text>
+                          </Group>
+                          <Group gap="xl" mt="sm">
+                            {listing.price_per_month && (
+                              <div>
+                                <Text size="xs" c="dimmed">Price</Text>
+                                <Text fw={600}>${listing.price_per_month}/mo</Text>
+                              </div>
+                            )}
+                            {listing.number_of_bedrooms != null && (
+                              <div>
+                                <Text size="xs" c="dimmed">Beds</Text>
+                                <Text fw={600}>{listing.number_of_bedrooms === 0 ? 'Studio' : listing.number_of_bedrooms}</Text>
+                              </div>
+                            )}
+                          </Group>
+                        </div>
+                        <Stack gap={4} align="flex-end">
+                          <Text size="xs" c="dimmed">Liked by</Text>
+                          {(listing.liked_by || []).map((name) => (
+                            <Badge key={name} size="sm" variant="light" color="pink">{name}</Badge>
+                          ))}
+                        </Stack>
+                      </Group>
+                    </Card>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </Tabs.Panel>
         </Tabs>
       </Stack>
 
