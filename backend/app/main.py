@@ -70,6 +70,8 @@ _agent_dbg_log(
 )
 # endregion agent log
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import (
@@ -97,13 +99,25 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configure CORS
+# Configure CORS (Starlette returns 400 on failed preflight — usually wrong Origin)
+_cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://[::1]:3000",
+]
+_extra = os.getenv("CORS_ORIGINS", "").strip()
+if _extra:
+    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Next.js frontend
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=_cors_origins,
+    # IPv6 loopback [::1], any dev port, or LAN when using `next dev -H 0.0.0.0`
+    allow_origin_regex=(
+        r"^https?://((localhost|127\.0\.0\.1|\[::1\])(:\d+)?|"
+        r"192\.168\.\d{1,3}\.\d{1,3}(:\d+)?|"
+        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?)$"
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

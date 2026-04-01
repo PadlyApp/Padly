@@ -24,8 +24,8 @@ pip install -r requirements.txt
 cp app/.env.example app/.env
 # Edit app/.env with your Supabase credentials
 
-# Run the server
-uvicorn app.main:app --reload
+# Run the server (reload only app/ so pip changes under venv/ don't break the process)
+uvicorn app.main:app --reload --reload-dir app
 ```
 
 Server runs at: http://localhost:8000  
