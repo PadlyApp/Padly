@@ -250,6 +250,179 @@ async def get_group_behavior(
         raise HTTPException(status_code=500, detail=f"Failed to build group behavior vector: {e}")
 
 
+@router.get("/swipes/groups/{group_id}/liked")
+async def get_group_liked_listings(
+    group_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    token: str = Depends(require_user_token),
+):
+    """
+    Return listings liked by any accepted member of the group.
+    Each item includes the listing data plus a list of member names who liked it.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=user_id)
+
+    try:
+        # Get all accepted member user IDs
+        members_resp = (
+            supabase.table("group_members")
+            .select("user_id")
+            .eq("group_id", group_id)
+            .eq("status", "accepted")
+            .execute()
+        )
+        members = members_resp.data or []
+        if not members:
+            return {"status": "success", "data": []}
+
+        member_ids = [m["user_id"] for m in members]
+
+        # Fetch user details separately
+        users_resp = (
+            supabase.table("users")
+            .select("id, full_name, email")
+            .in_("id", member_ids)
+            .execute()
+        )
+        member_map = {
+            u["id"]: u.get("full_name") or u.get("email", "Member")
+            for u in (users_resp.data or [])
+        }
+
+        # Get liked + group_save swipes for all members
+        swipes_resp = (
+            supabase.table("swipe_interactions")
+            .select("listing_id, actor_user_id, action")
+            .in_("actor_user_id", member_ids)
+            .in_("action", ["like", "group_save"])
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        swipes = swipes_resp.data or []
+        if not swipes:
+            return {"status": "success", "data": []}
+
+        # Build mapping: listing_id -> list of member names who liked it
+        liked_by: dict = {}
+        for s in swipes:
+            lid = s["listing_id"]
+            name = member_map.get(s["actor_user_id"], "Member")
+            liked_by.setdefault(lid, [])
+            if name not in liked_by[lid]:
+                liked_by[lid].append(name)
+
+        unique_listing_ids = list(liked_by.keys())
+
+        # Fetch listing details
+        listings_resp = (
+            supabase.table("listings")
+            .select("*")
+            .in_("id", unique_listing_ids)
+            .execute()
+        )
+        listings = listings_resp.data or []
+        listing_map = {str(l["id"]): l for l in listings}
+
+        result = []
+        for lid in unique_listing_ids:
+            listing = listing_map.get(str(lid))
+            if listing:
+                result.append({**listing, "liked_by": liked_by[lid]})
+
+        return {"status": "success", "data": result}
+
+    except Exception as e:
+        err = str(e).lower()
+        if "swipe_interactions" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Swipe storage not configured. Run migration 004_swipe_interactions.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch group liked listings: {e}")
+
+
+@router.post("/swipes/groups/{group_id}/save/{listing_id}")
+async def save_listing_to_group(
+    group_id: str,
+    listing_id: str,
+    token: str = Depends(require_user_token),
+):
+    """Save a listing to the group (star/bookmark action from Discover)."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=user_id)
+
+    try:
+        # Delete any existing group_save for this user+listing+group, then insert fresh
+        supabase.table("swipe_interactions").delete().eq(
+            "actor_user_id", user_id
+        ).eq("listing_id", listing_id).eq("action", "group_save").eq(
+            "group_id_at_time", group_id
+        ).execute()
+
+        supabase.table("swipe_interactions").insert({
+            "actor_user_id": user_id,
+            "listing_id": listing_id,
+            "action": "group_save",
+            "group_id_at_time": group_id,
+            "surface": "matches",
+            "session_id": f"group-save-{user_id}-{group_id}-{listing_id}",
+            "algorithm_version": "group-save-v1",
+            "position_in_feed": 0,
+        }).execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save listing: {e}")
+
+
+@router.delete("/swipes/groups/{group_id}/save/{listing_id}")
+async def unsave_listing_from_group(
+    group_id: str,
+    listing_id: str,
+    token: str = Depends(require_user_token),
+):
+    """Remove a group-saved listing."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=user_id)
+
+    try:
+        supabase.table("swipe_interactions").delete().eq(
+            "actor_user_id", user_id
+        ).eq("listing_id", listing_id).eq("action", "group_save").execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to unsave listing: {e}")
+
+
+@router.get("/swipes/groups/{group_id}/saved")
+async def get_my_saved_listings_for_group(
+    group_id: str,
+    token: str = Depends(require_user_token),
+):
+    """Return listing IDs the current user has starred for this group."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=user_id)
+
+    try:
+        resp = (
+            supabase.table("swipe_interactions")
+            .select("listing_id")
+            .eq("actor_user_id", user_id)
+            .eq("group_id_at_time", group_id)
+            .eq("action", "group_save")
+            .execute()
+        )
+        ids = [r["listing_id"] for r in (resp.data or [])]
+        return {"status": "success", "saved_listing_ids": ids}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch saved listings: {e}")
+
+
 @router.get("/behavior/health")
 async def get_behavior_health(
     days: int = Query(7, ge=1, le=90),

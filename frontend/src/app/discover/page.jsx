@@ -191,6 +191,7 @@ function DiscoverContent() {
     fetchRecommendations();
   }, [fetchRecommendations]);
 
+
   useEffect(() => {
     setExpandedImageIndex(0);
   }, [expandedListing?.listing_id]);
@@ -283,6 +284,28 @@ function DiscoverContent() {
     setExpandedListing(null);
     setTimeout(() => handleButton(direction), 200);
   };
+
+
+  const openExpanded = (listing) => {
+    setExpandedImageIndex(0);
+    setExpandedListing(listing);
+  };
+
+  // Auto-advance modal images every 5s while modal is open
+  useEffect(() => {
+    if (!expandedListing) return;
+    const imgs = (() => {
+      const i = expandedListing.images;
+      if (Array.isArray(i)) return i;
+      if (typeof i === 'string') { try { return JSON.parse(i); } catch { return []; } }
+      return [];
+    })();
+    if (imgs.length <= 1) return;
+    const timer = setInterval(() => {
+      setExpandedImageIndex(prev => (prev + 1) % imgs.length);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [expandedListing]);
 
   const remaining = listings.length - currentIndex;
   const isDone = !loading && !error && remaining === 0 && !hasMore;
@@ -383,7 +406,7 @@ function DiscoverContent() {
                       onSwipe={handleSwipe}
                       isTop={offset === 0}
                       stackOffset={offset}
-                      onExpand={setExpandedListing}
+                      onExpand={openExpanded}
                     />
                   );
                 })}
@@ -405,7 +428,8 @@ function DiscoverContent() {
                   </ActionIcon>
                   <Text size="xs" c="dimmed" fw={500}>Pass</Text>
                 </Stack>
-                <Stack align="center" gap={6}>
+
+<Stack align="center" gap={6}>
                   <ActionIcon
                     data-tour="discover-like-btn"
                     size={64}
@@ -431,13 +455,14 @@ function DiscoverContent() {
       <Modal
         opened={!!expandedListing}
         onClose={() => setExpandedListing(null)}
-        size="lg"
+        size="min(90vw, 720px)"
         padding={0}
         radius="lg"
         centered
         overlayProps={{ backgroundOpacity: 0.5, blur: 6 }}
         transitionProps={{ transition: 'slide-up', duration: 300 }}
         withCloseButton={false}
+        styles={{ body: { maxHeight: '90vh', overflowY: 'auto' } }}
       >
         {expandedListing && (() => {
           const imgs = (() => {

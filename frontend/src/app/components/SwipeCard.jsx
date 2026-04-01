@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef, useState, useEffect } from 'react';
-import { Text, Badge, Box, Group, Button } from '@mantine/core';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { Text, Badge, Box, Group, Button, ActionIcon } from '@mantine/core';
+import { IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from './ImageWithFallback';
 
 const SWIPE_THRESHOLD = 100;
@@ -11,6 +11,7 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
   const [dragging, setDragging] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [leaving, setLeaving] = useState(null); // 'left' | 'right' | null
+  const [imageIndex, setImageIndex] = useState(0);
   const startXRef = useRef(0);
 
   useEffect(() => {
@@ -28,6 +29,10 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
         triggerLeave('right');
       } else if (offsetX < -SWIPE_THRESHOLD) {
         triggerLeave('left');
+      } else if (Math.abs(offsetX) < 8) {
+        // Tap with no drag — open detail view
+        onExpand && onExpand(listing);
+        setOffsetX(0);
       } else {
         setOffsetX(0);
       }
@@ -82,8 +87,24 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
     if (typeof imgs === 'string') { try { return JSON.parse(imgs); } catch { return []; } }
     return [];
   })();
+  const safeIndex = Math.min(imageIndex, Math.max(0, images.length - 1));
+  const [sweeping, setSweeping] = useState(false);
+
+  // Auto-advance images every 3s when card is on top and not being dragged
+  useEffect(() => {
+    if (!isTop || images.length <= 1 || dragging) return;
+    const timer = setInterval(() => {
+      setSweeping(true);
+      setTimeout(() => {
+        setImageIndex(i => (i + 1) % images.length);
+        setSweeping(false);
+      }, 300);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isTop, images.length, dragging]);
+
   const image =
-    images[0] ||
+    images[safeIndex] ||
     'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=800';
 
   return (
@@ -118,7 +139,11 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
           src={image}
           alt={listing.title || 'Listing'}
           draggable={false}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+          style={{
+            width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none',
+            transform: sweeping ? 'translateX(-6%) scale(1.06)' : 'translateX(0) scale(1)',
+            transition: sweeping ? 'transform 0.3s ease-in' : 'transform 0.35s ease-out',
+          }}
         />
 
         {/* Match badge */}
@@ -153,6 +178,60 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand }) {
         }}>
           <Text fw={800} size="lg" style={{ color: '#ff6b6b', letterSpacing: 3 }}>NOPE</Text>
         </Box>
+
+        {/* Image navigation (only when multiple images) */}
+        {images.length > 1 && (
+          <>
+            <ActionIcon
+              size="sm"
+              radius="xl"
+              variant="filled"
+              color="dark"
+              style={{
+                position: 'absolute', left: 8, top: '50%',
+                transform: 'translateY(-50%)',
+                opacity: safeIndex === 0 ? 0.3 : 0.8,
+                zIndex: 30,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setImageIndex(i => Math.max(0, i - 1)); }}
+            >
+              <IconChevronLeft size={14} />
+            </ActionIcon>
+            <ActionIcon
+              size="sm"
+              radius="xl"
+              variant="filled"
+              color="dark"
+              style={{
+                position: 'absolute', right: 8, top: '50%',
+                transform: 'translateY(-50%)',
+                opacity: safeIndex === images.length - 1 ? 0.3 : 0.8,
+                zIndex: 30,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setImageIndex(i => Math.min(images.length - 1, i + 1)); }}
+            >
+              <IconChevronRight size={14} />
+            </ActionIcon>
+            {/* Dot indicators */}
+            <Box style={{
+              position: 'absolute', bottom: 8, left: 0, right: 0,
+              display: 'flex', justifyContent: 'center', gap: 4, zIndex: 30,
+              pointerEvents: 'none',
+            }}>
+              {images.map((_, i) => (
+                <Box key={i} style={{
+                  width: i === safeIndex ? 16 : 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: i === safeIndex ? '#fff' : 'rgba(255,255,255,0.5)',
+                  transition: 'width 0.2s ease',
+                }} />
+              ))}
+            </Box>
+          </>
+        )}
       </Box>
 
       {/* Info */}
