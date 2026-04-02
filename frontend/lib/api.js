@@ -80,6 +80,22 @@ export const api = {
     return data;
   },
 
+  async searchUsers(token, options = {}) {
+    const params = new URLSearchParams();
+    params.append('limit', String(options.limit ?? 20));
+    params.append('offset', String(options.offset ?? 0));
+    const q = (options.q || '').trim();
+    if (q) params.append('q', q);
+
+    const response = await fetch(`${API_BASE_URL}/api/users?${params.toString()}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    return response.json();
+  },
+
   async getUser(id) {
     const response = await fetch(`${API_BASE_URL}/api/users/${id}`);
     if (!response.ok) {

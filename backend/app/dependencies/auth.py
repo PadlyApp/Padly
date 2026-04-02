@@ -3,8 +3,34 @@ Authentication dependencies
 Handles JWT token extraction from request headers
 """
 
+import os
 from fastapi import Header, HTTPException
 from typing import Optional
+
+
+async def require_admin_key(
+    x_admin_secret: Optional[str] = Header(None)
+) -> None:
+    """
+    Verify the X-Admin-Secret header matches the ADMIN_SECRET env variable.
+
+    All /api/admin/* routes must depend on this to prevent unauthenticated
+    access to service-role operations.
+
+    Raises:
+        HTTPException 401: if header is missing or incorrect
+    """
+    expected = os.getenv("ADMIN_SECRET")
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin endpoints are disabled: ADMIN_SECRET is not configured on the server."
+        )
+    if x_admin_secret != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing X-Admin-Secret header."
+        )
 
 
 async def get_user_token(

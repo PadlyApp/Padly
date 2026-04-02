@@ -257,6 +257,8 @@ function GroupsPageContent() {
   const [expressedIds, setExpressedIds] = useState(() => new Set());
   const [funnelBanner, setFunnelBanner] = useState(null);
   const [respondingId, setRespondingId] = useState(null);
+  const [peopleSearch, setPeopleSearch] = useState('');
+  const [debouncedPeopleSearch, setDebouncedPeopleSearch] = useState('');
   const myId = user?.profile?.id;
 
   useEffect(() => {
@@ -271,10 +273,23 @@ function GroupsPageContent() {
   // --- People tab queries ---
   const token = authState?.accessToken;
 
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedPeopleSearch(peopleSearch.trim());
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [peopleSearch]);
+
   const suggestionsQuery = useQuery({
     queryKey: ['roommateSuggestions', token, useMlRanking],
     queryFn: () => api.getRoommateSuggestions(token, { limit: 20, mode: useMlRanking ? 'ml' : 'hard_filter' }),
     enabled: !!token && activeTab === 'people',
+  });
+
+  const peopleSearchQuery = useQuery({
+    queryKey: ['peopleSearch', token, debouncedPeopleSearch],
+    queryFn: () => api.searchUsers(token, { q: debouncedPeopleSearch, limit: 20, offset: 0 }),
+    enabled: !!token && activeTab === 'people' && peopleSubTab === 'suggested' && debouncedPeopleSearch.length >= 2,
   });
 
   const inboxQuery = useQuery({
@@ -334,6 +349,8 @@ function GroupsPageContent() {
   };
 
   const suggestions = suggestionsQuery.data?.suggestions || [];
+  const searchedUsers = peopleSearchQuery.data?.data || [];
+  const showPeopleSearchSection = peopleSearch.trim().length > 0;
   const prefsError = suggestionsQuery.isError && (suggestionsQuery.error?.message || '').toLowerCase().includes('target_city');
 
   // --- End People tab queries ---
@@ -615,6 +632,18 @@ function GroupsPageContent() {
             {peopleSubTab === 'suggested' ? (
               <Stack gap="md">
                 <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
+                  <TextInput
+                    placeholder="Search users by name or email..."
+                    leftSection={<IconSearch size={16} />}
+                    value={peopleSearch}
+                    onChange={(e) => setPeopleSearch(e.currentTarget.value)}
+                  />
+                  <Text size="xs" c="dimmed" mt={8}>
+                    Search anyone and send roommate interest directly.
+                  </Text>
+                </Card>
+
+                <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
                   <Group justify="space-between" align="center" wrap="wrap">
                     <div>
                       <Text size="sm" fw={500}>Ranking mode</Text>
@@ -623,6 +652,53 @@ function GroupsPageContent() {
                     <Switch checked={useMlRanking} onChange={(e) => setUseMlRanking(e.currentTarget.checked)} color="teal" onLabel="ML" offLabel="Hard" />
                   </Group>
                 </Card>
+
+                {showPeopleSearchSection && (
+                  <Stack gap="sm">
+                    {debouncedPeopleSearch.length < 2 ? (
+                      <Text size="sm" c="dimmed">Type at least 2 characters to search.</Text>
+                    ) : peopleSearchQuery.isLoading ? (
+                      <Center py="sm"><Loader size="sm" color="teal" /></Center>
+                    ) : peopleSearchQuery.isError ? (
+                      <Alert color="red" title="Could not search users">{peopleSearchQuery.error.message}</Alert>
+                    ) : searchedUsers.length === 0 ? (
+                      <Alert color="gray" title="No users found">
+                        <Text size="sm">Try another name or email.</Text>
+                      </Alert>
+                    ) : (
+                      <Stack gap="sm">
+                        {searchedUsers.map((candidate) => {
+                          const sent = expressedIds.has(candidate.id);
+                          const expressing = expressMutation.isPending && expressMutation.variables === candidate.id;
+                          return (
+                            <Card key={candidate.id} withBorder padding="md" radius="lg">
+                              <Group justify="space-between" align="center" wrap="wrap">
+                                <Group gap="md" wrap="nowrap">
+                                  <Avatar src={candidate.profile_picture_url} radius="xl" color="teal">
+                                    {initials(displayName(candidate))}
+                                  </Avatar>
+                                  <div>
+                                    <Text fw={600}>{displayName(candidate)}</Text>
+                                    {candidate.email && <Text size="sm" c="dimmed">{candidate.email}</Text>}
+                                  </div>
+                                </Group>
+                                <Button
+                                  size="sm"
+                                  color="teal"
+                                  disabled={!candidate.id || candidate.id === myId || sent || expressing}
+                                  loading={expressing}
+                                  onClick={() => expressMutation.mutate(candidate.id)}
+                                >
+                                  {sent ? 'Interest sent' : 'Express interest'}
+                                </Button>
+                              </Group>
+                            </Card>
+                          );
+                        })}
+                      </Stack>
+                    )}
+                  </Stack>
+                )}
 
                 {suggestionsQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
 

@@ -3,7 +3,7 @@ User routes
 CRUD operations for users table
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
 from app.dependencies.auth import get_user_token, require_user_token
 from app.services.supabase_client import SupabaseHTTPClient
@@ -34,7 +34,8 @@ def _validate_profile_catalog_fields(data: dict) -> dict:
 async def list_users(
     token: Optional[str] = Depends(get_user_token),
     limit: Optional[int] = 100,
-    offset: Optional[int] = 0
+    offset: Optional[int] = 0,
+    q: Optional[str] = Query(None, description="Case-insensitive search over full_name and email"),
 ):
     """
     List all users.
@@ -44,9 +45,37 @@ async def list_users(
     - RLS disabled: Returns all users
     """
     client = SupabaseHTTPClient(token=token)
-    
+    filters = {}
+
+    q_norm = (q or "").strip()
+    if q_norm:
+        filters["or"] = f"(full_name.ilike.*{q_norm}*,email.ilike.*{q_norm}*)"
+
+    # Exclude the caller from results when authenticated.
+    if token:
+        try:
+            from app.dependencies.supabase import get_admin_client
+
+            admin_client = get_admin_client()
+            user_response = admin_client.auth.get_user(token)
+            auth_user_id = user_response.user.id if user_response and user_response.user else None
+            if auth_user_id:
+                me = (
+                    admin_client.table("users")
+                    .select("id")
+                    .eq("auth_id", auth_user_id)
+                    .limit(1)
+                    .execute()
+                )
+                if me.data:
+                    filters["id"] = f"neq.{me.data[0]['id']}"
+        except Exception:
+            # Best-effort only; if this lookup fails, still return searchable users.
+            pass
+
     users = await client.select(
         table="users",
+        filters=filters or None,
         limit=limit,
         offset=offset,
         order="created_at.desc"
