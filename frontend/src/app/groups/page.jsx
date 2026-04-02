@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -380,7 +380,7 @@ function GroupsPageContent() {
     try {
       // Fetch user's pending join requests
       const pendingResponse = await fetch(
-        '${API_BASE}/api/roommate-groups/my-pending-requests',
+        `${API_BASE}/api/roommate-groups/my-pending-requests`,
         {
           headers: {
             'Authorization': `Bearer ${authState.accessToken}`
@@ -396,7 +396,7 @@ function GroupsPageContent() {
 
       // Fetch user's accepted memberships
       const response = await fetch(
-        '${API_BASE}/api/roommate-groups?my_groups=true',
+        `${API_BASE}/api/roommate-groups?my_groups=true`,
         {
           headers: {
             'Authorization': `Bearer ${authState.accessToken}`

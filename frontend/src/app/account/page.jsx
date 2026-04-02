@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -128,7 +128,7 @@ function ProfilePanel() {
 
       try {
         const token = await getValidToken();
-        const response = await fetch('${API_BASE}/api/auth/me', {
+        const response = await fetch(`${API_BASE}/api/auth/me`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -167,9 +167,9 @@ function ProfilePanel() {
     const loadOptions = async () => {
       try {
         const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch('${API_BASE}/api/options/companies?limit=500'),
-          fetch('${API_BASE}/api/options/schools?limit=500'),
-          fetch('${API_BASE}/api/options/roles'),
+          fetch(`${API_BASE}/api/options/companies?limit=500`),
+          fetch(`${API_BASE}/api/options/schools?limit=500`),
+          fetch(`${API_BASE}/api/options/roles`),
         ]);
 
         if (companiesRes.ok) {

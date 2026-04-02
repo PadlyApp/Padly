@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -119,7 +119,7 @@ export default function CreateGroupPage() {
         return;
       }
 
-      const response = await fetch('${API_BASE}/api/roommate-groups', {
+      const response = await fetch(`${API_BASE}/api/roommate-groups`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

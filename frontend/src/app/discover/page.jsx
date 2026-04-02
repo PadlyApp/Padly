@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group, Progress, Modal, Badge, Divider } from '@mantine/core';
@@ -79,7 +79,7 @@ function DiscoverContent() {
         }
 
         try {
-          const swipesRes = await fetch('${API_BASE}/api/interactions/swipes/me?limit=500', {
+          const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
             headers: { Authorization: `Bearer ${authState.accessToken}` },
           });
           if (swipesRes.ok) {
@@ -101,7 +101,7 @@ function DiscoverContent() {
       // Prefer persisted behavior features from backend (Phase 2A).
       if (authState?.accessToken) {
         try {
-          const behaviorRes = await fetch('${API_BASE}/api/interactions/behavior/me?days=180', {
+          const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
             headers: { Authorization: `Bearer ${authState.accessToken}` },
           });
           if (behaviorRes.ok) {
@@ -156,7 +156,7 @@ function DiscoverContent() {
         ...likedExtras,
       };
 
-      const res = await fetch('${API_BASE}/api/recommendations', {
+      const res = await fetch(`${API_BASE}/api/recommendations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -218,7 +218,7 @@ function DiscoverContent() {
         : DISCOVER_ALGORITHM_VERSION;
 
     try {
-      const response = await fetch('${API_BASE}/api/interactions/swipes', {
+      const response = await fetch(`${API_BASE}/api/interactions/swipes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

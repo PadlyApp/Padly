@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, ActionIcon, Tooltip } from '@mantine/core';
@@ -51,7 +51,7 @@ function MatchesPageContent() {
         }
 
         try {
-          const behaviorRes = await fetch('${API_BASE}/api/interactions/behavior/me?days=180', {
+          const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
             headers: { Authorization: `Bearer ${authState.accessToken}` },
           });
           if (behaviorRes.ok) {
@@ -105,7 +105,7 @@ function MatchesPageContent() {
         ...likedExtras,
       };
 
-      const res = await fetch('${API_BASE}/api/recommendations', {
+      const res = await fetch(`${API_BASE}/api/recommendations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -132,7 +132,7 @@ function MatchesPageContent() {
     if (!authState?.accessToken) return;
     const fetchGroup = async () => {
       try {
-        const res = await fetch('${API_BASE}/api/roommate-groups?my_groups=true&limit=1', {
+        const res = await fetch(`${API_BASE}/api/roommate-groups?my_groups=true&limit=1`, {
           headers: { Authorization: `Bearer ${authState.accessToken}` },
         });
         const data = await res.json();

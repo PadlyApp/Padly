@@ -1,6 +1,6 @@
 ﻿'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -46,9 +46,9 @@ export default function OnboardingPage() {
     const loadOptions = async () => {
       try {
         const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch('${API_BASE}/api/options/companies?limit=500'),
-          fetch('${API_BASE}/api/options/schools?limit=500'),
-          fetch('${API_BASE}/api/options/roles'),
+          fetch(`${API_BASE}/api/options/companies?limit=500`),
+          fetch(`${API_BASE}/api/options/schools?limit=500`),
+          fetch(`${API_BASE}/api/options/roles`),
         ]);
 
         if (companiesRes.ok) {
