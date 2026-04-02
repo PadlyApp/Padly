@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
     const newUser = addUser(email, password, name);
 
     // Return success (without password!)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _, ...userWithoutPassword } = newUser;
     
     return NextResponse.json({
