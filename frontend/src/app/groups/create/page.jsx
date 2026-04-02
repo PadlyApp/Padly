@@ -1,21 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Container, 
-  Title, 
-  Text, 
-  Button, 
-  Stack, 
-  Card, 
+import {
+  Container,
+  Title,
+  Text,
+  Button,
+  Stack,
+  Card,
   TextInput,
   Textarea,
   NumberInput,
   Select,
   Group,
   Paper,
-  Stepper
+  Stepper,
+  Box,
+  Switch
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
@@ -33,10 +35,30 @@ export default function CreateGroupPage() {
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [targetCity, setTargetCity] = useState('');
+  const [cityOptions, setCityOptions] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
   const [budgetMin, setBudgetMin] = useState(null);
   const [budgetMax, setBudgetMax] = useState(null);
   const [moveInDate, setMoveInDate] = useState(null);
+  const [hasGroupSizeLimit, setHasGroupSizeLimit] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
+
+  useEffect(() => {
+    const loadCities = async () => {
+      try {
+        const query = citySearch.trim();
+        const response = await fetch(
+          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setCityOptions(result.data || []);
+      } catch {
+        // Keep form usable if options API is temporarily unavailable.
+      }
+    };
+    loadCities();
+  }, [citySearch]);
 
   const handleSubmit = async (e) => {
     console.log("we submitting baby")
@@ -71,6 +93,15 @@ export default function CreateGroupPage() {
       return;
     }
 
+    if (hasGroupSizeLimit && !groupSize) {
+      notifications.show({
+        title: 'Missing Group Size',
+        message: 'Set a group size or turn off the member limit',
+        color: 'red',
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -99,7 +130,7 @@ export default function CreateGroupPage() {
           budget_per_person_min: budgetMin,
           budget_per_person_max: budgetMax,
           target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
-          target_group_size: groupSize,
+          target_group_size: hasGroupSizeLimit ? groupSize : null,
           status: 'active'
         })
       });
@@ -146,7 +177,7 @@ export default function CreateGroupPage() {
   const prevStep = () => setActive((current) => (current > 0 ? current - 1 : current));
 
   return (
-    <>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
       <Container size="md" py="xl">
         <Stack gap="xl">
@@ -189,22 +220,35 @@ export default function CreateGroupPage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
 
-                <TextInput
+                <Select
                   label="Target City"
-                  placeholder="e.g., San Francisco"
+                  placeholder="Search and select a city"
                   required
+                  data={cityOptions}
+                  searchable
                   value={targetCity}
-                  onChange={(e) => setTargetCity(e.target.value)}
+                  onChange={(value) => setTargetCity(value || '')}
+                  onSearchChange={setCitySearch}
+                  nothingFoundMessage="No cities found"
                 />
 
-                <NumberInput
-                  label="Group Size"
-                  description="How many people are looking for housing together?"
-                  min={2}
-                  max={10}
-                  value={groupSize}
-                  onChange={setGroupSize}
+                <Switch
+                  label="Set a member limit"
+                  description="Leave this off if the group should stay open with no cap."
+                  checked={hasGroupSizeLimit}
+                  onChange={(event) => setHasGroupSizeLimit(event.currentTarget.checked)}
                 />
+
+                {hasGroupSizeLimit && (
+                  <NumberInput
+                    label="Group Size Limit"
+                    description="How many people are looking for housing together?"
+                    min={2}
+                    max={50}
+                    value={groupSize}
+                    onChange={setGroupSize}
+                  />
+                )}
               </Stack>
             </Card>
           </Stepper.Step>
@@ -235,7 +279,7 @@ export default function CreateGroupPage() {
                 />
 
                 {budgetMin && budgetMax && (
-                  <Paper p="md" withBorder bg="blue.0">
+                  <Paper p="md" bg="teal.0" style={{ backgroundColor: '#e6fcf5' }}>
                     <Text size="sm" fw={500}>
                       Total Budget Range: ${budgetMin * groupSize} - ${budgetMax * groupSize}
                     </Text>
@@ -336,6 +380,6 @@ export default function CreateGroupPage() {
         </Group>
       </Stack>
     </Container>
-    </>
+    </Box>
   );
 }

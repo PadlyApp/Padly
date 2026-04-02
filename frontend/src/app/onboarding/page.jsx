@@ -16,24 +16,57 @@ import {
   Progress,
   SegmentedControl,
   Box,
+  Select,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconUser, IconBriefcase, IconSchool, IconCheck, IconHome, IconSearch } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePadlyTour } from '../contexts/TourContext';
 
 export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [active, setActive] = useState(0);
-  const { user, authState, getValidToken } = useAuth();
+  const [companyOptions, setCompanyOptions] = useState([]);
+  const [schoolOptions, setSchoolOptions] = useState([]);
+  const [roleTitleOptions, setRoleTitleOptions] = useState([]);
+  const { user, authState, isLoading: authLoading, getValidToken } = useAuth();
+  const { startTour } = usePadlyTour();
   const router = useRouter();
 
-  // Redirect if not authenticated
   useEffect(() => {
-    if (!authState?.accessToken) {
+    if (!authLoading && !authState?.accessToken) {
       router.push('/login');
     }
-  }, [authState, router]);
+  }, [authLoading, authState, router]);
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
+          fetch('http://localhost:8000/api/options/companies?limit=500'),
+          fetch('http://localhost:8000/api/options/schools?limit=500'),
+          fetch('http://localhost:8000/api/options/roles'),
+        ]);
+
+        if (companiesRes.ok) {
+          const result = await companiesRes.json();
+          setCompanyOptions(result.data || []);
+        }
+        if (schoolsRes.ok) {
+          const result = await schoolsRes.json();
+          setSchoolOptions(result.data || []);
+        }
+        if (rolesRes.ok) {
+          const result = await rolesRes.json();
+          setRoleTitleOptions(result.data || []);
+        }
+      } catch {
+        // Keep onboarding usable if options service is temporarily unavailable.
+      }
+    };
+    loadOptions();
+  }, []);
 
   const form = useForm({
     initialValues: {
@@ -121,9 +154,8 @@ export default function OnboardingPage() {
           icon: <IconCheck />,
         });
         
-        // Mark onboarding as complete in localStorage
         localStorage.setItem('padly_onboarding_complete', 'true');
-        
+        startTour();
         router.push('/');
       } else {
         throw new Error(data.detail || 'Failed to update profile');
@@ -182,17 +214,31 @@ export default function OnboardingPage() {
   const progress = ((active + 1) / 5) * 100;
 
   return (
-    <Container size={500} my={40}>
-      <Title ta="center" fw={900}>
-        Complete Your Profile
-      </Title>
-      <Text c="dimmed" size="sm" ta="center" mt={5} mb={30}>
-        Tell us a bit more about yourself to help find better roommate matches
-      </Text>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {/* Hairline progress at top */}
+      <Progress value={progress} size="xs" color="teal" radius={0} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }} />
 
-      <Progress value={progress} size="sm" mb="xl" color="teal" />
+      {/* Logo-only top bar */}
+      <Box style={{ borderBottom: '1px solid #e9ecef', padding: '1rem 2rem' }}>
+        <Group gap="xs" align="center">
+          <Box style={{ width: 28, height: 28, borderRadius: 8, background: '#20c997', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconHome size={16} color="white" />
+          </Box>
+          <Text size="lg" fw={700} style={{ color: '#212529' }}>Padly</Text>
+        </Group>
+      </Box>
 
-      <Paper withBorder shadow="md" p={30} radius="md">
+      {/* Existing content */}
+      <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Container size={500} my={40}>
+          <Title ta="center" fw={900}>
+            Complete Your Profile
+          </Title>
+          <Text c="dimmed" size="sm" ta="center" mt={5} mb={30}>
+            Tell us a bit more about yourself to help find better roommate matches
+          </Text>
+
+          <Paper shadow="sm" radius="lg" style={{ border: '1px solid #e9ecef' }} p={30}>
           <Stepper active={active} size="sm" mb="xl" allowNextStepsSelect={false}>
             <Stepper.Step label="Role" icon={<IconHome size={18} />}>
               <Stack mt="md" gap="lg">
@@ -247,14 +293,18 @@ export default function OnboardingPage() {
 
             <Stepper.Step label="Work" icon={<IconBriefcase size={18} />}>
               <Stack mt="md">
-                <TextInput
+                <Select
                   label="Company Name"
-                  placeholder="Where do you work? (optional)"
+                  placeholder="Select company (optional)"
+                  data={companyOptions}
+                  searchable
                   {...form.getInputProps('company_name')}
                 />
-                <TextInput
+                <Select
                   label="Role / Title"
-                  placeholder="Your job title (optional)"
+                  placeholder="Select role/title (optional)"
+                  data={roleTitleOptions}
+                  searchable
                   {...form.getInputProps('role_title')}
                 />
               </Stack>
@@ -262,9 +312,11 @@ export default function OnboardingPage() {
 
             <Stepper.Step label="Education" icon={<IconSchool size={18} />}>
               <Stack mt="md">
-                <TextInput
+                <Select
                   label="School / University"
-                  placeholder="Where did you study?"
+                  placeholder="Select school/university"
+                  data={schoolOptions}
+                  searchable
                   required
                   {...form.getInputProps('school_name')}
                 />
@@ -340,7 +392,9 @@ export default function OnboardingPage() {
               </Button>
             )}
           </Group>
-      </Paper>
-    </Container>
+          </Paper>
+        </Container>
+      </Box>
+    </Box>
   );
 }

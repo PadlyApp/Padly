@@ -5,6 +5,7 @@ Builds (group, listing) pairs that satisfy hard constraints.
 
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime, date, timedelta
+from app.services.location_matching import locations_match
 from .scoring import check_hard_constraints
 
 
@@ -12,25 +13,14 @@ from .scoring import check_hard_constraints
 
 def location_matches(group: Dict, listing: Dict) -> bool:
     """Check if group and listing locations are compatible."""
-    group_city = str(group.get('target_city', '')).lower().strip()
-    listing_city = str(listing.get('city', '')).lower().strip()
-    
-    if not group_city or not listing_city or group_city != listing_city:
-        return False
-    
-    # Check country
-    group_country = str(group.get('target_country', 'USA')).lower().strip()
-    listing_country = str(listing.get('country', 'USA')).lower().strip()
-    if group_country != listing_country:
-        return False
-    
-    # Check state (only if both specified)
-    group_state = str(group.get('target_state_province', '')).lower().strip()
-    listing_state = str(listing.get('state_province', '')).lower().strip()
-    if group_state and listing_state and group_state != listing_state:
-        return False
-    
-    return True
+    return locations_match(
+        target_city=group.get("target_city"),
+        listing_city=listing.get("city"),
+        target_state=group.get("target_state_province"),
+        listing_state=listing.get("state_province"),
+        target_country=group.get("target_country", "USA"),
+        listing_country=listing.get("country", "USA"),
+    )
 
 
 # --- DATE MATCHING ---
@@ -100,15 +90,18 @@ def price_matches(group: Dict, listing: Dict) -> bool:
 # --- HARD ATTRIBUTES ---
 
 def hard_attributes_match(group: Dict, listing: Dict) -> bool:
-    """Check non-negotiable requirements (furnished, utilities, pets, parking, AC)."""
+    """Check non-negotiable requirements (furnished required, pets, parking, AC)."""
+    # Furnished is hard only when explicitly marked as hard requirement.
+    if (group.get('furnished_is_hard') or (group.get('furnished_preference') == 'required')) and group.get('target_furnished') is True:
+        if listing.get('furnished') is not True:
+            return False
+
     checks = [
-        ('target_furnished', 'furnished'),
-        ('target_utilities_included', 'utilities_included'),
         ('needs_pets_allowed', 'pets_allowed'),
         ('needs_parking', 'parking'),
         ('needs_air_conditioning', 'air_conditioning'),
     ]
-    
+
     for group_key, listing_key in checks:
         if group.get(group_key) is True and listing.get(listing_key) is not True:
             return False

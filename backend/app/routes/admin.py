@@ -1,13 +1,21 @@
 """
 Admin routes
-Admin-only operations using service role (bypasses RLS)
+Admin-only operations using service role (bypasses RLS).
+
+All routes here require the X-Admin-Secret header to match the ADMIN_SECRET
+environment variable. Never expose these endpoints to the frontend.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
 from app.services.supabase_client import SupabaseHTTPClient
+from app.dependencies.auth import require_admin_key
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_key)],
+)
 
 
 @router.get("/users")

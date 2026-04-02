@@ -1,6 +1,6 @@
 # Padly Backend
 
-> A roommate and housing matching platform using Gale-Shapley stable matching with LNS optimization.
+> A roommate and housing matching backend with neural-first Group->Listing ranking and legacy stable matching kept for historical reads.
 
 ## Quick Start
 
@@ -24,8 +24,8 @@ pip install -r requirements.txt
 cp app/.env.example app/.env
 # Edit app/.env with your Supabase credentials
 
-# Run the server
-uvicorn app.main:app --reload
+# Run the server (reload only app/ so pip changes under venv/ don't break the process)
+uvicorn app.main:app --reload --reload-dir app
 ```
 
 Server runs at: http://localhost:8000  
@@ -70,9 +70,9 @@ backend/
 | Feature | Description |
 |---------|-------------|
 | **User→Group Matching** | Solo users find compatible groups (0-100 score) |
-| **Gale-Shapley** | Stable matching guaranteeing no blocking pairs |
+| **Neural Group→Listing Feed** | Hard-filtered + neural/rule/behavior ranked recommendations |
 | **LNS Optimization** | Improves match quality by 13.8% |
-| **Auto Re-matching** | Triggers on group changes, rejections |
+| **Legacy Stable Matching** | Read-only historical/audit access in Phase 3B |
 
 ---
 
@@ -80,17 +80,25 @@ backend/
 
 ### Matching
 - `GET /api/matches/groups` - Discover compatible groups
-- `POST /api/stable-matches/run` - Run matching algorithm
+- `GET /api/roommate-groups/{id}/neural-ranked-listings` - Primary Group→Listing feed
+- `GET /api/roommate-groups/{id}/ranked-listings` - Deterministic fallback feed
 - `GET /api/stable-matches/active` - Get active matches
 
 ### Groups
 - `POST /api/roommate-groups` - Create group
 - `POST /api/roommate-groups/{id}/join` - Request to join
-- `POST /api/roommate-groups/{id}/confirm-match` - Confirm match
+- `GET /api/roommate-groups/{id}/matches` - Legacy-compatible alias (neural-backed in Phase 3B)
 
 ### Listings
 - `GET /api/listings` - List all listings
 - `POST /api/listings/{id}/confirm-match` - Confirm match
+
+### Interactions (Phase 2A)
+- `POST /api/interactions/swipes` - Persist Discover swipe events
+- `GET /api/interactions/swipes/me` - Inspect current user swipe history
+- `GET /api/interactions/behavior/me` - Build authenticated user behavior vector
+- `GET /api/interactions/behavior/groups/{group_id}` - Build group behavior vector (member-only access)
+- `GET /api/interactions/behavior/health` - Swipe event quality/freshness summary
 
 Full API documentation available at `/docs` when server is running.
 

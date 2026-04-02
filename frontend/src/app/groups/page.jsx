@@ -1,93 +1,380 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  Container, 
-  Title, 
-  Text, 
-  Button, 
-  Stack, 
-  Card, 
-  Group, 
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Container,
+  Title,
+  Text,
+  Button,
+  Stack,
+  Card,
+  Group,
   Badge,
   TextInput,
   Select,
   Loader,
   Grid,
   ActionIcon,
-  Tabs
+  Tabs,
+  Box,
+  Skeleton,
+  ThemeIcon,
+  Avatar,
+  Switch,
+  Alert,
+  Center,
+  Collapse,
+  Divider,
+  Progress,
 } from '@mantine/core';
-import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar } from '@tabler/icons-react';
+import { useDisclosure } from '@mantine/hooks';
+import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrencyDollar, IconCheck, IconUserPlus, IconSparkles, IconStar, IconInbox, IconChevronDown, IconChevronUp, IconAlertCircle, IconHome, IconUserSearch } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { Navigation } from '../components/Navigation';
+import { InvitationsPanel } from '../components/InvitationsPanel';
+import { api } from '../../../lib/api';
+
+// --- People tab helpers (copied from roommates/page.jsx) ---
+
+function displayName(profile) {
+  if (!profile) return 'Member';
+  return profile.full_name || profile.fullName || 'Member';
+}
+
+function initials(name) {
+  if (!name || typeof name !== 'string') return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function SuggestionCard({ item, myId, useMlRanking, onExpress, expressing, expressedSet }) {
+  const [opened, { toggle }] = useDisclosure(false);
+  const profile = item.profile || {};
+  const scores = item.scores || {};
+  const uid = item.user_id;
+  const hardFilterMode = !useMlRanking || scores.behavior_confidence === 'hard_filter';
+  const pct = Math.round((scores.final ?? 0) * 100);
+  const sent = expressedSet.has(uid);
+
+  return (
+    <Card withBorder padding="lg" radius="lg" shadow="sm">
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="md" wrap="nowrap">
+          <Avatar src={profile.profile_picture_url} radius="xl" size="lg" color="teal">
+            {initials(displayName(profile))}
+          </Avatar>
+          <div>
+            <Text fw={600} size="md">
+              {displayName(profile)}
+            </Text>
+            <Group gap="xs" mt={4}>
+              {profile.verification_status && (
+                <Badge size="xs" variant="light" color="teal">
+                  {String(profile.verification_status).replace(/_/g, ' ')}
+                </Badge>
+              )}
+            </Group>
+            {(profile.company_name || profile.school_name) && (
+              <Text size="sm" c="dimmed" mt={4}>
+                {[profile.company_name, profile.school_name].filter(Boolean).join(' · ')}
+              </Text>
+            )}
+          </div>
+        </Group>
+        {hardFilterMode ? (
+          <Badge color="teal" variant="light">
+            Hard-pass
+          </Badge>
+        ) : (
+          <Stack gap={4} align="flex-end">
+            <Text fw={700} size="xl" c="teal">
+              {pct}%
+            </Text>
+            <Text size="xs" c="dimmed">
+              match
+            </Text>
+            <Progress value={pct} size="xs" color="teal" radius="xl" w={60} mt={4} />
+          </Stack>
+        )}
+      </Group>
+
+      {Array.isArray(item.reasons) && item.reasons.length > 0 && (
+        <Stack gap={6} mt="md">
+          {item.reasons.slice(0, 4).map((r) => (
+            <Text key={r} size="sm" c="dimmed">
+              {r}
+            </Text>
+          ))}
+        </Stack>
+      )}
+
+      {!hardFilterMode && (
+        <>
+          <Button
+            variant="subtle"
+            size="xs"
+            mt="sm"
+            px={0}
+            rightSection={opened ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
+            onClick={toggle}
+          >
+            Score details
+          </Button>
+          <Collapse in={opened}>
+            <Stack gap={6} mt="xs">
+              <Text size="sm">
+                Lifestyle: {scores.lifestyle != null ? `${Math.round(scores.lifestyle * 100)}%` : '—'}
+              </Text>
+              <Text size="sm">
+                Behavior:{' '}
+                {scores.behavior != null ? `${Math.round(scores.behavior * 100)}%` : '— (cold start)'}
+              </Text>
+              <Text size="sm">
+                Taste embedding:{' '}
+                {scores.embedding != null ? `${Math.round(scores.embedding * 100)}%` : '—'}
+              </Text>
+              <Text size="xs" c="dimmed">
+                Behavior confidence: {scores.behavior_confidence || '—'}
+              </Text>
+            </Stack>
+          </Collapse>
+        </>
+      )}
+
+      <Divider my="md" />
+
+      <Button
+        fullWidth
+        color="teal"
+        disabled={!uid || uid === myId || sent || expressing}
+        loading={expressing}
+        onClick={() => onExpress(uid)}
+      >
+        {sent ? 'Interest sent' : 'Express interest'}
+      </Button>
+    </Card>
+  );
+}
+
+function IntroRow({ row, direction, profiles, onRespond, respondingId }) {
+  const otherId = direction === 'incoming' ? row.from_user_id : row.to_user_id;
+  const other = profiles[otherId] || {};
+  const status = (row.status || '').toLowerCase();
+  const isPendingIncoming = direction === 'incoming' && status === 'pending';
+
+  return (
+    <Card withBorder padding="md" radius="lg">
+      <Group justify="space-between" align="center" wrap="wrap">
+        <Group gap="md">
+          <Avatar radius="xl" color="gray">
+            {initials(displayName(other))}
+          </Avatar>
+          <div>
+            <Text fw={500}>{displayName(other)}</Text>
+            <Text size="xs" c="dimmed">
+              {direction === 'incoming' ? 'Wants to connect' : 'You reached out'} · {status}
+            </Text>
+          </div>
+        </Group>
+        {isPendingIncoming && (
+          <Group gap="sm">
+            <Button
+              size="sm"
+              variant="light"
+              color="red"
+              loading={respondingId === row.id}
+              onClick={() => onRespond(row.id, 'decline')}
+            >
+              Decline
+            </Button>
+            <Button
+              size="sm"
+              color="teal"
+              loading={respondingId === row.id}
+              onClick={() => onRespond(row.id, 'accept')}
+            >
+              Accept
+            </Button>
+          </Group>
+        )}
+        {direction === 'outgoing' && status === 'pending' && (
+          <Badge color="gray" variant="light">
+            Waiting for them
+          </Badge>
+        )}
+        {row.result_group_id && (
+          <Button component={Link} href={`/groups/${row.result_group_id}`} size="sm" variant="light">
+            View group
+          </Button>
+        )}
+      </Group>
+    </Card>
+  );
+}
+
+// --- End People tab helpers ---
 
 export default function GroupsPage() {
+  return (
+    <Suspense fallback={<><Navigation /><Stack align="center" py="xl"><Loader size="lg" /></Stack></>}>
+      <GroupsPageContent />
+    </Suspense>
+  );
+}
+
+function GroupsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, authState, isLoading: authLoading } = useAuth();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchCity, setSearchCity] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
-  const [activeTab, setActiveTab] = useState('all');
+  const tabFromUrl = searchParams.get('tab');
+  const myTabFromUrl = searchParams.get('myTab');
+  const validTabs = ['all', 'my-groups', 'people'];
+  const [activeTab, setActiveTab] = useState(
+    tabFromUrl === 'invitations' ? 'my-groups' : validTabs.includes(tabFromUrl) ? tabFromUrl : 'all'
+  );
+  const [myGroupsSubTab, setMyGroupsSubTab] = useState(
+    tabFromUrl === 'invitations' || myTabFromUrl === 'invitations' ? 'invitations' : 'groups'
+  );
+  const [peopleSubTab, setPeopleSubTab] = useState('suggested');
   const [userGroupIds, setUserGroupIds] = useState(new Set()); // Non-solo groups user is in (for "My Group" badge)
   const [userInAnyGroup, setUserInAnyGroup] = useState(false); // True if user is in ANY group (including solo)
   const [pendingRequestIds, setPendingRequestIds] = useState(new Set()); // Groups where user has pending join request
   const [joiningGroupId, setJoiningGroupId] = useState(null);
-  const [recommendedGroups, setRecommendedGroups] = useState([]);
-  const [loadingRecommended, setLoadingRecommended] = useState(false);
+  const [recommendedGroupIds, setRecommendedGroupIds] = useState(new Set());
+
+  // --- People tab state ---
+  const queryClient = useQueryClient();
+  const [useMlRanking, setUseMlRanking] = useState(true);
+  const [expressedIds, setExpressedIds] = useState(() => new Set());
+  const [funnelBanner, setFunnelBanner] = useState(null);
+  const [respondingId, setRespondingId] = useState(null);
+  const [peopleSearch, setPeopleSearch] = useState('');
+  const [debouncedPeopleSearch, setDebouncedPeopleSearch] = useState('');
+  const myId = user?.profile?.id;
 
   useEffect(() => {
-    if (activeTab === 'recommended' && authState?.accessToken) {
-      fetchRecommendedGroups();
-    } else {
-      fetchGroups();
-    }
+    if (activeTab === 'people' || (activeTab === 'my-groups' && myGroupsSubTab === 'invitations')) return;
+    fetchGroups();
     if (authState?.accessToken) {
       fetchUserMemberships();
+      fetchRecommendedIds();
     }
-  }, [statusFilter, activeTab, authState]);
+  }, [statusFilter, activeTab, myGroupsSubTab, authState]);
 
-  const fetchRecommendedGroups = async () => {
+  // --- People tab queries ---
+  const token = authState?.accessToken;
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedPeopleSearch(peopleSearch.trim());
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [peopleSearch]);
+
+  const suggestionsQuery = useQuery({
+    queryKey: ['roommateSuggestions', token, useMlRanking],
+    queryFn: () => api.getRoommateSuggestions(token, { limit: 20, mode: useMlRanking ? 'ml' : 'hard_filter' }),
+    enabled: !!token && activeTab === 'people',
+  });
+
+  const peopleSearchQuery = useQuery({
+    queryKey: ['peopleSearch', token, debouncedPeopleSearch],
+    queryFn: () => api.searchUsers(token, { q: debouncedPeopleSearch, limit: 20, offset: 0 }),
+    enabled: !!token && activeTab === 'people' && peopleSubTab === 'suggested' && debouncedPeopleSearch.length >= 2,
+  });
+
+  const inboxQuery = useQuery({
+    queryKey: ['roommateIntroInbox', token],
+    queryFn: async () => {
+      const raw = await api.getRoommateIntroInbox(token);
+      const ids = new Set();
+      for (const row of [...(raw.incoming || []), ...(raw.outgoing || [])]) {
+        if (row.from_user_id) ids.add(row.from_user_id);
+        if (row.to_user_id) ids.add(row.to_user_id);
+      }
+      const profiles = {};
+      await Promise.all([...ids].map(async (uid) => {
+        try {
+          const r = await api.getUserWithAuth(uid, token);
+          profiles[uid] = r.data || r;
+        } catch { profiles[uid] = { id: uid, full_name: 'User' }; }
+      }));
+      return { ...raw, profiles };
+    },
+    enabled: !!token && activeTab === 'people' && peopleSubTab === 'inbox',
+  });
+
+  const expressMutation = useMutation({
+    mutationFn: (toUserId) => api.expressRoommateInterest(token, toUserId),
+    onSuccess: (data, toUserId) => {
+      setExpressedIds((prev) => new Set(prev).add(toUserId));
+      queryClient.invalidateQueries({ queryKey: ['roommateIntroInbox'] });
+      if (data.funnel?.group_id) {
+        setFunnelBanner(data.funnel);
+        notifications.show({ title: "You're matched", message: 'Open your group to continue.', color: 'teal' });
+      } else {
+        notifications.show({ title: 'Interest sent', message: "They'll see this in their inbox.", color: 'teal' });
+      }
+    },
+    onError: (e) => notifications.show({ title: 'Could not send', message: e.message, color: 'red' }),
+  });
+
+  const respondMutation = useMutation({
+    mutationFn: ({ introId, action }) => api.respondToRoommateIntro(token, introId, action),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['roommateIntroInbox'] });
+      if (data.funnel?.group_id) {
+        setFunnelBanner(data.funnel);
+        notifications.show({ title: 'Accepted', message: 'Continue in your roommate group.', color: 'teal' });
+      } else {
+        notifications.show({ title: 'Updated', message: 'Intro status saved.', color: 'teal' });
+      }
+    },
+    onError: (e) => notifications.show({ title: 'Action failed', message: e.message, color: 'red' }),
+    onSettled: () => setRespondingId(null),
+  });
+
+  const handleRespond = (introId, action) => {
+    setRespondingId(introId);
+    respondMutation.mutate({ introId, action });
+  };
+
+  const suggestions = suggestionsQuery.data?.suggestions || [];
+  const searchedUsers = peopleSearchQuery.data?.data || [];
+  const showPeopleSearchSection = peopleSearch.trim().length > 0;
+  const prefsError = suggestionsQuery.isError && (suggestionsQuery.error?.message || '').toLowerCase().includes('target_city');
+
+  // --- End People tab queries ---
+
+  const fetchRecommendedIds = async () => {
     if (!authState?.accessToken) return;
-    
-    setLoadingRecommended(true);
     try {
-      // Use a default city or get from user preferences
-      const city = searchCity || 'San Francisco'; // Default city
+      const city = searchCity || 'San Francisco';
       const response = await fetch(
         `http://localhost:8000/api/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
-        {
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`
-          }
-        }
+        { headers: { 'Authorization': `Bearer ${authState.accessToken}` } }
       );
       const data = await response.json();
-      
       if (response.ok && data.status === 'success') {
-        // Add current_member_count for consistency with other views
-        const groupsWithCount = data.groups.map(g => ({
-          ...g,
-          current_member_count: g.current_member_count || 0
-        }));
-        setRecommendedGroups(groupsWithCount);
-      } else {
-        console.error('Error fetching recommended groups:', data);
-        setRecommendedGroups([]);
+        setRecommendedGroupIds(new Set(data.groups.map(g => g.group_id || g.id)));
       }
-    } catch (error) {
-      console.error('Error fetching recommended groups:', error);
-      setRecommendedGroups([]);
-    } finally {
-      setLoadingRecommended(false);
+    } catch {
+      // best-effort — flags are optional
     }
   };
 
   const fetchUserMemberships = async () => {
     if (!authState?.accessToken) return;
-    
+
     try {
       // Fetch user's pending join requests
       const pendingResponse = await fetch(
@@ -99,12 +386,12 @@ export default function GroupsPage() {
         }
       );
       const pendingData = await pendingResponse.json();
-      
+
       if (pendingResponse.ok && pendingData.status === 'success') {
         const pendingIds = new Set(pendingData.data.map(r => r.group_id));
         setPendingRequestIds(pendingIds);
       }
-      
+
       // Fetch user's accepted memberships
       const response = await fetch(
         'http://localhost:8000/api/roommate-groups?my_groups=true',
@@ -115,22 +402,22 @@ export default function GroupsPage() {
         }
       );
       const data = await response.json();
-      
+
       if (data.status === 'success') {
         // Check if user is in ANY group (including solo) - blocks joining other groups
         const allGroups = data.data || [];
         setUserInAnyGroup(allGroups.length > 0);
-        
+
         // Filter out solo groups for the "My Group" badge display
         const nonSoloGroups = allGroups.filter(g => g.is_solo !== true);
         const memberGroupIds = new Set(nonSoloGroups.map(g => g.id));
-        
+
         console.log('User memberships:', {
           allGroups: allGroups.map(g => ({ id: g.id, name: g.group_name, is_solo: g.is_solo })),
           nonSoloGroups: nonSoloGroups.map(g => ({ id: g.id, name: g.group_name })),
           userInAnyGroup: allGroups.length > 0
         });
-        
+
         setUserGroupIds(memberGroupIds);
       }
     } catch (error) {
@@ -142,11 +429,11 @@ export default function GroupsPage() {
     try {
       setLoading(true);
       let url = `http://localhost:8000/api/roommate-groups?status=${statusFilter}`;
-      
+
       if (activeTab === 'my-groups' && user) {
         url += '&my_groups=true';
       }
-      
+
       if (searchCity) {
         url += `&city=${encodeURIComponent(searchCity)}`;
       }
@@ -161,13 +448,13 @@ export default function GroupsPage() {
 
       const response = await fetch(url, { headers });
       const data = await response.json();
-      
+
       console.log('Groups response:', { status: data.status, count: data.count, groupsLength: data.data?.length });
-      
+
       if (data.status === 'success') {
         // For "All Groups" tab, filter out solo groups (they're personal)
         // For "My Groups" tab, show all groups including solo
-        const filteredGroups = activeTab === 'all' 
+        const filteredGroups = activeTab === 'all'
           ? data.data.filter(g => g.is_solo !== true)
           : data.data;
         setGroups(filteredGroups);
@@ -180,16 +467,13 @@ export default function GroupsPage() {
   };
 
   const handleSearch = () => {
-    if (activeTab === 'recommended') {
-      fetchRecommendedGroups();
-    } else {
-      fetchGroups();
-    }
+    fetchGroups();
+    if (authState?.accessToken) fetchRecommendedIds();
   };
 
   const handleJoinGroup = async (groupId, e) => {
     e.stopPropagation();
-    
+
     if (!authState?.accessToken) {
       notifications.show({
         title: 'Authentication Required',
@@ -201,7 +485,7 @@ export default function GroupsPage() {
     }
 
     setJoiningGroupId(groupId);
-    
+
     try {
       const response = await fetch(
         `http://localhost:8000/api/roommate-groups/${groupId}/request-join`,
@@ -218,10 +502,10 @@ export default function GroupsPage() {
       if (response.ok && data.status === 'success') {
         // Add to pending requests
         setPendingRequestIds(prev => new Set([...prev, groupId]));
-        
+
         notifications.show({
           title: 'Join Request Sent!',
-          message: 'Check your Invitations page to accept and join the group',
+          message: 'Check My Group > Invitations to accept and join the group',
           color: 'green',
           icon: <IconCheck />,
         });
@@ -270,13 +554,16 @@ export default function GroupsPage() {
       <Container size="lg" py="xl">
         <Stack gap="xl">
         {/* Header */}
-        <Group justify="space-between" align="flex-start">
-          <div>
-            <Title order={1}>Roommate Groups</Title>
-            <Text c="dimmed" mt="xs">
-              Find or create groups to search for housing together
-            </Text>
-          </div>
+        <Group justify="space-between" align="flex-start" data-tour="groups-header">
+          <Group gap="sm" align="flex-start" mb="xs">
+            <Box style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(32,201,151,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 4, flexShrink: 0 }}>
+              <IconUsers size={22} color="#20c997" />
+            </Box>
+            <div>
+              <Title order={1}>Roommate Groups</Title>
+              <Text c="dimmed" mt={4}>Find or create groups to search for housing together</Text>
+            </div>
+          </Group>
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => router.push('/groups/create')}
@@ -287,26 +574,433 @@ export default function GroupsPage() {
         </Group>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onChange={setActiveTab}>
+        <Tabs value={activeTab} onChange={setActiveTab} data-tour="groups-tabs">
           <Tabs.List>
-            {authState?.accessToken && (
-              <Tabs.Tab value="recommended" leftSection={<IconSparkles size={16} />}>
-                Recommended For You
-              </Tabs.Tab>
-            )}
             <Tabs.Tab value="all" leftSection={<IconUsers size={16} />}>
               All Groups
             </Tabs.Tab>
             {authState?.accessToken && (
               <Tabs.Tab value="my-groups" leftSection={<IconUsers size={16} />}>
-                My Groups
+                My Group
+              </Tabs.Tab>
+            )}
+            {authState?.accessToken && (
+              <Tabs.Tab value="people" leftSection={<IconUserSearch size={16} />}>
+                People
               </Tabs.Tab>
             )}
           </Tabs.List>
         </Tabs>
 
+        {/* Tab Content */}
+        {activeTab === 'people' ? (
+          <Stack gap="lg">
+            {funnelBanner?.group_id && (
+              <Alert icon={<IconHome size={18} />} title="Next step" color="teal" variant="light">
+                <Text size="sm" mb="sm">
+                  {funnelBanner.next_step === 'join_group'
+                    ? 'Accept your invite and join the roommate group to continue.'
+                    : 'Open your roommate group to coordinate with your match.'}
+                </Text>
+                <Button component={Link} href={`/groups/${funnelBanner.group_id}`} size="sm" color="teal">
+                  Go to group
+                </Button>
+              </Alert>
+            )}
+
+            <Group gap="xs">
+              <Button
+                size="xs"
+                radius="xl"
+                variant={peopleSubTab === 'suggested' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setPeopleSubTab('suggested')}
+              >
+                Suggested
+              </Button>
+              <Button
+                size="xs"
+                radius="xl"
+                variant={peopleSubTab === 'inbox' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setPeopleSubTab('inbox')}
+              >
+                Inbox
+              </Button>
+            </Group>
+
+            {peopleSubTab === 'suggested' ? (
+              <Stack gap="md">
+                <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
+                  <TextInput
+                    placeholder="Search users by name or email..."
+                    leftSection={<IconSearch size={16} />}
+                    value={peopleSearch}
+                    onChange={(e) => setPeopleSearch(e.currentTarget.value)}
+                  />
+                  <Text size="xs" c="dimmed" mt={8}>
+                    Search anyone and send roommate interest directly.
+                  </Text>
+                </Card>
+
+                <Card padding="md" radius="lg" style={{ backgroundColor: '#f8f9fa' }}>
+                  <Group justify="space-between" align="center" wrap="wrap">
+                    <div>
+                      <Text size="sm" fw={500}>Ranking mode</Text>
+                      <Text size="xs" c="dimmed">Toggle between ML ranking and hard constraints.</Text>
+                    </div>
+                    <Switch checked={useMlRanking} onChange={(e) => setUseMlRanking(e.currentTarget.checked)} color="teal" onLabel="ML" offLabel="Hard" />
+                  </Group>
+                </Card>
+
+                {showPeopleSearchSection && (
+                  <Stack gap="sm">
+                    {debouncedPeopleSearch.length < 2 ? (
+                      <Text size="sm" c="dimmed">Type at least 2 characters to search.</Text>
+                    ) : peopleSearchQuery.isLoading ? (
+                      <Center py="sm"><Loader size="sm" color="teal" /></Center>
+                    ) : peopleSearchQuery.isError ? (
+                      <Alert color="red" title="Could not search users">{peopleSearchQuery.error.message}</Alert>
+                    ) : searchedUsers.length === 0 ? (
+                      <Alert color="gray" title="No users found">
+                        <Text size="sm">Try another name or email.</Text>
+                      </Alert>
+                    ) : (
+                      <Stack gap="sm">
+                        {searchedUsers.map((candidate) => {
+                          const sent = expressedIds.has(candidate.id);
+                          const expressing = expressMutation.isPending && expressMutation.variables === candidate.id;
+                          return (
+                            <Card key={candidate.id} withBorder padding="md" radius="lg">
+                              <Group justify="space-between" align="center" wrap="wrap">
+                                <Group gap="md" wrap="nowrap">
+                                  <Avatar src={candidate.profile_picture_url} radius="xl" color="teal">
+                                    {initials(displayName(candidate))}
+                                  </Avatar>
+                                  <div>
+                                    <Text fw={600}>{displayName(candidate)}</Text>
+                                    {candidate.email && <Text size="sm" c="dimmed">{candidate.email}</Text>}
+                                  </div>
+                                </Group>
+                                <Button
+                                  size="sm"
+                                  color="teal"
+                                  disabled={!candidate.id || candidate.id === myId || sent || expressing}
+                                  loading={expressing}
+                                  onClick={() => expressMutation.mutate(candidate.id)}
+                                >
+                                  {sent ? 'Interest sent' : 'Express interest'}
+                                </Button>
+                              </Group>
+                            </Card>
+                          );
+                        })}
+                      </Stack>
+                    )}
+                  </Stack>
+                )}
+
+                {suggestionsQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
+
+                {prefsError && (
+                  <Alert icon={<IconAlertCircle size={18} />} color="orange" title="Set your city">
+                    <Text size="sm" mb="md">{suggestionsQuery.error.message}</Text>
+                    <Button component={Link} href="/account?tab=preferences" variant="light" color="teal">Open preferences</Button>
+                  </Alert>
+                )}
+
+                {suggestionsQuery.isError && !prefsError && (
+                  <Alert color="red" title="Could not load suggestions">{suggestionsQuery.error.message}</Alert>
+                )}
+
+                {!suggestionsQuery.isLoading && !suggestionsQuery.isError && suggestions.length === 0 && (
+                  <Alert color="gray" title="No matches yet">
+                    <Text size="sm">
+                      {useMlRanking ? 'No strong ranked matches right now. Swipe on ' : 'No users meet your hard constraints. Swipe on '}
+                      <Text component={Link} href="/discover" c="teal" inherit span fw={500}>Discover</Text>
+                      {useMlRanking ? ' to improve your taste signal.' : ' to improve data coverage.'}
+                    </Text>
+                  </Alert>
+                )}
+
+                {suggestions.map((item) => (
+                  <SuggestionCard
+                    key={item.user_id}
+                    item={item}
+                    myId={myId}
+                    useMlRanking={useMlRanking}
+                    onExpress={(uid) => expressMutation.mutate(uid)}
+                    expressing={expressMutation.isPending && expressMutation.variables === item.user_id}
+                    expressedSet={expressedIds}
+                  />
+                ))}
+              </Stack>
+            ) : (
+              <Stack gap="md">
+                {inboxQuery.isLoading && <Center py="xl"><Loader color="teal" /></Center>}
+                {inboxQuery.isError && <Alert color="red">{inboxQuery.error.message}</Alert>}
+                {!inboxQuery.isLoading && !inboxQuery.isError && (
+                  <Stack gap="xl">
+                    <div>
+                      <Text fw={600} mb="sm">Incoming</Text>
+                      {(inboxQuery.data?.incoming || []).length === 0 ? (
+                        <Text size="sm" c="dimmed">No incoming requests.</Text>
+                      ) : (
+                        <Stack gap="sm">
+                          {(inboxQuery.data.incoming || []).map((row) => (
+                            <IntroRow key={row.id} row={row} direction="incoming" profiles={inboxQuery.data.profiles || {}} onRespond={handleRespond} respondingId={respondingId} />
+                          ))}
+                        </Stack>
+                      )}
+                    </div>
+                    <Divider />
+                    <div>
+                      <Text fw={600} mb="sm">Outgoing</Text>
+                      {(inboxQuery.data?.outgoing || []).length === 0 ? (
+                        <Text size="sm" c="dimmed">You haven't sent interest to anyone yet.</Text>
+                      ) : (
+                        <Stack gap="sm">
+                          {(inboxQuery.data.outgoing || []).map((row) => (
+                            <IntroRow key={row.id} row={row} direction="outgoing" profiles={inboxQuery.data.profiles || {}} onRespond={handleRespond} respondingId={respondingId} />
+                          ))}
+                        </Stack>
+                      )}
+                    </div>
+                  </Stack>
+                )}
+              </Stack>
+            )}
+          </Stack>
+        ) : activeTab === 'my-groups' ? (
+          <Stack gap="md">
+            <Group gap="xs">
+              <Button
+                size="xs"
+                radius="xl"
+                variant={myGroupsSubTab === 'groups' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setMyGroupsSubTab('groups')}
+              >
+                Group
+              </Button>
+              <Button
+                size="xs"
+                radius="xl"
+                variant={myGroupsSubTab === 'invitations' ? 'filled' : 'light'}
+                color="teal"
+                onClick={() => setMyGroupsSubTab('invitations')}
+              >
+                Invitations
+              </Button>
+            </Group>
+
+            {myGroupsSubTab === 'invitations' ? (
+              <InvitationsPanel user={user} authState={authState} />
+            ) : (
+              <>{/* Search and Filters */}
+                <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }} data-tour="groups-search">
+                  <Group gap="md">
+                    <TextInput
+                      placeholder="Search by city..."
+                      leftSection={<IconSearch size={16} />}
+                      value={searchCity}
+                      onChange={(e) => setSearchCity(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                      style={{ flex: 1 }}
+                    />
+                    <Select
+                      placeholder="Status"
+                      data={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
+                        { value: 'matched', label: 'Matched' }
+                      ]}
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      style={{ width: 150 }}
+                    />
+                    <Button onClick={handleSearch}>Search</Button>
+                  </Group>
+                </Card>
+
+                {/* Groups Grid */}
+                <div data-tour="groups-list">
+                  {loading ? (
+                    <Grid>
+                      {[1,2,3,4,5,6].map(i => (
+                        <Grid.Col key={i} span={{ base: 12, sm: 6, md: 4 }}>
+                          <Card radius="lg" shadow="sm" style={{ height: 220 }}>
+                            <Stack gap="md">
+                              <Skeleton height={20} width="60%" />
+                              <Skeleton height={14} width="40%" />
+                              <Skeleton height={14} width="80%" />
+                              <Box style={{ flex: 1 }} />
+                              <Skeleton height={36} />
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  ) : groups.length === 0 ? (
+                    <Card withBorder p="xl">
+                      <Stack align="center" gap="md" py="xl">
+                        <ThemeIcon size={64} variant="light" color="teal"><IconUsers size={32} /></ThemeIcon>
+                        <Title order={3}>No groups found</Title>
+                        <Text c="dimmed" ta="center">
+                          {"You haven't joined any groups yet. Create one or browse all groups to join."}
+                        </Text>
+                      </Stack>
+                    </Card>
+                  ) : (
+                    <Grid>
+                      {groups.map((group) => (
+                        <Grid.Col key={group.id} span={{ base: 12, sm: 6, md: 4 }}>
+                          <Card
+                            className="card-lift"
+                            padding="lg"
+                            radius="lg"
+                            shadow="sm"
+                            style={{
+                              height: '100%',
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => router.push(`/groups/${group.id}`)}
+                          >
+                            <Stack gap="md" style={{ height: '100%' }}>
+                              {/* Header */}
+                              <Group justify="space-between">
+                                <Group gap="xs">
+                                  <Badge color={getStatusColor(group.status)} variant="light">
+                                    {group.status}
+                                  </Badge>
+                                  {/* My Group badge for groups user is a member of */}
+                                  {userGroupIds.has(group.id) && (
+                                    <Badge color="blue" variant="filled">
+                                      My Group
+                                    </Badge>
+                                  )}
+                                  {group.is_solo === true && (
+                                    <Badge color="grape" variant="light">
+                                      Solo
+                                    </Badge>
+                                  )}
+                                  {recommendedGroupIds.has(group.id) && (
+                                    <Badge color="teal" variant="light" leftSection={<IconSparkles size={12} />}>
+                                      Recommended
+                                    </Badge>
+                                  )}
+                                </Group>
+                                <Group gap={4}>
+                                  <IconUsers size={16} color="gray" />
+                                  <Text size="sm" c="dimmed">
+                                    {group.target_group_size}
+                                  </Text>
+                                </Group>
+                              </Group>
+
+                              {/* Title */}
+                              <Title order={4} lineClamp={2}>
+                                {group.group_name}
+                              </Title>
+
+                              {/* Description */}
+                              <Text size="sm" c="dimmed" lineClamp={2} style={{ flex: 1 }}>
+                                {group.description || 'No description provided'}
+                              </Text>
+
+                              {/* Details */}
+                              <Stack gap="xs">
+                                <Group gap="xs">
+                                  <IconMapPin size={16} color="gray" />
+                                  <Text size="sm">{group.target_city}</Text>
+                                </Group>
+
+                                {group.budget_per_person_min && group.budget_per_person_max && (
+                                  <Group gap="xs">
+                                    <IconCurrencyDollar size={16} color="gray" />
+                                    <Text size="sm">
+                                      ${group.budget_per_person_min} - ${group.budget_per_person_max}
+                                    </Text>
+                                  </Group>
+                                )}
+
+                                {group.target_move_in_date && (
+                                  <Group gap="xs">
+                                    <IconCalendar size={16} color="gray" />
+                                    <Text size="sm">
+                                      {new Date(group.target_move_in_date).toLocaleDateString()}
+                                    </Text>
+                                  </Group>
+                                )}
+                              </Stack>
+
+                              {/* Full Group Indicator - only show if we have valid data */}
+                              {group.target_group_size && (group.current_member_count || 0) >= group.target_group_size && (
+                                <Badge color="red" variant="filled" size="lg" fullWidth>
+                                  Group is Full
+                                </Badge>
+                              )}
+
+                              {/* Pending Request Indicator */}
+                              {pendingRequestIds.has(group.id) && (
+                                <Badge color="blue" variant="light" size="lg" fullWidth>
+                                  ✓ Request Sent
+                                </Badge>
+                              )}
+
+                              {/* Footer */}
+                              <Group gap="xs" mt="auto">
+                                {/* Show Join button only if: user is logged in, no pending request, not in this group, group not full, and user not in ANY group (including solo) */}
+                                {!pendingRequestIds.has(group.id) && !userGroupIds.has(group.id) && authState?.accessToken && (!group.target_group_size || (group.current_member_count || 0) < group.target_group_size) && !userInAnyGroup ? (
+                                  <>
+                                    <Button
+                                      variant="filled"
+                                      color="green"
+                                      flex={1}
+                                      leftSection={<IconUserPlus size={16} />}
+                                      onClick={(e) => handleJoinGroup(group.id, e)}
+                                      loading={joiningGroupId === group.id}
+                                    >
+                                      Join
+                                    </Button>
+                                    <Button
+                                      variant="light"
+                                      flex={1}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        router.push(`/groups/${group.id}`);
+                                      }}
+                                    >
+                                      View
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Button
+                                    variant="light"
+                                    fullWidth
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      router.push(`/groups/${group.id}`);
+                                    }}
+                                  >
+                                    View Details
+                                  </Button>
+                                )}
+                              </Group>
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  )}
+                </div>
+            </>
+            )}
+          </Stack>
+        ) : (
+        <>
         {/* Search and Filters */}
-        <Card withBorder>
+        <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }} data-tour="groups-search">
           <Group gap="md">
             <TextInput
               placeholder="Search by city..."
@@ -332,21 +1026,31 @@ export default function GroupsPage() {
         </Card>
 
         {/* Groups Grid */}
-        {(activeTab === 'recommended' ? loadingRecommended : loading) ? (
-          <Stack align="center" gap="md" style={{ minHeight: '300px', justifyContent: 'center' }}>
-            <Loader size="lg" />
-            <Text>{activeTab === 'recommended' ? 'Finding compatible groups...' : 'Loading groups...'}</Text>
-          </Stack>
-        ) : (activeTab === 'recommended' ? recommendedGroups : groups).length === 0 ? (
+        <div data-tour="groups-list">
+        {loading ? (
+          <Grid>
+            {[1,2,3,4,5,6].map(i => (
+              <Grid.Col key={i} span={{ base: 12, sm: 6, md: 4 }}>
+                <Card radius="lg" shadow="sm" style={{ height: 220 }}>
+                  <Stack gap="md">
+                    <Skeleton height={20} width="60%" />
+                    <Skeleton height={14} width="40%" />
+                    <Skeleton height={14} width="80%" />
+                    <Box style={{ flex: 1 }} />
+                    <Skeleton height={36} />
+                  </Stack>
+                </Card>
+              </Grid.Col>
+            ))}
+          </Grid>
+        ) : groups.length === 0 ? (
           <Card withBorder p="xl">
             <Stack align="center" gap="md" py="xl">
-              <IconUsers size={48} stroke={1.5} color="gray" />
+              <ThemeIcon size={64} variant="light" color="teal"><IconUsers size={32} /></ThemeIcon>
               <Title order={3}>No groups found</Title>
               <Text c="dimmed" ta="center">
-                {activeTab === 'my-groups' 
+                {activeTab === 'my-groups'
                   ? "You haven't joined any groups yet. Create one or browse all groups to join."
-                  : activeTab === 'recommended'
-                  ? "No compatible groups found. Try searching a different city or adjusting your preferences."
                   : "No groups match your search criteria. Try adjusting your filters."}
               </Text>
               {activeTab === 'all' && (
@@ -358,23 +1062,16 @@ export default function GroupsPage() {
           </Card>
         ) : (
           <Grid>
-            {(activeTab === 'recommended' ? recommendedGroups : groups).map((group) => (
+            {groups.map((group) => (
               <Grid.Col key={group.id} span={{ base: 12, sm: 6, md: 4 }}>
                 <Card
-                  withBorder
+                  className="card-lift"
                   padding="lg"
-                  style={{ 
-                    height: '100%', 
+                  radius="lg"
+                  shadow="sm"
+                  style={{
+                    height: '100%',
                     cursor: 'pointer',
-                    transition: 'transform 0.2s, box-shadow 0.2s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
                   }}
                   onClick={() => router.push(`/groups/${group.id}`)}
                 >
@@ -396,21 +1093,16 @@ export default function GroupsPage() {
                             Solo
                           </Badge>
                         )}
-                        {/* Compatibility score for recommended groups */}
-                        {group.compatibility?.score && (
-                          <Badge 
-                            color={group.compatibility.score >= 80 ? 'green' : group.compatibility.score >= 60 ? 'teal' : 'yellow'} 
-                            variant="filled"
-                            leftSection={<IconStar size={12} />}
-                          >
-                            {Math.round(group.compatibility.score)}% Match
+                        {recommendedGroupIds.has(group.id) && (
+                          <Badge color="teal" variant="light" leftSection={<IconSparkles size={12} />}>
+                            Recommended
                           </Badge>
                         )}
                       </Group>
                       <Group gap={4}>
                         <IconUsers size={16} color="gray" />
                         <Text size="sm" c="dimmed">
-                          {group.target_group_size}
+                          {group.target_group_size ?? 'Unlimited'}
                         </Text>
                       </Group>
                     </Group>
@@ -431,7 +1123,7 @@ export default function GroupsPage() {
                         <IconMapPin size={16} color="gray" />
                         <Text size="sm">{group.target_city}</Text>
                       </Group>
-                      
+
                       {group.budget_per_person_min && group.budget_per_person_max && (
                         <Group gap="xs">
                           <IconCurrencyDollar size={16} color="gray" />
@@ -440,7 +1132,7 @@ export default function GroupsPage() {
                           </Text>
                         </Group>
                       )}
-                      
+
                       {group.target_move_in_date && (
                         <Group gap="xs">
                           <IconCalendar size={16} color="gray" />
@@ -470,8 +1162,8 @@ export default function GroupsPage() {
                       {/* Show Join button only if: user is logged in, no pending request, not in this group, group not full, and user not in ANY group (including solo) */}
                       {!pendingRequestIds.has(group.id) && !userGroupIds.has(group.id) && authState?.accessToken && (!group.target_group_size || (group.current_member_count || 0) < group.target_group_size) && !userInAnyGroup ? (
                         <>
-                          <Button 
-                            variant="filled" 
+                          <Button
+                            variant="filled"
                             color="green"
                             flex={1}
                             leftSection={<IconUserPlus size={16} />}
@@ -480,8 +1172,8 @@ export default function GroupsPage() {
                           >
                             Join
                           </Button>
-                          <Button 
-                            variant="light" 
+                          <Button
+                            variant="light"
                             flex={1}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -492,8 +1184,8 @@ export default function GroupsPage() {
                           </Button>
                         </>
                       ) : (
-                        <Button 
-                          variant="light" 
+                        <Button
+                          variant="light"
                           fullWidth
                           onClick={(e) => {
                             e.stopPropagation();
@@ -509,6 +1201,9 @@ export default function GroupsPage() {
               </Grid.Col>
             ))}
           </Grid>
+        )}
+        </div>
+        </>
         )}
       </Stack>
     </Container>

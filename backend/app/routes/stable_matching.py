@@ -20,9 +20,11 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 import logging
+import os
 
 from app.dependencies.supabase import get_admin_client
 from app.models import ListingResponse, RoommateGroupResponse
+from app.services.location_matching import cities_match, filter_listings_for_location
 from app.services.stable_matching import (
     # Phase 1: Filters
     get_eligible_listings,
@@ -44,6 +46,76 @@ from app.services.stable_matching import (
 
 router = APIRouter(prefix="/api/stable-matches", tags=["Stable Matching"])
 logger = logging.getLogger(__name__)
+
+
+def _fetch_all_active_listings(supabase) -> List[Dict]:
+    page_size = 1000
+    page = 0
+    listings: List[Dict] = []
+    while True:
+        batch = (
+            supabase.table("listings")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        listings.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return listings
+
+
+def _fetch_all_active_groups(supabase) -> List[Dict]:
+    page_size = 1000
+    page = 0
+    groups: List[Dict] = []
+    while True:
+        batch = (
+            supabase.table("roommate_groups")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        groups.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return groups
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stable_writes_enabled() -> bool:
+    # Phase 3B default: stable matching is read-only legacy.
+    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
+
+
+def _require_stable_writes_enabled() -> None:
+    if _stable_writes_enabled():
+        return
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Stable matching write operations are disabled in Phase 3B. "
+            "Use neural group listing ranking endpoints for live serving."
+        ),
+    )
 
 
 # ============================================================================
@@ -162,6 +234,8 @@ async def run_matching(request: RunMatchingRequest):
     
     Returns match results and diagnostics.
     """
+    _require_stable_writes_enabled()
+
     try:
         start_time = datetime.now()
         logger.info(f"Starting matching for city: {request.city}")
@@ -183,8 +257,15 @@ async def run_matching(request: RunMatchingRequest):
         
         # Fetch all data from database
         logger.info("Fetching data from database...")
-        listings_response = supabase.table('listings').select('*').eq('city', request.city).eq('status', 'active').execute()
-        groups_response = supabase.table('roommate_groups').select('*').eq('target_city', request.city).eq('status', 'active').execute()
+        listings_response_data = filter_listings_for_location(
+            _fetch_all_active_listings(supabase),
+            target_city=request.city,
+        )
+        groups_response_data = [
+            group
+            for group in _fetch_all_active_groups(supabase)
+            if cities_match(request.city, group.get("target_city"))
+        ]
         
         # Parse data using Pydantic models for type safety and validation
         logger.info("Parsing data with Pydantic models...")
@@ -205,11 +286,11 @@ async def run_matching(request: RunMatchingRequest):
         # Parse with Pydantic for validation, then convert Decimals to floats
         all_listings_raw = [
             convert_decimals_to_float(ListingResponse(**listing).model_dump())
-            for listing in listings_response.data
+            for listing in listings_response_data
         ]
         all_groups_raw = [
             convert_decimals_to_float(RoommateGroupResponse(**group).model_dump())
-            for group in groups_response.data
+            for group in groups_response_data
         ]
         
         # 🔥 OPTION 3: Exclude confirmed groups and listings from matching pool
@@ -525,6 +606,8 @@ async def delete_matches_for_group(group_id: str):
     - Group preferences changed significantly
     - Group wants to opt out of matching
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         engine = MatchPersistenceEngine(supabase)
@@ -552,6 +635,8 @@ async def delete_matches_for_listing(listing_id: str):
     - Listing becomes unavailable
     - Listing details changed significantly
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         engine = MatchPersistenceEngine(supabase)
@@ -579,6 +664,8 @@ async def expire_old_matches(
     Marks matches older than the threshold as 'expired'.
     Default: 30 days
     """
+    _require_stable_writes_enabled()
+
     try:
         supabase = get_admin_client()
         

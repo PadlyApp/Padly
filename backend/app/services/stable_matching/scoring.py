@@ -1,41 +1,59 @@
 """
 Scoring & Preference Lists for Group↔Listing matching.
-Hard constraints: city, state, budget, bedrooms, date (±60d), lease type/duration.
-Soft preferences: bathrooms(20), furnished(20), utilities(20), deposit(20), house_rules(20).
+Hard constraints: city, state, budget, bedrooms, date (±60d), lease type/duration,
+bathrooms minimum, deposit cap, furnished(required).
+Soft preferences (frontend UI contract): preferred_neighborhoods, amenity_priorities,
+building_type_preferences, target_house_rules.
 """
 
-from typing import Dict, List, Tuple, Any, Optional
-from datetime import datetime, date, timedelta
+from typing import Dict, List, Tuple, Any, Optional, Set
+from datetime import datetime
+import re
 import logging
+from app.services.location_matching import locations_match, normalize_city_name, normalize_state
+from app.services.preferences_contract import lease_types_compatible
 
 logger = logging.getLogger(__name__)
 
 # Weights (100 pts total)
-GROUP_SCORING_WEIGHTS = {'bathrooms': 20, 'furnished': 20, 'utilities': 20, 'deposit': 20, 'house_rules': 20}
-LISTING_SCORING_WEIGHTS = {'bathrooms': 20, 'furnished': 20, 'utilities': 20, 'deposit': 20, 'house_rules': 20}
+GROUP_SCORING_WEIGHTS = {
+    "preferred_neighborhoods": 25,
+    "amenity_priorities": 25,
+    "building_type_preferences": 25,
+    "target_house_rules": 25,
+}
+LISTING_SCORING_WEIGHTS = {"budget": 40, "deposit": 30, "preference_match": 30}
 MAX_SCORE = 100
 
 # --- HARD CONSTRAINTS ---
 
 def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[str]]:
     """Check all hard constraints. Returns (passes, rejection_reason)."""
-    
-    # City match
-    group_city = (group.get('target_city') or '').strip().lower()
-    listing_city = (listing.get('city') or '').strip().lower()
-    if group_city != listing_city:
-        return False, f"city_mismatch_{group_city}_vs_{listing_city}"
-    
-    # State match (if both specified)
-    group_state = (group.get('target_state_province') or '').strip().lower()
-    listing_state = (listing.get('state_province') or '').strip().lower()
-    if group_state and listing_state and group_state != listing_state:
+
+    group_city = normalize_city_name(group.get("target_city"))
+    listing_city = normalize_city_name(listing.get("city"))
+    group_state = normalize_state(group.get("target_state_province"))
+    listing_state = normalize_state(listing.get("state_province"))
+    if not locations_match(
+        target_city=group.get("target_city"),
+        listing_city=listing.get("city"),
+        target_state=group.get("target_state_province"),
+        listing_state=listing.get("state_province"),
+        target_country=group.get("target_country", "USA"),
+        listing_country=listing.get("country", "USA"),
+    ):
+        if group_city != listing_city:
+            return False, f"city_mismatch_{group_city}_vs_{listing_city}"
         return False, f"state_mismatch_{group_state}_vs_{listing_state}"
     
     # Budget range
-    group_size = group.get('target_group_size', 2)
-    min_budget = group.get('budget_per_person_min', 0)
-    max_budget = group.get('budget_per_person_max', 0)
+    group_size = group.get("target_group_size") or group.get("current_member_count") or 2
+    min_budget = group.get("budget_per_person_min")
+    max_budget = group.get("budget_per_person_max")
+    if min_budget is None:
+        min_budget = group.get("budget_min", 0)
+    if max_budget is None:
+        max_budget = group.get("budget_max", 0)
     listing_price = listing.get('price_per_month', 0)
     min_total = min_budget * group_size
     max_total = (max_budget * group_size) + 100
@@ -48,7 +66,7 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
         return False, f"insufficient_bedrooms"
     
     # Move-in date (±60 days)
-    group_date = group.get('target_move_in_date')
+    group_date = group.get("target_move_in_date") or group.get("move_in_date")
     listing_date = listing.get('available_from')
     if group_date and listing_date:
         if isinstance(group_date, str):
@@ -59,90 +77,248 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
             return False, f"date_mismatch"
     
     # Lease type/duration (if specified)
-    group_lease_type = (group.get('target_lease_type') or '').strip().lower()
-    listing_lease_type = (listing.get('lease_type') or '').strip().lower()
-    if group_lease_type and listing_lease_type and group_lease_type != listing_lease_type:
+    group_lease_type = group.get('target_lease_type')
+    listing_lease_type = listing.get('lease_type')
+    if not lease_types_compatible(group_lease_type, listing_lease_type):
         return False, f"lease_type_mismatch"
     
     group_duration = group.get('target_lease_duration_months')
     listing_duration = listing.get('lease_duration_months')
     if group_duration is not None and listing_duration is not None and group_duration != listing_duration:
         return False, f"lease_duration_mismatch"
+
+    # Bathroom preference as hard requirement when present.
+    group_bathrooms = group.get('target_bathrooms')
+    listing_bathrooms = listing.get('number_of_bathrooms')
+    if group_bathrooms is not None and listing_bathrooms is not None:
+        try:
+            if float(listing_bathrooms) < float(group_bathrooms):
+                return False, "bathroom_requirement_not_met"
+        except (TypeError, ValueError):
+            return False, "invalid_bathroom_data"
+
+    # Maximum deposit as hard requirement when present.
+    max_deposit = group.get('target_deposit_amount')
+    listing_deposit = listing.get('deposit_amount')
+    if max_deposit is not None and listing_deposit is not None:
+        try:
+            if float(listing_deposit) > float(max_deposit):
+                return False, "deposit_requirement_not_met"
+        except (TypeError, ValueError):
+            return False, "invalid_deposit_data"
+
+    # Furnished requirement: only hard when explicitly required.
+    furnished_pref = (group.get('furnished_preference') or '').strip().lower()
+    furnished_is_hard = bool(group.get('furnished_is_hard')) or furnished_pref == 'required'
+    if furnished_is_hard and group.get('target_furnished') is True:
+        listing_furnished = listing.get('furnished')
+        if isinstance(listing_furnished, str):
+            listing_furnished = listing_furnished.lower() in ['true', 't', '1', 'yes']
+        if listing_furnished is not True:
+            return False, "furnished_requirement_not_met"
     
     return True, None
 
 
-# --- SOFT PREFERENCE SCORING (20 pts each) ---
+# --- SOFT PREFERENCE SCORING (frontend UI fields) ---
 
-def calculate_bathroom_score(group: Dict, listing: Dict) -> float:
-    """Bathroom match: meets/exceeds=20, within 0.5=10, else=5."""
-    target = float(group.get('target_bathrooms', 1.0))
-    actual = float(listing.get('number_of_bathrooms', 1.0))
-    if actual >= target:
-        return 20.0
-    if actual >= target - 0.5:
-        return 10.0
-    return 5.0
+def _norm(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
-def calculate_furnished_score(group: Dict, listing: Dict) -> float:
-    """Furnished match: same=20, different=10."""
-    group_pref = group.get('target_furnished', False)
-    listing_val = listing.get('furnished', False)
-    if isinstance(group_pref, str):
-        group_pref = group_pref.lower() in ['true', 't', '1', 'yes']
-    if isinstance(listing_val, str):
-        listing_val = listing_val.lower() in ['true', 't', '1', 'yes']
-    return 20.0 if group_pref == listing_val else 10.0
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return _norm(value) in {"1", "true", "t", "yes", "y", "on"}
 
 
-def calculate_utilities_score(group: Dict, listing: Dict) -> float:
-    """Utilities match: same=20, different=10."""
-    group_pref = group.get('target_utilities_included', False)
-    listing_val = listing.get('utilities_included', False)
-    if isinstance(group_pref, str):
-        group_pref = group_pref.lower() in ['true', 't', '1', 'yes']
-    if isinstance(listing_val, str):
-        listing_val = listing_val.lower() in ['true', 't', '1', 'yes']
-    return 20.0 if group_pref == listing_val else 10.0
+def _build_norm_set(values: Any) -> Set[str]:
+    if not isinstance(values, list):
+        return set()
+    out: Set[str] = set()
+    for value in values:
+        token = _norm(value)
+        if token:
+            out.add(token)
+    return out
 
 
-def calculate_deposit_score(group: Dict, listing: Dict) -> float:
-    """Deposit: at/below=20, +$500=10, +$1500=5, else=0."""
-    target = float(group.get('target_deposit_amount') or 0)
-    actual = float(listing.get('deposit_amount') or 0)
-    if actual <= target:
-        return 20.0
-    if actual <= target + 500:
-        return 10.0
-    if actual <= target + 1500:
-        return 5.0
-    return 0.0
+def _extract_listing_neighborhood_tokens(listing: Dict[str, Any]) -> Set[str]:
+    tokens: Set[str] = set()
+    for key in ("neighborhood", "neighbourhood", "district", "area", "address_line_2"):
+        token = _norm(listing.get(key))
+        if token:
+            tokens.add(token)
+    return tokens
+
+
+_AMENITY_ALIASES = {
+    "laundry": "laundry",
+    "parking": "parking",
+    "gym": "gym",
+    "fitness_center": "gym",
+    "air_conditioning": "ac",
+    "airconditioner": "ac",
+    "a_c": "ac",
+    "ac": "ac",
+    "dishwasher": "dishwasher",
+    "elevator": "elevator",
+    "doorman": "doorman",
+    "bike_storage": "bike_storage",
+    "bike_room": "bike_storage",
+    "bike_parking": "bike_storage",
+}
+
+
+def _amenity_alias(value: Any) -> Optional[str]:
+    token = _norm(value).replace("-", "_").replace(" ", "_").replace("/", "_")
+    if not token:
+        return None
+    return _AMENITY_ALIASES.get(token, token if token in _AMENITY_ALIASES.values() else None)
+
+
+def _extract_listing_amenity_tokens(listing: Dict[str, Any]) -> Set[str]:
+    tokens: Set[str] = set()
+    amenities = listing.get("amenities")
+    if isinstance(amenities, dict):
+        for raw_key, raw_val in amenities.items():
+            alias = _amenity_alias(raw_key)
+            if alias and _is_truthy(raw_val):
+                tokens.add(alias)
+    elif isinstance(amenities, list):
+        for item in amenities:
+            alias = _amenity_alias(item)
+            if alias:
+                tokens.add(alias)
+    elif isinstance(amenities, str):
+        for part in re.split(r"[^a-zA-Z0-9_]+", amenities):
+            alias = _amenity_alias(part)
+            if alias:
+                tokens.add(alias)
+
+    # Fallback for common top-level booleans when amenities blob is sparse.
+    if _is_truthy(listing.get("parking")):
+        tokens.add("parking")
+    if _is_truthy(listing.get("air_conditioning")) or _is_truthy(listing.get("ac")):
+        tokens.add("ac")
+    if _is_truthy(listing.get("dishwasher")):
+        tokens.add("dishwasher")
+    if _is_truthy(listing.get("elevator")):
+        tokens.add("elevator")
+
+    return tokens
+
+
+def _normalize_building_type(value: Any) -> str:
+    raw = _norm(value).replace("-", "_").replace(" ", "_")
+    aliases = {
+        "single_family": "house",
+        "single_family_home": "house",
+        "condominium": "condo",
+        "private_room": "apartment",
+        "studio": "apartment",
+    }
+    return aliases.get(raw, raw)
+
+
+def calculate_neighborhood_score(group: Dict[str, Any], listing: Dict[str, Any]) -> float:
+    """Score preferred_neighborhoods vs listing neighborhood metadata."""
+    weight = float(GROUP_SCORING_WEIGHTS["preferred_neighborhoods"])
+    preferred = _build_norm_set(group.get("preferred_neighborhoods") or [])
+    if not preferred:
+        return weight / 2.0
+
+    listing_tokens = _extract_listing_neighborhood_tokens(listing)
+    if not listing_tokens:
+        return weight / 2.0
+
+    if preferred.intersection(listing_tokens):
+        return weight
+
+    # Loose partial match to handle formatting differences.
+    for pref in preferred:
+        for token in listing_tokens:
+            if pref in token or token in pref:
+                return weight * 0.75
+    return weight * 0.25
+
+
+def calculate_amenity_score(group: Dict[str, Any], listing: Dict[str, Any]) -> float:
+    """Score overlap of lifestyle.amenity_priorities against listing amenities."""
+    weight = float(GROUP_SCORING_WEIGHTS["amenity_priorities"])
+    lifestyle = group.get("lifestyle_preferences") or {}
+    desired = _build_norm_set(lifestyle.get("amenity_priorities") or [])
+    if not desired:
+        return weight / 2.0
+
+    offered = _extract_listing_amenity_tokens(listing)
+    if not offered:
+        return weight / 2.0
+
+    overlap = len(desired.intersection(offered))
+    if overlap <= 0:
+        return 0.0
+    return round(weight * (overlap / max(1, len(desired))), 2)
+
+
+def calculate_building_type_score(group: Dict[str, Any], listing: Dict[str, Any]) -> float:
+    """Score lifestyle.building_type_preferences against listing.property_type."""
+    weight = float(GROUP_SCORING_WEIGHTS["building_type_preferences"])
+    lifestyle = group.get("lifestyle_preferences") or {}
+    desired = {
+        _normalize_building_type(v)
+        for v in (lifestyle.get("building_type_preferences") or [])
+        if _normalize_building_type(v)
+    }
+    if not desired:
+        return weight / 2.0
+
+    listing_type = _normalize_building_type(listing.get("property_type"))
+    if not listing_type:
+        return weight / 2.0
+    if listing_type in desired:
+        return weight
+    return weight * 0.2
 
 
 def calculate_house_rules_score(group: Dict, listing: Dict) -> float:
-    """House rules: no conflicts=20, 1-2 conflicts=10, 3+ conflicts=0."""
-    group_rules = (group.get('target_house_rules') or '').lower()
-    listing_rules = (listing.get('house_rules') or '').lower()
+    """Score target_house_rules note vs listing house_rules note."""
+    weight = float(GROUP_SCORING_WEIGHTS["target_house_rules"])
+    group_rules = _norm(group.get("target_house_rules"))
+    listing_rules = _norm(listing.get("house_rules"))
     
     if not group_rules or not listing_rules:
-        return 10.0
+        return weight / 2.0
     if group_rules == listing_rules:
-        return 20.0
+        return weight
     
     conflicts = 0
-    if 'no smoking' in listing_rules and 'smoking' in group_rules and 'no smoking' not in group_rules:
+    if ("no smoking" in listing_rules or "smoke free" in listing_rules) and (
+        "smoking allowed" in group_rules or "smoking ok" in group_rules
+    ):
         conflicts += 1
-    if 'no pets' in listing_rules and 'pet' in group_rules and 'no pet' not in group_rules:
+    if ("no pets" in listing_rules or "pet free" in listing_rules) and (
+        "pets allowed" in group_rules or "pets ok" in group_rules
+    ):
         conflicts += 1
-    if 'no parties' in listing_rules and 'parties' in group_rules and 'no parties' not in group_rules:
+    if ("no parties" in listing_rules or "quiet hours" in listing_rules) and (
+        "parties allowed" in group_rules or "party friendly" in group_rules
+    ):
         conflicts += 1
     
-    if conflicts == 0:
-        return 20.0
-    if conflicts <= 2:
-        return 10.0
-    return 0.0
+    if conflicts > 0:
+        return 0.0
+
+    # No explicit conflict but text differs.
+    shared_keywords = 0
+    for kw in ("smoking", "pet", "party", "quiet", "guest", "clean"):
+        if kw in group_rules and kw in listing_rules:
+            shared_keywords += 1
+    if shared_keywords > 0:
+        return weight
+    return weight * 0.75
 
 
 # --- OVERALL SCORING ---
@@ -155,12 +331,11 @@ def calculate_group_score(group: Dict[str, Any], listing: Dict[str, Any]) -> flo
         logger.debug(f"Group {group.get('id')} rejected listing {listing.get('id')}: {reason}")
         return 0.0
     
-    # Calculate soft preference scores (5 categories × 20 points = 100 max)
+    # Soft preference scoring from frontend UI soft fields only.
     score = (
-        calculate_bathroom_score(group, listing) +
-        calculate_furnished_score(group, listing) +
-        calculate_utilities_score(group, listing) +
-        calculate_deposit_score(group, listing) +
+        calculate_neighborhood_score(group, listing) +
+        calculate_amenity_score(group, listing) +
+        calculate_building_type_score(group, listing) +
         calculate_house_rules_score(group, listing)
     )
     

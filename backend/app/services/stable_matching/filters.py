@@ -5,6 +5,7 @@ Filters listings and groups for stable matching algorithm.
 
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, date, timedelta
+from app.services.location_matching import cities_match, normalize_city_name
 
 
 # --- LISTING ELIGIBILITY ---
@@ -63,7 +64,7 @@ def get_eligible_listings(all_listings: List[Dict[str, Any]], city: Optional[str
     rejection_stats = {}
     
     for listing in all_listings:
-        if city and listing.get('city', '').lower() != city.lower():
+        if city and not cities_match(city, listing.get('city')):
             continue
         
         is_eligible, reason = is_listing_pair_eligible(listing)
@@ -123,7 +124,7 @@ def get_eligible_groups(all_groups: List[Dict[str, Any]], city: Optional[str] = 
     rejection_stats = {}
     
     for group in all_groups:
-        if city and group.get('target_city', '').lower() != city.lower():
+        if city and not cities_match(city, group.get('target_city')):
             continue
         
         is_eligible, reason = is_group_eligible(group)
@@ -222,20 +223,6 @@ def get_move_in_windows(groups: List[Dict[str, Any]], window_days: int = 60) -> 
 
 
 # --- HELPERS ---
-
-def normalize_city_name(city: str) -> str:
-    """Normalize city name for comparison."""
-    if not city:
-        return ""
-    
-    normalized = city.lower().strip()
-    aliases = {
-        'sf': 'san francisco', 'san fran': 'san francisco',
-        'nyc': 'new york', 'new york city': 'new york',
-        'la': 'los angeles',
-    }
-    return aliases.get(normalized, normalized)
-
 
 def validate_listing_data_quality(listing: Dict[str, Any]) -> List[str]:
     """Check for data quality issues in a listing."""

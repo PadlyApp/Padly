@@ -12,9 +12,11 @@ import {
   TextInput,
   Textarea,
   NumberInput,
+  Select,
   Group,
   Loader,
-  Alert
+  Alert,
+  Switch
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
@@ -36,11 +38,31 @@ export default function EditGroupPage() {
   const [groupName, setGroupName] = useState('');
   const [description, setDescription] = useState('');
   const [targetCity, setTargetCity] = useState('');
+  const [cityOptions, setCityOptions] = useState([]);
+  const [citySearch, setCitySearch] = useState('');
   const [budgetMin, setBudgetMin] = useState(null);
   const [budgetMax, setBudgetMax] = useState(null);
   const [moveInDate, setMoveInDate] = useState(null);
+  const [hasGroupSizeLimit, setHasGroupSizeLimit] = useState(false);
   const [groupSize, setGroupSize] = useState(2);
   const [isSolo, setIsSolo] = useState(false);
+
+  useEffect(() => {
+    const loadCities = async () => {
+      try {
+        const query = citySearch.trim();
+        const response = await fetch(
+          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+        );
+        if (!response.ok) return;
+        const result = await response.json();
+        setCityOptions(result.data || []);
+      } catch {
+        // Keep form usable if options API is temporarily unavailable.
+      }
+    };
+    loadCities();
+  }, [citySearch]);
 
   // Fetch existing group data
   useEffect(() => {
@@ -64,9 +86,11 @@ export default function EditGroupPage() {
           setGroupName(group.group_name || '');
           setDescription(group.description || '');
           setTargetCity(group.target_city || '');
+          setCitySearch(group.target_city || '');
           setBudgetMin(group.budget_per_person_min || null);
           setBudgetMax(group.budget_per_person_max || null);
-          setGroupSize(group.target_group_size || 2);
+          setHasGroupSizeLimit(group.target_group_size != null);
+          setGroupSize(group.target_group_size ?? 2);
           setIsSolo(group.is_solo || false);
           
           if (group.target_move_in_date) {
@@ -118,6 +142,15 @@ export default function EditGroupPage() {
       return;
     }
 
+    if (!isSolo && hasGroupSizeLimit && !groupSize) {
+      notifications.show({
+        title: 'Missing Group Size',
+        message: 'Set a group size or turn off the member limit',
+        color: 'red',
+      });
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -145,7 +178,7 @@ export default function EditGroupPage() {
           budget_per_person_min: budgetMin,
           budget_per_person_max: budgetMax,
           target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
-          target_group_size: groupSize
+          target_group_size: isSolo ? groupSize : (hasGroupSizeLimit ? groupSize : null)
         })
       });
 
@@ -247,23 +280,38 @@ export default function EditGroupPage() {
                   onChange={(e) => setDescription(e.target.value)}
                 />
 
-                <TextInput
+                <Select
                   label="Target City"
-                  placeholder="e.g., San Francisco"
+                  placeholder="Search and select a city"
                   required
+                  data={cityOptions}
+                  searchable
                   value={targetCity}
-                  onChange={(e) => setTargetCity(e.target.value)}
+                  onChange={(value) => setTargetCity(value || '')}
+                  onSearchChange={setCitySearch}
+                  nothingFoundMessage="No cities found"
                 />
 
                 {!isSolo && (
-                  <NumberInput
-                    label="Group Size"
-                    description="How many people are looking for housing together?"
-                    min={2}
-                    max={10}
-                    value={groupSize}
-                    onChange={setGroupSize}
-                  />
+                  <>
+                    <Switch
+                      label="Set a member limit"
+                      description="Leave this off if the group should stay open with no cap."
+                      checked={hasGroupSizeLimit}
+                      onChange={(event) => setHasGroupSizeLimit(event.currentTarget.checked)}
+                    />
+
+                    {hasGroupSizeLimit && (
+                      <NumberInput
+                        label="Group Size Limit"
+                        description="How many people are looking for housing together?"
+                        min={2}
+                        max={50}
+                        value={groupSize}
+                        onChange={setGroupSize}
+                      />
+                    )}
+                  </>
                 )}
 
                 <Group grow>
@@ -311,5 +359,3 @@ export default function EditGroupPage() {
     </>
   );
 }
-
-

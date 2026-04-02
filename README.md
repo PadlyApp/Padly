@@ -1,284 +1,118 @@
 # Padly
 
-A trusted platform for students, interns, and early-career professionals to find housing and compatible roommates.
+Padly is a roommate-first housing platform for students, interns, and early-career professionals.
 
----
+Most rental apps start with listings. Padly starts with people.
 
-## Project Vision
+## What The App Does
 
-The mission of Padly is to eliminate the stress and fragmentation of finding housing during pivotal career and life transitions. We are building a centralized, secure, and user-centric platform that connects a community of peers, landlords, and subletters, enabling them to transact with confidence and ease.
+Padly helps users:
 
----
+- define what they need in a home and roommate setup
+- find compatible roommates and groups
+- discover listings that fit the group, not just one person
+- get recommendations that improve with usage
 
-## Key Features
+## Why Padly Is Different
 
-### Authentication & Profiles
-- Secure sign-up and login with Supabase Auth (JWT-based)
-- User profiles with professional context (company, school, role)
-- Email verification system for trust building
-- Account management with editable profile information
+Traditional marketplaces focus on individual renter -> listing matching.
 
-### Roommate Groups
-- Create and manage roommate groups
-- Request to join existing groups
-- Group owner approval system for join requests
-- Dynamic group sizing (1-N members)
-- Solo groups for individual users
-- Group recommendations based on compatibility scoring
-- Automatic ownership transfer when creators leave
+Padly is built around:
 
-### Housing Listings & Matching
-- Browse and search housing listings
-- Intelligent matching using Gale-Shapley Stable Matching algorithm
-- Large Neighborhood Search (LNS) optimization for improved match quality
-- Hard constraints filtering (city, budget, date, bedrooms)
-- Soft preferences scoring (bathrooms, furnished, utilities, deposit, house rules)
-- Real-time match updates when preferences change
+- compatibility between people
+- shared constraints across a household
+- group-aware housing recommendations
 
-### Preferences System
-- Hard constraints (non-negotiable requirements)
-- Soft preferences (nice-to-haves with scoring)
-- Lifestyle compatibility matching
-- Automatic stable matching trigger on preference updates
+This household-first approach reduces the common failure case where a listing looks good on paper but the roommate setup does not work in real life.
 
-### Matching Algorithms
-- **Gale-Shapley Deferred Acceptance**: Guarantees stable matches with no blocking pairs
-- **Large Neighborhood Search (LNS)**: Optimizes match quality through iterative destroy-repair cycles
-- **Greedy Heuristics**: Regret-greedy and randomized greedy for repair operations
-- Compatibility scoring (0-100 points) based on budget, date, company/school, verification, and lifestyle
+## Core Features
 
----
+### 1) Personal Onboarding and Preferences
 
-## Tech Stack
+Users create a profile and set:
 
-### Frontend
-- **Next.js 15** - React framework with server-side rendering
-- **React 19** - UI library
-- **Mantine** - Component library and UI framework
-- **TanStack React Query** - Data fetching and caching
-- **TypeScript** - Type safety
+- hard requirements (must-have constraints)
+- soft preferences (ranking signals and lifestyle preferences)
 
-### Backend
-- **FastAPI** - High-performance Python web framework
-- **Uvicorn** - ASGI server
-- **Pydantic** - Data validation using Python type hints
-- **Supabase** - Backend-as-a-Service (Auth, Database, Storage)
+### 2) Roommate and Group Discovery
 
-### Database
-- **PostgreSQL** - Relational database (via Supabase)
-- **PostgREST** - Auto-generated REST API from database schema
+Padly helps users discover compatible groups and candidates using:
 
-### Authentication
-- **Supabase Auth** - JWT-based authentication with refresh tokens
+- hard compatibility gates
+- lifestyle alignment
+- trust and fit signals
 
-### API Documentation
-- **OpenAPI/Swagger** - Auto-generated interactive API docs at `/docs`
+### 3) Group Formation and Management
 
----
+Groups can:
 
-## Prerequisites
+- accept members
+- maintain shared preferences
+- evolve as members join or leave
 
-Before you begin, ensure you have the following installed:
+Padly continuously keeps the group profile aligned with member preferences.
 
-- **Node.js** (v18 or higher) and **npm**
-- **Python** (v3.9 or higher)
-- **Supabase Account** - [Create one here](https://supabase.com)
-- **Git**
+### 4) Group-to-Listing Recommendations
 
----
+Listings are shown only after feasibility checks, then ranked by blended intelligence:
 
-## Getting Started
+- preference fit
+- behavior patterns
+- neural affinity
 
-### 1. Clone the Repository
+Users get an explainable ranking, not a black box.
 
-```bash
-git clone <repository-url>
-cd Padly
-```
+### 5) Discover Feedback Loop
 
-### 2. Set Up Supabase
+As users interact with recommendations, Padly learns from behavior and improves future ranking quality over time.
 
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Go to Project Settings → API
-3. Copy your `SUPABASE_URL` and `SUPABASE_ANON_KEY`
-4. Copy your `SUPABASE_SERVICE_ROLE_KEY` (keep this secret!)
-
-### 3. Backend Setup
-
-```bash
-cd backend
-
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
-# On Windows:
-.\venv\Scripts\activate
-# On Mac/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Create .env file in backend/app/ directory
-# Add the following variables:
-# SUPABASE_URL=your_supabase_url
-# SUPABASE_ANON_KEY=your_anon_key
-# SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
-
-### 4. Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Create .env.local file (optional, if using Supabase client directly)
-# NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-# NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-```
-
----
-
-## Running the Application
-
-### Option 1: Run Both Services Together (Recommended)
-
-```bash
-# From project root
-chmod +x run-dev.sh  # On Mac/Linux
-./run-dev.sh
-
-# On Windows, use Git Bash or WSL
-```
-
-This script will:
-- Start the FastAPI backend on `http://localhost:8000`
-- Start the Next.js frontend on `http://localhost:3000`
-- Auto-install dependencies if needed
-
-### Option 2: Run Services Separately
-
-**Backend:**
-```bash
-cd backend
-source venv/bin/activate  # or .\venv\Scripts\activate on Windows
-uvicorn app.main:app --reload
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-### Access Points
-
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
----
-
-## Project Structure
-
-```
-Padly/
-├── backend/                 # FastAPI backend
-│   ├── app/
-│   │   ├── main.py         # FastAPI application entry point
-│   │   ├── routes/         # API route handlers
-│   │   │   ├── auth.py    # Authentication endpoints
-│   │   │   ├── users.py   # User management
-│   │   │   ├── groups.py   # Roommate groups
-│   │   │   ├── listings.py # Housing listings
-│   │   │   ├── preferences.py # User preferences
-│   │   │   └── stable_matching.py # Matching algorithm
-│   │   ├── services/       # Business logic
-│   │   │   ├── stable_matching/ # Matching algorithm modules
-│   │   │   ├── lns_optimizer.py # LNS optimization
-│   │   │   └── user_group_matching.py # User-group compatibility
-│   │   ├── models.py       # Pydantic models
-│   │   ├── db.py          # Database configuration
-│   │   └── schemas/        # Database schema SQL files
-│   ├── requirements.txt    # Python dependencies
-│   └── migrations/         # Database migrations
-│
-├── frontend/               # Next.js frontend
-│   ├── src/
-│   │   ├── app/           # Next.js app directory
-│   │   │   ├── account/   # Account management page
-│   │   │   ├── groups/    # Groups pages
-│   │   │   ├── listings/ # Listings pages
-│   │   │   ├── matches/   # Matches page
-│   │   │   ├── preferences/ # Preferences page
-│   │   │   └── components/ # React components
-│   │   ├── contexts/      # React contexts (Auth)
-│   │   └── lib/           # Utility functions
-│   └── package.json       # Node dependencies
-│
-└── run-dev.sh             # Development server launcher
-```
-
----
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/signup` - Register new user
-- `POST /api/auth/signin` - Login user
-- `GET /api/auth/me` - Get current user
-- `POST /api/auth/signout` - Sign out
-
-### Users
-- `GET /api/users` - List users
-- `GET /api/users/{user_id}` - Get user profile
-- `PUT /api/users/{user_id}` - Update user profile
-
-### Groups
-- `GET /api/roommate-groups` - List groups (with filters)
-- `GET /api/roommate-groups/{group_id}` - Get group details
-- `POST /api/roommate-groups` - Create group
-- `PUT /api/roommate-groups/{group_id}` - Update group
-- `POST /api/roommate-groups/{group_id}/request-join` - Request to join
-- `POST /api/roommate-groups/{group_id}/accept-request/{user_id}` - Accept join request
-- `DELETE /api/roommate-groups/{group_id}/leave` - Leave group
-
-### Matching
-- `GET /api/matches/groups` - Get compatible groups for user
-- `POST /api/stable-matches/run` - Run stable matching algorithm
-- `GET /api/stable-matches/active` - Get active matches
-
-### Preferences
-- `GET /api/preferences/{user_id}` - Get user preferences
-- `PUT /api/preferences/{user_id}` - Update preferences
-
-## Links
-
-- [Supabase Documentation](https://supabase.com/docs)
-- [FastAPI Documentation](https://fastapi.tiangolo.com)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Mantine Documentation](https://mantine.dev)
-
----
-
-## Troubleshooting
-
-### Backend won't start
-- Ensure virtual environment is activated
-- Check that `.env` file exists with correct Supabase credentials
-- Verify Python version (3.9+)
-
-### Frontend won't start
-- Ensure Node.js version is 18+
-- Delete `node_modules` and run `npm install` again
-- Check for port conflicts (3000, 8000)
-
-### Database connection errors
-- Verify Supabase credentials in `.env`
-- Check Supabase project is active
-- Ensure database schema is applied
+## End-to-End Product Flow
 
+Padly follows a clear journey:
+
+1. User onboarding and preference setup.
+2. User discovers compatible roommates/groups.
+3. User joins or forms a group.
+4. Group preferences become the source of truth.
+5. Group receives ranked listing recommendations.
+6. Ongoing interactions improve recommendation quality.
+
+## Matching Intelligence (In Plain Language)
+
+Padly combines three layers:
+
+- Rules: clear preference and constraint alignment.
+- Behavior: learning from what users engage with.
+- Neural modeling: deeper similarity and affinity scoring.
+
+The same intelligence that improves listing recommendations is also used to strengthen roommate suggestions.
+
+## Two-Tower Architecture (Technical Overview)
+
+Padly’s neural layer uses a two-tower model:
+
+- Preference tower: encodes a user (or group preference profile) into an embedding.
+- Listing tower: encodes each listing into an embedding in the same vector space.
+
+Recommendations are produced by comparing these embeddings:
+
+- closer vectors = higher predicted affinity
+- farther vectors = lower predicted affinity
+
+Padly blends this neural affinity with rules and behavior signals, so ranking stays robust in both cold-start and mature-data scenarios.
+
+For roommate suggestions, Padly reuses listing-taste embeddings from interaction history to estimate similarity between people with similar housing tastes.
+
+## Who Padly Is For
+
+- students moving for school terms
+- interns relocating temporarily
+- new grads and early-career professionals moving to new cities
+- anyone who needs both a home and compatible roommates
+
+## Product Direction
+
+Padly is focused on making shared-living decisions faster, safer, and more compatible by solving both sides of the problem together:
+
+- **Who should I live with?**
+- **Where should we live?**

@@ -4,19 +4,223 @@ CRUD operations for roommate groups and member management
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from app.dependencies.auth import get_user_token, require_user_token
 from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
+from app.services.controlled_vocab import validate_city_name, validate_neighborhoods
+from app.services.behavior_features import build_group_behavior_vector
+from app.services.location_matching import filter_listings_for_location
+from app.services.preferences_contract import (
+    normalize_lease_type,
+    resolve_furnished_preference,
+    target_furnished_from_preference,
+)
+from app.ai.recommender import score_listings
 from pydantic import BaseModel
 from datetime import datetime
+import os
 
 router = APIRouter(prefix="/api/roommate-groups", tags=["Roommate Groups"])
+
+
+def _fetch_active_listings_for_group_location(supabase: Any, group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Load all active listings, then apply metro-aware location matching in Python."""
+    page_size = 1000
+    page = 0
+    listings: List[Dict[str, Any]] = []
+
+    while True:
+        batch = (
+            supabase.table("listings")
+            .select("*")
+            .eq("status", "active")
+            .range(page * page_size, page * page_size + page_size - 1)
+            .execute()
+            .data
+            or []
+        )
+        if not batch:
+            break
+        listings.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+
+    return filter_listings_for_location(
+        listings,
+        target_city=group.get("target_city"),
+        target_state=group.get("target_state_province"),
+        target_country=group.get("target_country"),
+    )
 
 
 # =============================================================================
 # Pydantic Models for Requests/Responses
 # =============================================================================
+
+
+def _normalize_group_preference_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Keep personal-style and group-legacy field names in sync.
+
+    Personal-style:
+    - budget_min / budget_max / move_in_date / required_bedrooms
+    Group-legacy:
+    - budget_per_person_min / budget_per_person_max / target_move_in_date / target_bedrooms
+    """
+    out = dict(payload)
+
+    # Budget aliases
+    if out.get("budget_min") is not None and out.get("budget_per_person_min") is None:
+        out["budget_per_person_min"] = out["budget_min"]
+    if out.get("budget_per_person_min") is not None and out.get("budget_min") is None:
+        out["budget_min"] = out["budget_per_person_min"]
+    if out.get("budget_max") is not None and out.get("budget_per_person_max") is None:
+        out["budget_per_person_max"] = out["budget_max"]
+    if out.get("budget_per_person_max") is not None and out.get("budget_max") is None:
+        out["budget_max"] = out["budget_per_person_max"]
+
+    # Move-in aliases
+    if out.get("move_in_date") is not None and out.get("target_move_in_date") is None:
+        out["target_move_in_date"] = out["move_in_date"]
+    if out.get("target_move_in_date") is not None and out.get("move_in_date") is None:
+        out["move_in_date"] = out["target_move_in_date"]
+
+    # Bedroom aliases
+    if out.get("required_bedrooms") is not None and out.get("target_bedrooms") is None:
+        out["target_bedrooms"] = out["required_bedrooms"]
+    if out.get("target_bedrooms") is not None and out.get("required_bedrooms") is None:
+        out["required_bedrooms"] = out["target_bedrooms"]
+
+    # Furnished tri-state alignment.
+    furnished_pref = resolve_furnished_preference(
+        out.get("furnished_preference"),
+        out.get("target_furnished"),
+    )
+    if furnished_pref is not None:
+        out["furnished_preference"] = furnished_pref
+        out["target_furnished"] = target_furnished_from_preference(furnished_pref)
+        out["furnished_is_hard"] = furnished_pref == "required"
+
+    # Lease-type alignment (frontend canonical values).
+    if "target_lease_type" in out and out.get("target_lease_type") is not None:
+        normalized_lease_type = normalize_lease_type(out.get("target_lease_type"))
+        if normalized_lease_type is not None:
+            out["target_lease_type"] = normalized_lease_type
+
+    # Keep arrays/dicts clean.
+    if out.get("preferred_neighborhoods") is not None:
+        values = [str(v).strip() for v in (out.get("preferred_neighborhoods") or []) if str(v).strip()]
+        # Preserve order, remove duplicates.
+        out["preferred_neighborhoods"] = list(dict.fromkeys(values))
+    if out.get("lifestyle_preferences") is not None and not isinstance(out.get("lifestyle_preferences"), dict):
+        out["lifestyle_preferences"] = {}
+
+    return out
+
+
+def _to_json_serializable_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert decimal/date-like values so Supabase receives JSON-serializable fields."""
+    from decimal import Decimal
+    from datetime import date as date_type, datetime as datetime_type
+
+    out = dict(payload)
+    for key, value in list(out.items()):
+        if isinstance(value, Decimal):
+            out[key] = float(value)
+        elif isinstance(value, date_type) and not isinstance(value, datetime_type):
+            out[key] = value.isoformat()
+    return out
+
+
+def _normalize_group_record_for_response(group: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize a fetched group record so response payloads always expose both
+    personal-style and legacy group aliases.
+    """
+    if not isinstance(group, dict):
+        return group
+    return _normalize_group_preference_payload(group)
+
+
+def _build_group_update_from_aggregate_prefs(aggregate_prefs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a roommate_groups update payload from aggregated member preferences.
+    """
+    allowed_fields = [
+        "target_country",
+        "target_state_province",
+        "target_city",
+        "budget_min",
+        "budget_max",
+        "budget_per_person_min",
+        "budget_per_person_max",
+        "move_in_date",
+        "target_move_in_date",
+        "required_bedrooms",
+        "target_bedrooms",
+        "target_bathrooms",
+        "target_furnished",
+        "furnished_preference",
+        "furnished_is_hard",
+        "target_utilities_included",
+        "target_deposit_amount",
+        "gender_policy",
+        "target_lease_type",
+        "target_lease_duration_months",
+        "target_house_rules",
+        "preferred_neighborhoods",
+        "lifestyle_preferences",
+    ]
+
+    update_data: Dict[str, Any] = {}
+    nullable_passthrough_fields = {
+        "target_furnished",
+        "target_utilities_included",
+        "target_deposit_amount",
+        "target_house_rules",
+        "target_lease_type",
+        "target_lease_duration_months",
+    }
+
+    for key in allowed_fields:
+        if key not in aggregate_prefs:
+            continue
+        if aggregate_prefs[key] is not None or key in nullable_passthrough_fields:
+            update_data[key] = aggregate_prefs[key]
+
+    update_data = _normalize_group_preference_payload(update_data)
+    return _to_json_serializable_payload(update_data)
+
+
+def _aggregate_and_persist_group_preferences(group_id: str) -> Dict[str, Any]:
+    """
+    Recompute aggregate preferences for a group and persist them.
+    """
+    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
+
+    supabase = get_admin_client()
+    aggregate_prefs = calculate_aggregate_group_preferences(group_id)
+    update_data = _build_group_update_from_aggregate_prefs(aggregate_prefs)
+
+    if not update_data:
+        return {"status": "skipped"}
+
+    supabase.table("roommate_groups").update(update_data).eq("id", group_id).execute()
+    return {
+        "status": "success",
+        "updated_fields": list(update_data.keys()),
+        "aggregate_prefs": {
+            "budget_min": update_data.get("budget_min"),
+            "budget_max": update_data.get("budget_max"),
+            "move_in_date": update_data.get("move_in_date"),
+            "required_bedrooms": update_data.get("required_bedrooms"),
+            "target_bathrooms": update_data.get("target_bathrooms"),
+            "furnished_preference": update_data.get("furnished_preference"),
+            "gender_policy": update_data.get("gender_policy"),
+        },
+    }
 
 class GroupMemberInvite(BaseModel):
     """Model for inviting a user to a group"""
@@ -47,7 +251,7 @@ class GroupWithMembers(BaseModel):
     budget_per_person_min: Optional[float]
     budget_per_person_max: Optional[float]
     target_move_in_date: Optional[str]
-    target_group_size: int
+    target_group_size: Optional[int]
     status: str
     created_at: datetime
     updated_at: datetime
@@ -141,6 +345,9 @@ async def list_groups(
         # Update each group with the accurate count
         for group in groups:
             group['current_member_count'] = member_counts.get(group['id'], 0)
+            normalized = _normalize_group_record_for_response(group)
+            group.clear()
+            group.update(normalized)
     
     return {
         "status": "success",
@@ -312,7 +519,7 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
     if not group_response.data:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    group = group_response.data
+    group = _normalize_group_record_for_response(group_response.data)
     
     if group["creator_user_id"] != current_user_id:
         raise HTTPException(status_code=403, detail="Only group creator can view pending requests")
@@ -430,16 +637,25 @@ async def create_group(
     
     # Create group
     group_dict = group_data.model_dump(exclude_none=True)
+    group_dict = _normalize_group_preference_payload(group_dict)
     group_dict['creator_user_id'] = user_id
+
+    try:
+        group_dict["target_city"] = validate_city_name(group_dict.get("target_city", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    if "preferred_neighborhoods" in group_dict:
+        try:
+            group_dict["preferred_neighborhoods"] = validate_neighborhoods(
+                group_dict.get("target_city", ""),
+                group_dict.get("preferred_neighborhoods"),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     
     # Convert non-JSON-serializable types
-    from decimal import Decimal
-    from datetime import date as date_type, datetime as datetime_type
-    for key, value in group_dict.items():
-        if isinstance(value, Decimal):
-            group_dict[key] = float(value)
-        elif isinstance(value, date_type) and not isinstance(value, datetime_type):
-            group_dict[key] = value.isoformat()  # Convert date to "YYYY-MM-DD" string
+    group_dict = _to_json_serializable_payload(group_dict)
 
     group_response = supabase.table('roommate_groups')\
         .insert(group_dict)\
@@ -448,7 +664,7 @@ async def create_group(
     if not group_response.data:
         raise HTTPException(status_code=500, detail="Failed to create group")
     
-    created_group = group_response.data[0]
+    created_group = _normalize_group_record_for_response(group_response.data[0])
     group_id = created_group['id']
     
     # Add creator as first member
@@ -461,26 +677,10 @@ async def create_group(
     
     supabase.table('group_members').insert(member_data).execute()
     
-    # 🔥 TRIGGER STABLE MATCHING for the new group's city
-    # Option 3: Hybrid re-matching - preserves confirmed matches
-    target_city = created_group.get('target_city')
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if target_city:
-        from app.routes.stable_matching import run_matching, RunMatchingRequest
-        
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": matching_response.message
-            }
-        except Exception as e:
-            # Don't fail group creation if matching fails
-            matching_result = {"status": "error", "message": str(e)}
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=created_group.get("target_city"),
+        reason="group_created",
+    )
     
     return {
         "status": "success",
@@ -541,20 +741,39 @@ async def update_group(
     if not group_response.data:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    group = group_response.data
+    group = _normalize_group_record_for_response(group_response.data)
     
     # Update group
     update_dict = group_data.model_dump(exclude_none=True)
+    update_dict = _normalize_group_preference_payload(update_dict)
     
     if not update_dict:
         raise HTTPException(status_code=400, detail="No data provided for update")
+
+    if "target_city" in update_dict:
+        try:
+            update_dict["target_city"] = validate_city_name(update_dict.get("target_city", ""))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    if "preferred_neighborhoods" in update_dict:
+        effective_city = update_dict.get("target_city") or group.get("target_city")
+        try:
+            update_dict["preferred_neighborhoods"] = validate_neighborhoods(
+                effective_city or "",
+                update_dict.get("preferred_neighborhoods"),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     
+    update_dict = _to_json_serializable_payload(update_dict)
+
     updated_response = supabase.table('roommate_groups')\
         .update(update_dict)\
         .eq('id', group_id)\
         .execute()
     
-    # TRIGGER STABLE MATCHING if preference fields changed
+    # Legacy stable re-run (Phase 3B default OFF)
     preference_fields = [
         'budget_per_person_min', 'budget_per_person_max', 
         'target_move_in_date', 'target_city'
@@ -563,26 +782,16 @@ async def update_group(
     matching_result = {'status': 'skipped', 'message': 'No preference changes detected'}
     
     if any(field in update_dict for field in preference_fields):
-        from app.routes.stable_matching import run_matching, RunMatchingRequest
-        
-        target_city = group.get('target_city')
-        if target_city:
-            try:
-                matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-                matching_response = await run_matching(matching_request)
-                matching_result = {
-                    "status": "success",
-                    "city": target_city,
-                    "total_matches": len(matching_response.matches),
-                    "message": matching_response.message
-                }
-            except Exception as e:
-                matching_result = {"status": "error", "message": str(e)}
+        target_city = update_dict.get('target_city') or group.get('target_city')
+        matching_result = await _maybe_trigger_legacy_stable_matching(
+            target_city=target_city,
+            reason="group_updated",
+        )
     
     return {
         "status": "success",
         "message": "Group updated successfully",
-        "data": updated_response.data[0] if updated_response.data else None,
+        "data": _normalize_group_record_for_response(updated_response.data[0]) if updated_response.data else None,
         "matching": matching_result
     }
 
@@ -723,8 +932,14 @@ async def invite_to_group(
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    inviter_id = user_response.user.id
-    
+    auth_user_id = user_response.user.id
+
+    # Resolve auth UUID → app profile UUID
+    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    inviter_id = user_record.data[0]['id']
+
     # Check if group exists and user is a member
     group_response = supabase.table('roommate_groups')\
         .select('*')\
@@ -755,13 +970,12 @@ async def invite_to_group(
     invited_user_response = supabase.table('users')\
         .select('id, email, full_name')\
         .eq('email', invite_data.user_email)\
-        .single()\
         .execute()
     
     if not invited_user_response.data:
         raise HTTPException(status_code=404, detail=f"User with email {invite_data.user_email} not found")
     
-    invited_user_id = invited_user_response.data['id']
+    invited_user_id = invited_user_response.data[0]['id']
     
     # Check if user is already a member or has pending invite
     existing_member = supabase.table('group_members')\
@@ -813,7 +1027,7 @@ async def invite_to_group(
         "data": {
             "group_id": group_id,
             "invited_user_email": invite_data.user_email,
-            "invited_user_name": invited_user_response.data.get('full_name'),
+            "invited_user_name": invited_user_response.data[0].get('full_name'),
             "status": "pending"
         }
     }
@@ -920,7 +1134,8 @@ async def request_join_group(
         .eq('status', 'accepted')\
         .execute()
     
-    if len(current_members.data) >= group['target_group_size']:
+    target_size = group.get('target_group_size')
+    if target_size is not None and len(current_members.data) >= target_size:
         raise HTTPException(status_code=400, detail="Group is already full")
     
     # Create join request (pending invitation)
@@ -1015,60 +1230,16 @@ async def join_group(
         .execute()
     
     # 🔥 AGGREGATE MEMBER PREFERENCES into group preferences
-    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
-    
     aggregation_result = {'status': 'skipped'}
     try:
-        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
-        
-        # Update group with aggregated preferences
-        update_data = {}
-        
-        if aggregate_prefs.get('budget_per_person_min') is not None:
-            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
-        if aggregate_prefs.get('budget_per_person_max') is not None:
-            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
-        if aggregate_prefs.get('target_move_in_date'):
-            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
-        if aggregate_prefs.get('target_bedrooms'):
-            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
-        if aggregate_prefs.get('target_bathrooms'):
-            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
-        
-        if update_data:
-            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
-            aggregation_result = {
-                'status': 'success',
-                'updated_fields': list(update_data.keys()),
-                'aggregate_prefs': {
-                    'budget_min': update_data.get('budget_per_person_min'),
-                    'budget_max': update_data.get('budget_per_person_max'),
-                    'move_in_date': update_data.get('target_move_in_date'),
-                    'bedrooms': update_data.get('target_bedrooms'),
-                    'bathrooms': update_data.get('target_bathrooms')
-                }
-            }
+        aggregation_result = _aggregate_and_persist_group_preferences(group_id)
     except Exception as e:
         aggregation_result = {'status': 'error', 'message': str(e)}
     
-    # 🔥 TRIGGER STABLE MATCHING
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-    
-    target_city = group.get('target_city')
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if target_city:
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": matching_response.message
-            }
-        except Exception as e:
-            matching_result = {"status": "error", "message": str(e)}
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=group.get("target_city"),
+        reason="group_joined",
+    )
     
     # Get updated group info
     updated_group_response = supabase.table('roommate_groups')\
@@ -1231,24 +1402,10 @@ async def accept_join_request(
     
     user_info = user_info_response.data if user_info_response.data else {}
     
-    # 🔥 TRIGGER STABLE MATCHING
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-    
-    target_city = group.get('target_city')
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if target_city:
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": matching_response.message
-            }
-        except Exception as e:
-            matching_result = {"status": "error", "message": str(e)}
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=group.get("target_city"),
+        reason="join_request_accepted",
+    )
     
     return {
         "status": "success",
@@ -1489,60 +1646,16 @@ async def leave_group(
         .execute()
     
     # 🔄 AGGREGATE PREFERENCES after member leaves
-    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
-    
     aggregation_result = {'status': 'skipped'}
     try:
-        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
-        
-        # Update group with aggregated preferences
-        update_data = {}
-        
-        if aggregate_prefs.get('budget_per_person_min') is not None:
-            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
-        if aggregate_prefs.get('budget_per_person_max') is not None:
-            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
-        if aggregate_prefs.get('target_move_in_date'):
-            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
-        if aggregate_prefs.get('target_bedrooms'):
-            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
-        if aggregate_prefs.get('target_bathrooms'):
-            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
-        
-        if update_data:
-            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
-            aggregation_result = {
-                'status': 'success',
-                'updated_fields': list(update_data.keys()),
-                'aggregate_prefs': {
-                    'budget_min': update_data.get('budget_per_person_min'),
-                    'budget_max': update_data.get('budget_per_person_max'),
-                    'move_in_date': update_data.get('target_move_in_date'),
-                    'bedrooms': update_data.get('target_bedrooms'),
-                    'bathrooms': update_data.get('target_bathrooms')
-                }
-            }
+        aggregation_result = _aggregate_and_persist_group_preferences(group_id)
     except Exception as e:
         aggregation_result = {'status': 'error', 'message': str(e)}
     
-    # 🔥 TRIGGER STABLE MATCHING after member leaves
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-    
-    target_city = group.get('target_city')
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if target_city:
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": matching_response.message
-            }
-        except Exception as e:
-            matching_result = {"status": "error", "message": str(e)}
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=group.get("target_city"),
+        reason="member_left",
+    )
     
     return {
         "status": "success",
@@ -1621,60 +1734,16 @@ async def remove_member(
         .execute()
     
     # 🔥 RE-AGGREGATE MEMBER PREFERENCES (now with one less member)
-    from app.services.group_preferences_aggregator import calculate_aggregate_group_preferences
-    
     aggregation_result = {'status': 'skipped'}
     try:
-        aggregate_prefs = calculate_aggregate_group_preferences(group_id)
-        
-        # Update group with aggregated preferences
-        update_data = {}
-        
-        if aggregate_prefs.get('budget_per_person_min') is not None:
-            update_data['budget_per_person_min'] = float(aggregate_prefs['budget_per_person_min'])
-        if aggregate_prefs.get('budget_per_person_max') is not None:
-            update_data['budget_per_person_max'] = float(aggregate_prefs['budget_per_person_max'])
-        if aggregate_prefs.get('target_move_in_date'):
-            update_data['target_move_in_date'] = str(aggregate_prefs['target_move_in_date'])
-        if aggregate_prefs.get('target_bedrooms'):
-            update_data['target_bedrooms'] = aggregate_prefs['target_bedrooms']
-        if aggregate_prefs.get('target_bathrooms'):
-            update_data['target_bathrooms'] = aggregate_prefs['target_bathrooms']
-        
-        if update_data:
-            supabase.table('roommate_groups').update(update_data).eq('id', group_id).execute()
-            aggregation_result = {
-                'status': 'success',
-                'updated_fields': list(update_data.keys()),
-                'aggregate_prefs': {
-                    'budget_min': update_data.get('budget_per_person_min'),
-                    'budget_max': update_data.get('budget_per_person_max'),
-                    'move_in_date': update_data.get('target_move_in_date'),
-                    'bedrooms': update_data.get('target_bedrooms'),
-                    'bathrooms': update_data.get('target_bathrooms')
-                }
-            }
+        aggregation_result = _aggregate_and_persist_group_preferences(group_id)
     except Exception as e:
         aggregation_result = {'status': 'error', 'message': str(e)}
     
-    # 🔥 TRIGGER STABLE MATCHING
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-    
-    target_city = group.get('target_city')
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if target_city:
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": matching_response.message
-            }
-        except Exception as e:
-            matching_result = {"status": "error", "message": str(e)}
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=group.get("target_city"),
+        reason="member_removed",
+    )
     
     return {
         "status": "success",
@@ -1688,53 +1757,237 @@ async def remove_member(
 # Integration with Stable Matching
 # =============================================================================
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _stable_group_listing_writes_enabled() -> bool:
+    """
+    Phase 3B control:
+    - false (default): stable matching writes are disabled (read-only legacy)
+    - true: allow legacy stable write operations (rollback path)
+    """
+    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
+
+
+async def _maybe_trigger_legacy_stable_matching(
+    target_city: Optional[str],
+    reason: str,
+) -> Dict[str, Any]:
+    """
+    Trigger legacy stable matching only when explicitly enabled.
+    """
+    if not target_city:
+        return {"status": "skipped", "message": "No city specified"}
+
+    if not _stable_group_listing_writes_enabled():
+        return {
+            "status": "skipped",
+            "message": (
+                "Legacy stable matching writes are disabled in Phase 3B "
+                f"(reason={reason})."
+            ),
+        }
+
+    from app.routes.stable_matching import run_matching, RunMatchingRequest
+
+    try:
+        matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
+        matching_response = await run_matching(matching_request)
+        return {
+            "status": "success",
+            "city": target_city,
+            "total_matches": len(matching_response.matches),
+            "message": matching_response.message,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_current_user_id(token: str) -> str:
+    """Resolve authenticated user to internal users.id UUID."""
+    supabase = get_admin_client()
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    auth_user_id = user_response.user.id
+    user_record = supabase.table("users").select("id").eq("auth_id", auth_user_id).limit(1).execute()
+    if user_record.data:
+        return user_record.data[0]["id"]
+
+    fallback_record = supabase.table("users").select("id").eq("id", auth_user_id).limit(1).execute()
+    if fallback_record.data:
+        return fallback_record.data[0]["id"]
+
+    raise HTTPException(status_code=404, detail="User profile not found")
+
+
+def _require_group_membership(group_id: str, user_id: str) -> None:
+    """Require accepted group membership for protected group ranking surfaces."""
+    supabase = get_admin_client()
+    membership = (
+        supabase.table("group_members")
+        .select("group_id")
+        .eq("group_id", group_id)
+        .eq("user_id", user_id)
+        .eq("status", "accepted")
+        .limit(1)
+        .execute()
+    )
+    if not membership.data:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+
+def _build_user_payload_from_group(
+    group: Dict[str, Any],
+    behavior: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Map group constraints + behavior context into recommender user payload."""
+    group_size = _safe_int(
+        group.get("target_group_size") or group.get("current_member_count") or 2,
+        default=2,
+    )
+    group_size = max(1, group_size)
+    required_beds = _safe_int(group.get("required_bedrooms"), default=0)
+    desired_beds = max(group_size, required_beds) if required_beds else float(group_size)
+
+    furnished_preference = str(group.get("furnished_preference") or "").strip().lower()
+    wants_furnished = None
+    if furnished_preference in {"required", "preferred"}:
+        wants_furnished = 1
+    elif group.get("target_furnished") is True:
+        wants_furnished = 1
+    elif group.get("target_furnished") is False:
+        wants_furnished = 0
+
+    vector = (behavior or {}).get("vector") or {}
+    return {
+        "budget_min": _safe_float(group.get("budget_per_person_min"), default=0.0) or None,
+        "budget_max": _safe_float(group.get("budget_per_person_max"), default=0.0) or None,
+        "desired_beds": desired_beds,
+        "desired_baths": _safe_float(group.get("target_bathrooms"), default=0.0) or None,
+        "wants_furnished": wants_furnished,
+        "liked_mean_price": vector.get("liked_mean_price"),
+        "liked_mean_beds": vector.get("liked_mean_beds"),
+        "liked_mean_sqfeet": vector.get("liked_mean_sqfeet"),
+        "behavior_sample_size": _safe_int((behavior or {}).get("sample_size"), default=0),
+    }
+
+
+def _build_legacy_rule_rankings(
+    group: Dict[str, Any],
+    eligible_listings: List[Dict[str, Any]],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Phase 1 legacy ranking: soft rule score over hard-filtered candidates."""
+    from app.services.stable_matching.scoring import calculate_group_score
+
+    group_size = _safe_int(group.get("target_group_size"), default=2)
+    group_size = max(1, group_size)
+
+    ranked = []
+    for listing in eligible_listings:
+        score = float(calculate_group_score(group, listing))
+        listing_copy = dict(listing)
+        listing_copy["match_score"] = round(score, 2)
+        listing_copy["match_percent"] = f"{round(score)}%"
+        listing_price = _safe_float(listing.get("price_per_month"), default=0.0)
+        listing_copy["price_per_person"] = round(listing_price / group_size, 2)
+        ranked.append(listing_copy)
+
+    ranked.sort(key=lambda x: (-x.get("match_score", 0.0), x.get("price_per_month", float("inf"))))
+    return ranked[:limit]
+
 @router.get("/{group_id}/matches", response_model=dict)
 async def get_group_matches(
     group_id: str,
     token: Optional[str] = Depends(get_user_token)
 ):
     """
-    Get stable matches for a specific group.
-    Returns active matches from the stable matching system.
+    Phase 3B compatibility endpoint.
+
+    Primary source: neural-ranked listings (hard-filtered).
+    Fallback: deterministic rule-ranked listings.
+
+    Returns legacy `data` shape so older clients keep working.
     """
-    supabase = get_admin_client()
-    
-    # Check if group exists
-    group_response = supabase.table('roommate_groups')\
-        .select('*')\
-        .eq('id', group_id)\
-        .single()\
-        .execute()
-    
-    if not group_response.data:
-        raise HTTPException(status_code=404, detail="Group not found")
-    
-    # Get matches from stable_matches table
-    matches_response = supabase.table('stable_matches')\
-        .select('*')\
-        .eq('group_id', group_id)\
-        .eq('status', 'active')\
-        .order('group_rank')\
-        .execute()
-    
-    matches = matches_response.data
-    
-    # Enrich with listing details
-    for match in matches:
-        listing_response = supabase.table('listings')\
-            .select('*')\
-            .eq('id', match['listing_id'])\
-            .single()\
-            .execute()
-        
-        if listing_response.data:
-            match['listing'] = listing_response.data
-    
+    def to_legacy_data(ranked_listings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for idx, listing in enumerate(ranked_listings, start=1):
+            listing_id = listing.get("id") or listing.get("listing_id")
+            normalized_listing = dict(listing)
+            normalized_listing["id"] = listing_id
+            out.append(
+                {
+                    "id": listing_id,
+                    "listing_id": listing_id,
+                    "group_rank": idx,
+                    "listing_rank": None,
+                    "group_score": listing.get("match_score"),
+                    "listing_score": None,
+                    "is_stable": False,
+                    "algorithm_version": listing.get("algorithm_version"),
+                    "score_breakdown": listing.get("score_breakdown"),
+                    "explainability": listing.get("explainability"),
+                    "listing": normalized_listing,
+                }
+            )
+        return out
+
+    if token:
+        try:
+            response = await get_neural_ranked_listings_for_group(
+                group_id=group_id,
+                limit=50,
+                shadow_compare=False,
+                force_enable=True,
+                token=token,
+            )
+            data = to_legacy_data(response.get("ranked_listings", []))
+            return {
+                "status": "success",
+                "mode": "neural_cutover",
+                "group_id": group_id,
+                "count": len(data),
+                "data": data,
+                "fallback_used": False,
+            }
+        except HTTPException as exc:
+            # Keep serving path alive with deterministic ranking fallback.
+            if exc.status_code not in {403, 503, 500}:
+                raise
+
+    fallback = await get_ranked_listings_for_group(group_id=group_id, limit=50, token=token)
+    data = to_legacy_data(fallback.get("ranked_listings", []))
     return {
         "status": "success",
+        "mode": "legacy_rule_fallback",
         "group_id": group_id,
-        "count": len(matches),
-        "data": matches
+        "count": len(data),
+        "data": data,
+        "fallback_used": True,
     }
 
 
@@ -1753,7 +2006,7 @@ async def get_eligible_listings_for_group(
     - Move-in date compatibility (within ±30 days of target date)
     - Required attributes (furnished, utilities, pets, parking, etc.)
     
-    Unlike /matches (which returns LNS-optimized stable matches), this returns
+    Unlike /matches (which now serves ranked recommendations), this returns
     ALL listings that pass hard constraints - useful for browsing/exploration.
     
     Returns listings sorted by price (lowest first).
@@ -1784,14 +2037,7 @@ async def get_eligible_listings_for_group(
             detail="Group must have a target city to find eligible listings"
         )
     
-    # Get active listings in the same city
-    listings_response = supabase.table('listings')\
-        .select('*')\
-        .eq('city', target_city)\
-        .eq('status', 'active')\
-        .execute()
-    
-    all_listings = listings_response.data if listings_response.data else []
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
     
     if not all_listings:
         return {
@@ -1858,6 +2104,291 @@ async def get_eligible_listings_for_group(
     }
 
 
+@router.get("/{group_id}/ranked-listings", response_model=dict)
+async def get_ranked_listings_for_group(
+    group_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max ranked listings to return"),
+    token: Optional[str] = Depends(get_user_token)
+):
+    """
+    Return listings for a group using:
+    1) Hard-constraint filtering (feasible pairs)
+    2) Soft rule-based scoring (0-100) for ranking
+
+    This endpoint is the deterministic fallback (Phase 1 hard + soft rules surface).
+    """
+    from app.services.stable_matching import (
+        build_feasible_pairs,
+        get_feasibility_statistics
+    )
+    from app.services.stable_matching.scoring import calculate_group_score
+
+    supabase = get_admin_client()
+
+    group_response = supabase.table('roommate_groups')\
+        .select('*')\
+        .eq('id', group_id)\
+        .limit(1)\
+        .execute()
+
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group = group_response.data[0]
+    target_city = group.get('target_city')
+    if not target_city:
+        raise HTTPException(status_code=400, detail="Group must have a target city")
+
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
+    if not all_listings:
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "count": 0,
+            "ranked_listings": [],
+            "message": f"No active listings found in {target_city}"
+        }
+
+    feasible_pairs, _ = build_feasible_pairs(
+        groups=[group],
+        listings=all_listings,
+        date_delta_days=30,
+        include_rejection_reasons=True
+    )
+    eligible_listing_ids = set(listing_id for _, listing_id in feasible_pairs)
+
+    group_size = int(group.get("target_group_size") or group.get("current_member_count") or 2)
+    group_size = max(group_size, 1)
+
+    ranked = []
+    for listing in all_listings:
+        if listing['id'] not in eligible_listing_ids:
+            continue
+
+        score = float(calculate_group_score(group, listing))
+        listing_copy = dict(listing)
+        listing_copy["match_score"] = round(score, 2)
+        listing_copy["match_percent"] = f"{round(score)}%"
+
+        listing_price = float(listing.get("price_per_month") or 0.0)
+        listing_copy["price_per_person"] = round(listing_price / group_size, 2)
+        ranked.append(listing_copy)
+
+    ranked.sort(key=lambda x: (-x.get("match_score", 0.0), x.get("price_per_month", float('inf'))))
+    ranked = ranked[:limit]
+
+    stats = get_feasibility_statistics([group], all_listings, feasible_pairs)
+
+    return {
+        "status": "success",
+        "group_id": group_id,
+        "group_constraints": {
+            "target_city": target_city,
+            "budget_min": group.get('budget_per_person_min'),
+            "budget_max": group.get('budget_per_person_max'),
+            "target_move_in_date": str(group.get('target_move_in_date')) if group.get('target_move_in_date') else None,
+            "target_lease_type": group.get('target_lease_type'),
+            "target_lease_duration_months": group.get('target_lease_duration_months'),
+            "target_bathrooms": group.get('target_bathrooms'),
+            "target_furnished": group.get('target_furnished'),
+            "target_utilities_included": group.get('target_utilities_included'),
+            "target_deposit_amount": group.get('target_deposit_amount'),
+            "target_house_rules": group.get('target_house_rules'),
+        },
+        "stats": {
+            "total_listings_in_city": stats['total_listings'],
+            "eligible_count": stats['total_feasible_pairs'],
+            "returned_count": len(ranked),
+        },
+        "count": len(ranked),
+        "ranked_listings": ranked
+    }
+
+
+@router.get("/{group_id}/neural-ranked-listings", response_model=dict)
+async def get_neural_ranked_listings_for_group(
+    group_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max ranked listings to return"),
+    shadow_compare: bool = Query(
+        False,
+        description="When true, include side-by-side comparison with legacy rule rankings.",
+    ),
+    force_enable: bool = Query(
+        False,
+        description="Bypass feature flag check for testing while in Phase 3A.",
+    ),
+    token: str = Depends(require_user_token),
+):
+    """
+    Phase 3A Group -> Listing neural-ranked feed.
+
+    Foundation endpoint capabilities:
+    - hard-filter guardrail before any scoring
+    - neural/rule/behavior blend ranking (with ML fallback)
+    - optional shadow comparison against legacy rule ranking
+    - feature-flag + kill-switch controls (both default OFF)
+    """
+    from app.services.stable_matching import build_feasible_pairs, get_feasibility_statistics
+
+    # Phase 3A controls: default OFF until explicit enable.
+    ranking_enabled = _env_bool("PADLY_GROUP_NEURAL_RANKING_ENABLED", default=False)
+    kill_switch = _env_bool("PADLY_GROUP_NEURAL_KILL_SWITCH", default=False)
+
+    if kill_switch:
+        raise HTTPException(
+            status_code=503,
+            detail="Group neural ranking is temporarily disabled by kill switch.",
+        )
+    if not ranking_enabled and not force_enable:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Group neural ranking is not enabled yet. "
+                "Set PADLY_GROUP_NEURAL_RANKING_ENABLED=true or use force_enable for testing."
+            ),
+        )
+
+    supabase = get_admin_client()
+    current_user_id = _resolve_current_user_id(token)
+    _require_group_membership(group_id=group_id, user_id=current_user_id)
+
+    group_response = (
+        supabase.table("roommate_groups")
+        .select("*")
+        .eq("id", group_id)
+        .limit(1)
+        .execute()
+    )
+    if not group_response.data:
+        raise HTTPException(status_code=404, detail="Group not found")
+    group = group_response.data[0]
+
+    target_city = group.get("target_city")
+    if not target_city:
+        raise HTTPException(status_code=400, detail="Group must have a target city")
+
+    all_listings = _fetch_active_listings_for_group_location(supabase, group)
+    if not all_listings:
+        return {
+            "status": "success",
+            "mode": "group_neural_ranked",
+            "group_id": group_id,
+            "count": 0,
+            "ranked_listings": [],
+            "message": f"No active listings found in {target_city}",
+        }
+
+    # Hard-constraint guardrail: score ONLY listings that pass feasibility checks.
+    feasible_pairs, _ = build_feasible_pairs(
+        groups=[group],
+        listings=all_listings,
+        date_delta_days=30,
+        include_rejection_reasons=True,
+    )
+    eligible_listing_ids = {listing_id for _, listing_id in feasible_pairs}
+    eligible_listings = [l for l in all_listings if l.get("id") in eligible_listing_ids]
+    feasibility_stats = get_feasibility_statistics([group], all_listings, feasible_pairs)
+
+    if not eligible_listings:
+        return {
+            "status": "success",
+            "mode": "group_neural_ranked",
+            "group_id": group_id,
+            "stats": {
+                "total_listings_in_city": feasibility_stats["total_listings"],
+                "eligible_count": feasibility_stats["total_feasible_pairs"],
+                "returned_count": 0,
+            },
+            "count": 0,
+            "ranked_listings": [],
+            "message": "No hard-eligible listings found for this group.",
+        }
+
+    warnings: List[str] = []
+    behavior = None
+    try:
+        behavior = build_group_behavior_vector(group_id=group_id, days=180, max_events_per_user=2000)
+    except Exception as e:
+        warnings.append(f"Behavior vector unavailable, using neutral behavior prior: {e}")
+
+    user_payload = _build_user_payload_from_group(group=group, behavior=behavior)
+    scored = score_listings(user_payload, eligible_listings, top_n=limit)
+
+    # Guardrail invariant: ranked output must be subset of hard-eligible listing IDs.
+    invalid_ids = [str(item.get("id")) for item in scored if item.get("id") not in eligible_listing_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Hard-filter guardrail violation. Ranked non-eligible listings: {invalid_ids[:5]}",
+        )
+
+    group_size = _safe_int(
+        group.get("target_group_size") or group.get("current_member_count") or 2,
+        default=2,
+    )
+    group_size = max(1, group_size)
+
+    ranked_listings = []
+    for item in scored:
+        listing = dict(item)
+        listing["listing_id"] = str(item.get("id") or "")
+        listing_price = _safe_float(item.get("price_per_month"), default=0.0)
+        listing["price_per_person"] = round(listing_price / group_size, 2)
+        ranked_listings.append(listing)
+
+    shadow_comparison = None
+    if shadow_compare:
+        legacy_ranked = _build_legacy_rule_rankings(group=group, eligible_listings=eligible_listings, limit=limit)
+        neural_ids = [str(x.get("id")) for x in ranked_listings]
+        legacy_ids = [str(x.get("id")) for x in legacy_ranked]
+        neural_top = neural_ids[:limit]
+        legacy_top = legacy_ids[:limit]
+        overlap = len(set(neural_top).intersection(set(legacy_top)))
+        denom = len(set(neural_top).union(set(legacy_top))) or 1
+        shadow_comparison = {
+            "enabled": True,
+            "top_k": limit,
+            "overlap_count": overlap,
+            "overlap_rate": round(overlap / max(1, min(len(neural_top), len(legacy_top))), 4),
+            "jaccard_top_k": round(overlap / denom, 4),
+            "legacy_only_top_ids": [x for x in legacy_top if x not in set(neural_top)][:10],
+            "neural_only_top_ids": [x for x in neural_top if x not in set(legacy_top)][:10],
+        }
+
+    return {
+        "status": "success",
+        "mode": "group_neural_ranked",
+        "group_id": group_id,
+        "feature_flags": {
+            "group_neural_ranking_enabled": ranking_enabled,
+            "group_neural_kill_switch": kill_switch,
+            "force_enable": force_enable,
+        },
+        "group_constraints": {
+            "target_city": target_city,
+            "budget_min": group.get("budget_per_person_min"),
+            "budget_max": group.get("budget_per_person_max"),
+            "target_move_in_date": str(group.get("target_move_in_date")) if group.get("target_move_in_date") else None,
+        },
+        "stats": {
+            "total_listings_in_city": feasibility_stats["total_listings"],
+            "eligible_count": feasibility_stats["total_feasible_pairs"],
+            "returned_count": len(ranked_listings),
+        },
+        "behavior_context": {
+            "sample_size": user_payload.get("behavior_sample_size"),
+            "has_behavior_signal": any(
+                user_payload.get(key) is not None
+                for key in ("liked_mean_price", "liked_mean_beds", "liked_mean_sqfeet")
+            ),
+        },
+        "warnings": warnings,
+        "count": len(ranked_listings),
+        "ranked_listings": ranked_listings,
+        "shadow_comparison": shadow_comparison,
+    }
+
+
 @router.post("/{group_id}/confirm-match", response_model=dict)
 async def confirm_match_as_group(
     group_id: str,
@@ -1873,6 +2404,15 @@ async def confirm_match_as_group(
     matches are recalculated when new groups join or preferences change.
     """
     from datetime import datetime, timezone
+
+    if not _stable_group_listing_writes_enabled():
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Stable match confirmations are disabled in Phase 3B. "
+                "Group->Listing serving now uses neural ranking."
+            ),
+        )
     
     supabase = get_admin_client()
     
@@ -1965,6 +2505,15 @@ async def reject_match_as_group(
     This removes the match and optionally triggers re-matching
     to find a new match for the group.
     """
+    if not _stable_group_listing_writes_enabled():
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Stable match rejection writes are disabled in Phase 3B. "
+                "Group->Listing serving now uses neural ranking."
+            ),
+        )
+
     supabase = get_admin_client()
     
     # Get current user
@@ -2017,30 +2566,17 @@ async def reject_match_as_group(
         .eq('id', match['id'])\
         .execute()
     
-    # Get group to trigger re-matching
+    # Get group city for optional legacy re-matching (Phase 3B default OFF)
     group_response = supabase.table('roommate_groups')\
         .select('target_city')\
         .eq('id', group_id)\
         .single()\
         .execute()
-    
-    matching_result = {'status': 'skipped', 'message': 'No city specified'}
-    
-    if group_response.data and group_response.data.get('target_city'):
-        from app.routes.stable_matching import run_matching, RunMatchingRequest
-        
-        target_city = group_response.data['target_city']
-        try:
-            matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-            matching_response = await run_matching(matching_request)
-            matching_result = {
-                "status": "success",
-                "city": target_city,
-                "total_matches": len(matching_response.matches),
-                "message": "Re-matching completed"
-            }
-        except Exception as e:
-            matching_result = {"status": "error", "message": str(e)}
+
+    matching_result = await _maybe_trigger_legacy_stable_matching(
+        target_city=(group_response.data or {}).get("target_city"),
+        reason="group_reject_match",
+    )
     
     return {
         "status": "success",

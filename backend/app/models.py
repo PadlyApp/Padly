@@ -123,26 +123,29 @@ class UserResponse(UserBase):
 
 class PersonalPreferencesBase(BaseModel):
     """Base personal preferences model matching database schema"""
-    # Hard Constraints (Non-Negotiables)
+    # Frontend hard constraints (Preferences page source-of-truth).
+    target_country: Optional[str] = None  # ISO alpha-2 code (US/CA)
     target_city: Optional[str] = None
     target_state_province: Optional[str] = None
     budget_min: Optional[float] = None  # Accept float from frontend
     budget_max: Optional[float] = None  # Accept float from frontend
     required_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[float] = None  # Accept float from frontend
+    target_deposit_amount: Optional[float] = None  # Accept float from frontend
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
     move_in_date: Optional[str] = None  # Accept ISO string from frontend
     target_lease_type: Optional[str] = None
     target_lease_duration_months: Optional[int] = None
+
+    # Frontend soft constraints.
+    target_house_rules: Optional[str] = None
+    preferred_neighborhoods: Optional[list] = None  # Array field
+    lifestyle_preferences: Optional[dict] = None  # JSONB field for flexible preferences
     
-    # Soft Preferences (Nice-to-Haves)
-    target_bathrooms: Optional[float] = None  # Accept float from frontend
+    # Legacy compatibility fields (not directly edited by current frontend form).
     target_furnished: Optional[bool] = None
     target_utilities_included: Optional[bool] = None
-    target_deposit_amount: Optional[float] = None  # Accept float from frontend
-    target_house_rules: Optional[str] = None
-    
-    # Generic preferences field for future extensibility
-    lifestyle_preferences: Optional[dict] = None  # JSONB field for flexible preferences
-    preferred_neighborhoods: Optional[list] = None  # Array field
     
     model_config = ConfigDict(extra='forbid')
 
@@ -181,6 +184,7 @@ class ListingBase(BaseModel):
     area_sqft: Optional[int] = None
     furnished: bool = False
     price_per_month: Decimal
+    price_per_room: Optional[Decimal] = None
     utilities_included: bool = False
     deposit_amount: Optional[Decimal] = None
     address_line_1: Optional[str] = None
@@ -216,6 +220,7 @@ class ListingUpdate(BaseModel):
     area_sqft: Optional[int] = None
     furnished: Optional[bool] = None
     price_per_month: Optional[Decimal] = None
+    price_per_room: Optional[Decimal] = None
     utilities_included: Optional[bool] = None
     deposit_amount: Optional[Decimal] = None
     address_line_1: Optional[str] = None
@@ -336,11 +341,35 @@ class RoommateGroupBase(BaseModel):
     """Base roommate group model"""
     group_name: str
     description: Optional[str] = None
+    target_country: Optional[str] = None
+    target_state_province: Optional[str] = None
     target_city: str
+
+    # Keep legacy + personal-aligned naming in sync at API level.
+    budget_min: Optional[Decimal] = None
+    budget_max: Optional[Decimal] = None
     budget_per_person_min: Optional[Decimal] = None
     budget_per_person_max: Optional[Decimal] = None
+
+    move_in_date: Optional[date] = None
     target_move_in_date: Optional[date] = None
-    target_group_size: int = 2
+    target_group_size: Optional[int] = None
+
+    # Personal-aligned hard/soft fields
+    required_bedrooms: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_deposit_amount: Optional[Decimal] = None
+    furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    target_furnished: Optional[bool] = None
+    furnished_is_hard: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    gender_policy: Optional[str] = None  # same_gender_only | mixed_ok
+    target_lease_type: Optional[str] = None
+    target_lease_duration_months: Optional[int] = None
+    target_house_rules: Optional[str] = None
+    preferred_neighborhoods: Optional[List[str]] = None
+    lifestyle_preferences: Optional[dict] = None
 
 
 class RoommateGroupCreate(RoommateGroupBase):
@@ -353,11 +382,32 @@ class RoommateGroupUpdate(BaseModel):
     """Model for updating a roommate group"""
     group_name: Optional[str] = None
     description: Optional[str] = None
+    target_country: Optional[str] = None
+    target_state_province: Optional[str] = None
     target_city: Optional[str] = None
+
+    budget_min: Optional[Decimal] = None
+    budget_max: Optional[Decimal] = None
     budget_per_person_min: Optional[Decimal] = None
     budget_per_person_max: Optional[Decimal] = None
+
+    move_in_date: Optional[date] = None
     target_move_in_date: Optional[date] = None
     target_group_size: Optional[int] = None
+    required_bedrooms: Optional[int] = None
+    target_bedrooms: Optional[int] = None
+    target_bathrooms: Optional[Decimal] = None
+    target_deposit_amount: Optional[Decimal] = None
+    furnished_preference: Optional[str] = None
+    target_furnished: Optional[bool] = None
+    furnished_is_hard: Optional[bool] = None
+    target_utilities_included: Optional[bool] = None
+    gender_policy: Optional[str] = None
+    target_lease_type: Optional[str] = None
+    target_lease_duration_months: Optional[int] = None
+    target_house_rules: Optional[str] = None
+    preferred_neighborhoods: Optional[List[str]] = None
+    lifestyle_preferences: Optional[dict] = None
     status: Optional[PostStatus] = None
 
     model_config = ConfigDict(extra='forbid')

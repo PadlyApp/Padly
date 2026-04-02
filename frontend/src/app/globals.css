@@ -1,27 +1,217 @@
 @import '@mantine/core/styles.css';
+@import '@mantine/dates/styles.css';
+@import '@mantine/notifications/styles.css';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
 
 * {
-  box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
 }
 
-html,
-body {
+html, body {
   max-width: 100vw;
   overflow-x: hidden;
-  background-color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  background-color: #f8f9fa;
+  color: #343a40;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+.card-lift {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  will-change: transform;
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+}
+
+.img-zoom {
+  transition: transform 0.45s ease;
+}
+.img-zoom:hover {
+  transform: scale(1.05);
+}
+
+.swipe-container {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.nav-link {
+  position: relative;
+  color: #868e96;
+  transition: color 0.15s ease;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: #343a40;
+}
+.nav-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #20c997;
+  border-radius: 1px;
+}
+
+/* ── Liquid blob hero ───────────────────────────────────────────── */
+.hero-gradient {
+  position: relative;
+  overflow: hidden;
+  background: #f0fdf9;
+}
+
+/* Shared blob base */
+.hero-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(72px);
+  opacity: 0.55;
+  will-change: transform;
+  pointer-events: none;
+}
+
+@keyframes blob1 {
+  0%   { transform: translate(0px,    0px)   scale(1);    }
+  25%  { transform: translate(60px,  -80px)  scale(1.15); }
+  50%  { transform: translate(-40px,  60px)  scale(0.9);  }
+  75%  { transform: translate(80px,   40px)  scale(1.1);  }
+  100% { transform: translate(0px,    0px)   scale(1);    }
+}
+@keyframes blob2 {
+  0%   { transform: translate(0px,    0px)   scale(1);    }
+  30%  { transform: translate(-70px,  50px)  scale(1.2);  }
+  60%  { transform: translate(50px,  -60px)  scale(0.85); }
+  100% { transform: translate(0px,    0px)   scale(1);    }
+}
+@keyframes blob3 {
+  0%   { transform: translate(0px,   0px)   scale(1);    }
+  40%  { transform: translate(80px,  70px)  scale(1.1);  }
+  70%  { transform: translate(-50px, 30px)  scale(0.9);  }
+  100% { transform: translate(0px,   0px)   scale(1);    }
+}
+@keyframes blob4 {
+  0%   { transform: translate(0px,    0px)   scale(1);    }
+  35%  { transform: translate(-60px, -50px)  scale(1.15); }
+  65%  { transform: translate(40px,   80px)  scale(0.88); }
+  100% { transform: translate(0px,    0px)   scale(1);    }
+}
+
+.hero-blob-1 {
+  width: 520px; height: 520px;
+  background: #20c997;
+  top: -120px; left: -80px;
+  animation: blob1 9s ease-in-out infinite;
+}
+.hero-blob-2 {
+  width: 420px; height: 420px;
+  background: #63e6be;
+  top: -60px; right: -60px;
+  animation: blob2 11s ease-in-out infinite;
+}
+.hero-blob-3 {
+  width: 380px; height: 380px;
+  background: #38d9a9;
+  bottom: -80px; left: 30%;
+  animation: blob3 13s ease-in-out infinite;
+}
+.hero-blob-4 {
+  width: 300px; height: 300px;
+  background: #96f2d7;
+  top: 40%; right: 15%;
+  animation: blob4 8s ease-in-out infinite;
+}
+
+/* ── Stronger element definition ────────────────────────────────── */
+/* Buttons get a subtle shadow so they lift off the surface */
+.mantine-Button-root {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  transition: box-shadow 0.15s ease, transform 0.15s ease !important;
+}
+.mantine-Button-root:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.mantine-Button-root:active {
+  transform: translateY(0px);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+/* Cards get a more visible border + shadow */
+.mantine-Card-root {
+  border: 1px solid rgba(0,0,0,0.07) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04) !important;
+}
+
+/* Paper elements */
+.mantine-Paper-root {
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+
+/* Inputs get a clearer border */
+.mantine-Input-input {
+  border-color: #ced4da !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04) inset;
+}
+.mantine-Input-input:focus {
+  border-color: #20c997 !important;
+  box-shadow: 0 0 0 3px rgba(32,201,151,0.12) !important;
+}
+
+/* ActionIcons (swipe buttons etc.) */
+.mantine-ActionIcon-root {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+  transition: box-shadow 0.15s ease, transform 0.15s ease !important;
+}
+.mantine-ActionIcon-root:hover {
+  box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+  transform: translateY(-2px);
+}
+
+.feature-icon-bg {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(32, 201, 151, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+@media (min-width: 62em) {
+  .auth-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 100vh;
+  }
+}
+
+.section-padding {
+  padding: 5rem 0;
+}
+
+@media (max-width: 48em) {
+  .section-padding {
+    padding: 3rem 0;
+  }
 }

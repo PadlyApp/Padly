@@ -38,6 +38,7 @@ def parse_listing(raw: Dict[str, Any]) -> Dict[str, Any]:
         'area_sqft': raw.get('area_sqft'),
         'furnished': raw.get('furnished', False),
         'price_per_month': serialize_value(raw.get('price_per_month')),
+        'price_per_room': serialize_value(raw.get('price_per_room')),
         'utilities_included': raw.get('utilities_included', False),
         'deposit_amount': serialize_value(raw.get('deposit_amount')),
         'address_line_1': raw.get('address_line_1'),
