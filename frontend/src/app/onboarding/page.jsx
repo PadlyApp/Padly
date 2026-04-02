@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -44,9 +46,9 @@ export default function OnboardingPage() {
     const loadOptions = async () => {
       try {
         const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch('http://localhost:8000/api/options/companies?limit=500'),
-          fetch('http://localhost:8000/api/options/schools?limit=500'),
-          fetch('http://localhost:8000/api/options/roles'),
+          fetch('${API_BASE}/api/options/companies?limit=500'),
+          fetch('${API_BASE}/api/options/schools?limit=500'),
+          fetch('${API_BASE}/api/options/roles'),
         ]);
 
         if (companiesRes.ok) {
@@ -96,7 +98,7 @@ export default function OnboardingPage() {
 
       // Get the user profile ID from the users table (not auth_id)
       const userResponse = await fetch(
-        `http://localhost:8000/api/auth/me`,
+        `${API_BASE}/api/auth/me`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -132,7 +134,7 @@ export default function OnboardingPage() {
 
       // Update user profile
       const response = await fetch(
-        `http://localhost:8000/api/users/${userId}`,
+        `${API_BASE}/api/users/${userId}`,
         {
           method: 'PUT',
           headers: {

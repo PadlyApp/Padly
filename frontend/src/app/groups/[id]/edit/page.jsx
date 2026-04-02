@@ -1,5 +1,7 @@
 'use client';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { 
@@ -52,7 +54,7 @@ export default function EditGroupPage() {
       try {
         const query = citySearch.trim();
         const response = await fetch(
-          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+          `${API_BASE}/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
         );
         if (!response.ok) return;
         const result = await response.json();
@@ -75,7 +77,7 @@ export default function EditGroupPage() {
           headers['Authorization'] = `Bearer ${authState.accessToken}`;
         }
         
-        const response = await fetch(`http://localhost:8000/api/roommate-groups/${groupId}`, {
+        const response = await fetch(`${API_BASE}/api/roommate-groups/${groupId}`, {
           headers
         });
         
@@ -165,7 +167,7 @@ export default function EditGroupPage() {
         return;
       }
 
-      const response = await fetch(`http://localhost:8000/api/roommate-groups/${groupId}`, {
+      const response = await fetch(`${API_BASE}/api/roommate-groups/${groupId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

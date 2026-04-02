@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -49,7 +51,7 @@ export function InvitationsPanel({ user, authState }) {
       }
 
       const response = await fetch(
-        'http://localhost:8000/api/roommate-groups?my_groups=true',
+        '${API_BASE}/api/roommate-groups?my_groups=true',
         { headers }
       );
 
@@ -61,7 +63,7 @@ export function InvitationsPanel({ user, authState }) {
 
         for (const group of allGroups) {
           const memberResponse = await fetch(
-            `http://localhost:8000/api/roommate-groups/${group.id}/members`,
+            `${API_BASE}/api/roommate-groups/${group.id}/members`,
             { headers }
           );
           const memberData = await memberResponse.json();
@@ -95,7 +97,7 @@ export function InvitationsPanel({ user, authState }) {
     setProcessingId(groupId);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/roommate-groups/${groupId}/join`,
+        `${API_BASE}/api/roommate-groups/${groupId}/join`,
         {
           method: 'POST',
           headers: {
@@ -133,7 +135,7 @@ export function InvitationsPanel({ user, authState }) {
     setProcessingId(groupId);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/roommate-groups/${groupId}/reject`,
+        `${API_BASE}/api/roommate-groups/${groupId}/reject`,
         {
           method: 'POST',
           headers: {

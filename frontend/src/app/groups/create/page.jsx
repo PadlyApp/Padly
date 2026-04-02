@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -48,7 +50,7 @@ export default function CreateGroupPage() {
       try {
         const query = citySearch.trim();
         const response = await fetch(
-          `http://localhost:8000/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
+          `${API_BASE}/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
         );
         if (!response.ok) return;
         const result = await response.json();
@@ -117,7 +119,7 @@ export default function CreateGroupPage() {
         return;
       }
 
-      const response = await fetch('http://localhost:8000/api/roommate-groups', {
+      const response = await fetch('${API_BASE}/api/roommate-groups', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

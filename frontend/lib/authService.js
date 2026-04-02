@@ -1,6 +1,6 @@
 // Updated auth service to communicate with FastAPI backend
 export class AuthService {
-  static API_BASE = 'http://localhost:8000/api/auth';
+  static API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth`;
 
   static async signup(email, password, fullName) {
     const response = await fetch(`${this.API_BASE}/signup`, {

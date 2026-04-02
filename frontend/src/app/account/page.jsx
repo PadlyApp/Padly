@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -126,7 +128,7 @@ function ProfilePanel() {
 
       try {
         const token = await getValidToken();
-        const response = await fetch('http://localhost:8000/api/auth/me', {
+        const response = await fetch('${API_BASE}/api/auth/me', {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -165,9 +167,9 @@ function ProfilePanel() {
     const loadOptions = async () => {
       try {
         const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch('http://localhost:8000/api/options/companies?limit=500'),
-          fetch('http://localhost:8000/api/options/schools?limit=500'),
-          fetch('http://localhost:8000/api/options/roles'),
+          fetch('${API_BASE}/api/options/companies?limit=500'),
+          fetch('${API_BASE}/api/options/schools?limit=500'),
+          fetch('${API_BASE}/api/options/roles'),
         ]);
 
         if (companiesRes.ok) {
@@ -220,7 +222,7 @@ function ProfilePanel() {
         role_title: userData.role_title || null,
       };
 
-      const response = await fetch(`http://localhost:8000/api/users/${userData.id}`, {
+      const response = await fetch(`${API_BASE}/api/users/${userData.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

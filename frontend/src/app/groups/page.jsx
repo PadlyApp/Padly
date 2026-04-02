@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -360,7 +362,7 @@ function GroupsPageContent() {
     try {
       const city = searchCity || 'San Francisco';
       const response = await fetch(
-        `http://localhost:8000/api/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
+        `${API_BASE}/api/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
         { headers: { 'Authorization': `Bearer ${authState.accessToken}` } }
       );
       const data = await response.json();
@@ -378,7 +380,7 @@ function GroupsPageContent() {
     try {
       // Fetch user's pending join requests
       const pendingResponse = await fetch(
-        'http://localhost:8000/api/roommate-groups/my-pending-requests',
+        '${API_BASE}/api/roommate-groups/my-pending-requests',
         {
           headers: {
             'Authorization': `Bearer ${authState.accessToken}`
@@ -394,7 +396,7 @@ function GroupsPageContent() {
 
       // Fetch user's accepted memberships
       const response = await fetch(
-        'http://localhost:8000/api/roommate-groups?my_groups=true',
+        '${API_BASE}/api/roommate-groups?my_groups=true',
         {
           headers: {
             'Authorization': `Bearer ${authState.accessToken}`
@@ -428,7 +430,7 @@ function GroupsPageContent() {
   const fetchGroups = async () => {
     try {
       setLoading(true);
-      let url = `http://localhost:8000/api/roommate-groups?status=${statusFilter}`;
+      let url = `${API_BASE}/api/roommate-groups?status=${statusFilter}`;
 
       if (activeTab === 'my-groups' && user) {
         url += '&my_groups=true';
@@ -488,7 +490,7 @@ function GroupsPageContent() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/roommate-groups/${groupId}/request-join`,
+        `${API_BASE}/api/roommate-groups/${groupId}/request-join`,
         {
           method: 'POST',
           headers: {

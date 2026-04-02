@@ -1,4 +1,6 @@
-'use client';
+﻿'use client';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '${API_BASE}';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, ActionIcon, Tooltip } from '@mantine/core';
@@ -40,7 +42,7 @@ function MatchesPageContent() {
       const likedExtras = {};
 
       if (userId && authState?.accessToken) {
-        const prefRes = await fetch(`http://localhost:8000/api/preferences/${userId}`, {
+        const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
           headers: { Authorization: `Bearer ${authState.accessToken}` },
         });
         if (prefRes.ok) {
@@ -49,7 +51,7 @@ function MatchesPageContent() {
         }
 
         try {
-          const behaviorRes = await fetch('http://localhost:8000/api/interactions/behavior/me?days=180', {
+          const behaviorRes = await fetch('${API_BASE}/api/interactions/behavior/me?days=180', {
             headers: { Authorization: `Bearer ${authState.accessToken}` },
           });
           if (behaviorRes.ok) {
@@ -103,7 +105,7 @@ function MatchesPageContent() {
         ...likedExtras,
       };
 
-      const res = await fetch('http://localhost:8000/api/recommendations', {
+      const res = await fetch('${API_BASE}/api/recommendations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -130,7 +132,7 @@ function MatchesPageContent() {
     if (!authState?.accessToken) return;
     const fetchGroup = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/roommate-groups?my_groups=true&limit=1', {
+        const res = await fetch('${API_BASE}/api/roommate-groups?my_groups=true&limit=1', {
           headers: { Authorization: `Bearer ${authState.accessToken}` },
         });
         const data = await res.json();
@@ -141,7 +143,7 @@ function MatchesPageContent() {
         console.log('[matches] userGroup set:', group.id, group.group_name);
 
         const savedRes = await fetch(
-          `http://localhost:8000/api/interactions/swipes/groups/${group.id}/saved`,
+          `${API_BASE}/api/interactions/swipes/groups/${group.id}/saved`,
           { headers: { Authorization: `Bearer ${authState.accessToken}` } }
         );
         const savedData = await savedRes.json();
@@ -169,7 +171,7 @@ function MatchesPageContent() {
 
     try {
       const res = await fetch(
-        `http://localhost:8000/api/interactions/swipes/groups/${userGroup.id}/save/${lid}`,
+        `${API_BASE}/api/interactions/swipes/groups/${userGroup.id}/save/${lid}`,
         {
           method: isSaved ? 'DELETE' : 'POST',
           headers: { Authorization: `Bearer ${authState.accessToken}` },

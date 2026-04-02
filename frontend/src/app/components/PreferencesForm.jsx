@@ -22,7 +22,7 @@ import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const AMENITY_OPTIONS = [
   { value: 'laundry', label: 'Laundry' },
