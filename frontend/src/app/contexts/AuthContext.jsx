@@ -3,6 +3,20 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { AuthService } from '../../../lib/authService';
 
+/**
+ * @typedef {{
+ *   user: any,
+ *   authState: { accessToken: string, refreshToken: string, expiresAt: number } | null,
+ *   isLoading: boolean,
+ *   isAuthenticated: boolean,
+ *   signup: (email: string, password: string, fullName: string) => Promise<void>,
+ *   signin: (email: string, password: string) => Promise<void>,
+ *   signout: () => Promise<void>,
+ *   getValidToken: () => Promise<string | null>,
+ * }} AuthContextValue
+ */
+
+/** @type {import('react').Context<AuthContextValue | undefined>} */
 const AuthContext = createContext(undefined);
 
 const AUTH_STORAGE_KEY = 'padly_auth';
@@ -184,7 +198,7 @@ export function useAuth() {
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  return context;
+  return /** @type {AuthContextValue} */ (context);
 }
 
 // Hook to get authorization header for API requests
