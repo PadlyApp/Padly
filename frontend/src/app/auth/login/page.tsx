@@ -27,7 +27,7 @@ interface LoginFormValues {
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { login } = useAuth();
+  const { signin } = useAuth();
 
   const form = useForm<LoginFormValues>({
     initialValues: {
@@ -46,34 +46,14 @@ export default function LoginPage() {
     setLoading(true);
     
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: values.email,
-          password: values.password,
-        }),
-      });
+      await signin(values.email, values.password);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Login failed');
-      }
-
-      // Show success notification
       notifications.show({
         title: 'Login Successful',
-        message: `Welcome back, ${data.user.name}!`,
+        message: 'Welcome back!',
         color: 'green',
       });
 
-      // Store user data in context and localStorage
-      login(data.user);
-      
-      // Redirect to home
       router.push('/');
 
     } catch (error) {

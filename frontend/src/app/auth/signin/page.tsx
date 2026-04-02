@@ -26,7 +26,7 @@ interface SigninFormValues {
 export default function SigninPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { login } = useAuth();
+  const { signup } = useAuth();
 
   const form = useForm<SigninFormValues>({
     initialValues: {
@@ -49,35 +49,14 @@ export default function SigninPage() {
     setLoading(true);
     
     try {
-      const response = await fetch('/api/auth/signin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: values.name,
-          email: values.email,
-          password: values.password,
-        }),
-      });
+      await signup(values.email, values.password, values.name);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Registration failed');
-      }
-
-      // Show success notification
       notifications.show({
         title: 'Account Created',
-        message: `Welcome to Padly, ${data.user.name}!`,
+        message: `Welcome to Padly, ${values.name}!`,
         color: 'green',
       });
 
-      // Store user data in context and localStorage
-      login(data.user);
-      
-      // Redirect to home
       router.push('/');
 
     } catch (error) {
