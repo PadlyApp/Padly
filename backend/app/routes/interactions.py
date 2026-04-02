@@ -294,14 +294,21 @@ async def get_group_liked_listings(
         # Get liked + group_save swipes for all members
         swipes_resp = (
             supabase.table("swipe_interactions")
-            .select("listing_id, actor_user_id, action")
+            .select("listing_id, actor_user_id, action, group_id_at_time")
             .in_("actor_user_id", member_ids)
             .in_("action", ["like", "group_save"])
             .order("created_at", desc=True)
             .limit(limit)
             .execute()
         )
-        swipes = swipes_resp.data or []
+        raw_swipes = swipes_resp.data or []
+        # Filter group_save to only include saves for this specific group
+        swipes = []
+        for s in raw_swipes:
+            if s.get("action") == "like":
+                swipes.append(s)
+            elif s.get("action") == "group_save" and s.get("group_id_at_time") == group_id:
+                swipes.append(s)
         if not swipes:
             return {"status": "success", "data": []}
 

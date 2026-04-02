@@ -38,7 +38,7 @@ CREATE VIEW public.active_groups_view AS
   ) member_count ON rg.id = member_count.group_id
   WHERE rg.status = 'active'::post_status;
 
-GRANT SELECT ON public.active_groups_view TO anon, authenticated, service_role;
+GRANT SELECT ON public.active_groups_view TO authenticated, service_role;
 
 -- ============================================================
 -- active_listings_view
@@ -91,7 +91,7 @@ CREATE VIEW public.active_listings_view AS
   ) photo_count ON l.id = photo_count.listing_id
   WHERE l.status = 'active'::listing_status;
 
-GRANT SELECT ON public.active_listings_view TO anon, authenticated, service_role;
+GRANT SELECT ON public.active_listings_view TO authenticated, service_role;
 
 -- ============================================================
 -- active_roommate_posts_view
@@ -128,7 +128,7 @@ CREATE VIEW public.active_roommate_posts_view AS
   LEFT JOIN personal_preferences pp ON u.id = pp.user_id
   WHERE rp.status = 'active'::post_status;
 
-GRANT SELECT ON public.active_roommate_posts_view TO anon, authenticated, service_role;
+GRANT SELECT ON public.active_roommate_posts_view TO authenticated, service_role;
 
 -- ============================================================
 -- v_active_stable_matches

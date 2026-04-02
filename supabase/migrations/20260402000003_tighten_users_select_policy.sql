@@ -15,12 +15,13 @@ BEGIN;
 -- Remove the wide-open policy added in the initial RLS migration
 DROP POLICY IF EXISTS "users_select_public" ON public.users;
 
--- Authenticated users can read their own row or others via the view
+-- Authenticated users can only read their own row on the base table;
+-- use user_public_profiles view for other users' public info.
 DROP POLICY IF EXISTS "users_select_others_profile" ON public.users;
-CREATE POLICY "users_select_others_profile"
+CREATE POLICY "users_select_own_row"
   ON public.users FOR SELECT
   TO authenticated
-  USING (true);
+  USING (auth.uid() = auth_id);
 
 -- Anon gets nothing on the base table
 REVOKE ALL ON public.users FROM anon;

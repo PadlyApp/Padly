@@ -34,7 +34,7 @@ export default function SignupPage() {
       fullName: (value) => (!value ? 'Full name is required' : null),
       email: (value) => (/^\S+@\S+$/.test(value) ? null : 'Invalid email'),
       password: (value) =>
-        value.length < 6 ? 'Password must be at least 6 characters long' : null,
+        value.length < 8 ? 'Password must be at least 8 characters long' : null,
       confirmPassword: (value, values) =>
         value !== values.password ? 'Passwords do not match' : null,
     },

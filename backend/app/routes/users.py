@@ -47,8 +47,12 @@ async def list_users(
     client = SupabaseHTTPClient(token=token)
     filters = {}
 
+    import re
     q_norm = (q or "").strip()
     if q_norm:
+        # Sanitize: only allow alphanumeric, spaces, hyphens, dots, and @
+        if not re.match(r'^[\w\s\-\.@]+$', q_norm):
+            raise HTTPException(status_code=400, detail="Search query contains invalid characters")
         filters["or"] = f"(full_name.ilike.*{q_norm}*,email.ilike.*{q_norm}*)"
 
     # Exclude the caller from results when authenticated.

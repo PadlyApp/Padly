@@ -40,11 +40,13 @@ if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   echo -e "${YELLOW}Frontend dependencies not found. Installing...${NC}"
   cd "$FRONTEND_DIR"
   npm install
+  touch "$FRONTEND_INSTALL_STATE"
   cd "$PROJECT_ROOT"
 elif [ ! -f "$FRONTEND_INSTALL_STATE" ] || [ "$FRONTEND_DIR/package.json" -nt "$FRONTEND_INSTALL_STATE" ] || [ "$FRONTEND_DIR/package-lock.json" -nt "$FRONTEND_INSTALL_STATE" ]; then
   echo -e "${YELLOW}Frontend dependency files changed. Refreshing install...${NC}"
   cd "$FRONTEND_DIR"
   npm install
+  touch "$FRONTEND_INSTALL_STATE"
   cd "$PROJECT_ROOT"
 fi
 
