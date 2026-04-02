@@ -7,6 +7,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { PadlyTourProvider } from './contexts/TourContext';
 import { TourProvider } from '@reactour/tour';
 import { AppTour } from './components/tour/AppTour';
+import { Analytics } from '@vercel/analytics/next';
 
 const reactourStyles = {
   popover: (base) => ({
@@ -65,6 +66,7 @@ export default function RootLayout({ children }) {
             </AuthProvider>
           </MantineProviderWrapper>
         </QueryProvider>
+        <Analytics />
       </body>
     </html>
   );
