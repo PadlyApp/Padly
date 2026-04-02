@@ -4,115 +4,63 @@ Padly is a roommate-first housing platform for students, interns, and early-care
 
 Most rental apps start with listings. Padly starts with people.
 
-## What The App Does
+## The Problem
 
-Padly helps users:
+Finding housing with roommates is a two-sided problem: you need the right people *and* the right place. Traditional platforms only solve one side, leaving users to figure out the other on their own.
 
-- define what they need in a home and roommate setup
-- find compatible roommates and groups
-- discover listings that fit the group, not just one person
-- get recommendations that improve with usage
+## How Padly Works
 
-## Why Padly Is Different
+### 1. Set Your Preferences
 
-Traditional marketplaces focus on individual renter -> listing matching.
+New users go through onboarding to define their hard requirements (budget, location, move-in date) and soft preferences (lifestyle, cleanliness, schedule). These drive every recommendation that follows.
 
-Padly is built around:
+### 2. Find Compatible Roommates
 
-- compatibility between people
-- shared constraints across a household
-- group-aware housing recommendations
+Padly suggests roommates based on preference compatibility, lifestyle alignment, and behavioral signals. Users can express interest in each other through an intro system with mutual opt-in.
 
-This household-first approach reduces the common failure case where a listing looks good on paper but the roommate setup does not work in real life.
+### 3. Form a Group
 
-## Core Features
+Compatible users form groups. Each group has shared preferences automatically aggregated from its members. As members join or leave, the group profile updates.
 
-### 1) Personal Onboarding and Preferences
+### 4. Discover Listings
 
-Users create a profile and set:
+The Discover page presents listings ranked for the group using a blend of:
 
-- hard requirements (must-have constraints)
-- soft preferences (ranking signals and lifestyle preferences)
+- **Rule-based filtering** — hard constraints like budget, location, and bedroom count
+- **Behavioral signals** — learned from swipe interactions (likes, passes, saves)
+- **Neural ranking** — a two-tower model that embeds user preferences and listing features into the same vector space to score affinity
 
-### 2) Roommate and Group Discovery
+Users swipe through listings and can save favorites to their group.
 
-Padly helps users discover compatible groups and candidates using:
+### 5. Get Matched
 
-- hard compatibility gates
-- lifestyle alignment
-- trust and fit signals
+Padly runs a stable matching algorithm that pairs groups with listings, producing ranked matches where both sides are considered. Groups see their matches with explainable scores.
 
-### 3) Group Formation and Management
+### 6. Keep Improving
 
-Groups can:
+Every interaction feeds back into the system. Swipe behavior refines recommendations over time, so the more a group uses Padly, the better the suggestions get.
 
-- accept members
-- maintain shared preferences
-- evolve as members join or leave
+## Key Features
 
-Padly continuously keeps the group profile aligned with member preferences.
+- **Guided onboarding** with a walkthrough tour for new users
+- **Roommate suggestions** with compatibility scoring and intro requests
+- **Group management** with invitations, join requests, and shared preferences
+- **Swipe-based discover** for browsing recommended listings
+- **Group saves** to bookmark listings for the whole group
+- **Stable matching** between groups and listings
+- **Metro-aware location matching** across cities and regions
+- **Row-level security** on all database tables
 
-### 4) Group-to-Listing Recommendations
+## Tech Stack
 
-Listings are shown only after feasibility checks, then ranked by blended intelligence:
+- **Frontend:** Next.js 15, React 19, Mantine UI, TanStack Query
+- **Backend:** FastAPI, Supabase (Postgres + Auth), Pydantic
+- **AI/ML:** TensorFlow two-tower model, behavioral fingerprinting, embedding-based similarity
+- **Infrastructure:** Supabase migrations, Git LFS for model artifacts
 
-- preference fit
-- behavior patterns
-- neural affinity
+## Who It's For
 
-Users get an explainable ranking, not a black box.
-
-### 5) Discover Feedback Loop
-
-As users interact with recommendations, Padly learns from behavior and improves future ranking quality over time.
-
-## End-to-End Product Flow
-
-Padly follows a clear journey:
-
-1. User onboarding and preference setup.
-2. User discovers compatible roommates/groups.
-3. User joins or forms a group.
-4. Group preferences become the source of truth.
-5. Group receives ranked listing recommendations.
-6. Ongoing interactions improve recommendation quality.
-
-## Matching Intelligence (In Plain Language)
-
-Padly combines three layers:
-
-- Rules: clear preference and constraint alignment.
-- Behavior: learning from what users engage with.
-- Neural modeling: deeper similarity and affinity scoring.
-
-The same intelligence that improves listing recommendations is also used to strengthen roommate suggestions.
-
-## Two-Tower Architecture (Technical Overview)
-
-Padly’s neural layer uses a two-tower model:
-
-- Preference tower: encodes a user (or group preference profile) into an embedding.
-- Listing tower: encodes each listing into an embedding in the same vector space.
-
-Recommendations are produced by comparing these embeddings:
-
-- closer vectors = higher predicted affinity
-- farther vectors = lower predicted affinity
-
-Padly blends this neural affinity with rules and behavior signals, so ranking stays robust in both cold-start and mature-data scenarios.
-
-For roommate suggestions, Padly reuses listing-taste embeddings from interaction history to estimate similarity between people with similar housing tastes.
-
-## Who Padly Is For
-
-- students moving for school terms
-- interns relocating temporarily
-- new grads and early-career professionals moving to new cities
-- anyone who needs both a home and compatible roommates
-
-## Product Direction
-
-Padly is focused on making shared-living decisions faster, safer, and more compatible by solving both sides of the problem together:
-
-- **Who should I live with?**
-- **Where should we live?**
+- Students moving for school terms
+- Interns relocating temporarily
+- New grads and early-career professionals moving to new cities
+- Anyone who needs both a home and compatible roommates
