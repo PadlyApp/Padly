@@ -99,6 +99,17 @@ _CITY_CANONICAL_ALIASES = {
     "new york city": "new york",
 }
 
+# Metro display names that users can pick — treated as "show entire metro"
+_METRO_DISPLAY_NAMES = {
+    "gta": "gta",
+    "greater toronto area": "gta",
+    "nyc": "nyc",
+    "new york city metro": "nyc",
+    "bay area": "bay_area",
+    "sf bay area": "bay_area",
+    "san francisco bay area": "bay_area",
+}
+
 
 def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
@@ -137,12 +148,15 @@ def cities_match(target_city: Any, listing_city: Any) -> bool:
     listing = normalize_city_name(listing_city)
     if not target or not listing:
         return True
-    if target == listing:
-        return True
 
-    target_metro = metro_for_city(target)
-    listing_metro = metro_for_city(listing)
-    return bool(target_metro and target_metro == listing_metro)
+    # If user picked a metro name (GTA, NYC, Bay Area), match all cities in that metro
+    target_as_metro = _METRO_DISPLAY_NAMES.get(target)
+    if target_as_metro:
+        listing_metro = metro_for_city(listing)
+        return listing_metro == target_as_metro
+
+    # Otherwise strict exact match only
+    return target == listing
 
 
 def locations_match(

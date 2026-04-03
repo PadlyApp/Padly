@@ -92,6 +92,20 @@ async def get_cities(
             break
 
     cities.sort(key=lambda x: x["label"])
+
+    # Prepend metro options at the top if they match this country/state
+    metro_options = []
+    if country_code.upper() == "CA" and normalize_state(state_code) == "ontario":
+        metro_options.append({"value": "GTA", "label": "GTA (Greater Toronto Area)"})
+    if country_code.upper() == "US" and normalize_state(state_code) == "new york":
+        metro_options.append({"value": "NYC", "label": "NYC (New York City Metro)"})
+    if country_code.upper() == "US" and normalize_state(state_code) == "california":
+        metro_options.append({"value": "Bay Area", "label": "Bay Area (San Francisco Metro)"})
+
+    if q:
+        metro_options = [m for m in metro_options if q.lower() in m["label"].lower()]
+
+    cities = metro_options + cities
     return {"status": "success", "count": len(cities), "data": cities}
 
 
