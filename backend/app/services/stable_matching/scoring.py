@@ -46,23 +46,23 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
             return False, f"city_mismatch_{group_city}_vs_{listing_city}"
         return False, f"state_mismatch_{group_state}_vs_{listing_state}"
     
-    # Budget range
-    group_size = group.get("target_group_size") or group.get("current_member_count") or 2
+    # Budget range — compare per-person budget against price per room
     min_budget = group.get("budget_per_person_min")
     max_budget = group.get("budget_per_person_max")
     if min_budget is None:
         min_budget = group.get("budget_min", 0)
     if max_budget is None:
         max_budget = group.get("budget_max", 0)
-    listing_price = listing.get('price_per_month', 0)
-    min_total = min_budget * group_size
-    max_total = (max_budget * group_size) + 100
+    # Use price_per_room if available, otherwise derive from total / bedrooms
+    price_per_room = listing.get('price_per_room')
+    if not price_per_room:
+        bedrooms = listing.get('number_of_bedrooms') or 1
+        price_per_room = listing.get('price_per_month', 0) / bedrooms
+    if not (min_budget <= price_per_room <= max_budget + 100):
+        return False, f"budget_mismatch_${price_per_room:.0f}_per_room_not_in_[${min_budget},${max_budget}]"
     
-    if not (min_total <= listing_price <= max_total):
-        return False, f"budget_mismatch_${listing_price}_not_in_[${min_total},${max_total}]"
-    
-    # Bedroom count
-    if listing.get('number_of_bedrooms', 0) < group_size:
+    # Bedroom count — listing must have at least 1 bedroom
+    if listing.get('number_of_bedrooms', 0) < 1:
         return False, f"insufficient_bedrooms"
     
     # Move-in date (±60 days)
@@ -349,9 +349,12 @@ def calculate_listing_score(listing: Dict[str, Any], group: Dict[str, Any]) -> f
     score = 0.0
     
     # Budget score (40 pts) - prefer groups with higher budgets
-    listing_price = listing.get('price_per_month', 0)
-    group_budget = group.get('budget_per_person_max', 0) * group.get('target_group_size', 2)
-    budget_ratio = group_budget / listing_price if listing_price > 0 and group_budget > 0 else 1.0
+    price_per_room = listing.get('price_per_room')
+    if not price_per_room:
+        bedrooms = listing.get('number_of_bedrooms') or 1
+        price_per_room = listing.get('price_per_month', 0) / bedrooms
+    group_budget = group.get('budget_per_person_max', 0)
+    budget_ratio = group_budget / price_per_room if price_per_room > 0 and group_budget > 0 else 1.0
     
     if budget_ratio >= 1.5: score += 40
     elif budget_ratio >= 1.3: score += 35
