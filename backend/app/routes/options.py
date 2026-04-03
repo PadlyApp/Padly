@@ -44,8 +44,55 @@ async def get_cities(
     q: str = Query("", max_length=100),
     limit: int = Query(100, ge=1, le=500),
 ):
-    data = search_cities(country_code, state_code, q, limit)
-    return {"status": "success", "count": len(data), "data": data}
+    """Return cities that have actual listings in the DB, filtered by country/state."""
+    from app.dependencies.supabase import get_admin_client
+    from app.services.location_matching import normalize_state, normalize_country
+
+    supabase = get_admin_client()
+
+    # Map country_code to DB country values
+    country_map = {"US": ["usa", "us", "united states"], "CA": ["canada", "ca", "can"]}
+    db_countries = country_map.get(country_code.upper(), [country_code.lower()])
+
+    # Map state_code to DB state values
+    state_norm = normalize_state(state_code)
+    try:
+        resp = supabase.table("listings").select("city, state_province, country").eq("status", "active").execute()
+        rows = resp.data or []
+    except Exception:
+        # Fallback to geonamescache if DB unavailable
+        data = search_cities(country_code, state_code, q, limit)
+        return {"status": "success", "count": len(data), "data": data}
+
+    seen = set()
+    cities = []
+    for row in rows:
+        db_country = normalize_country(row.get("country", ""))
+        db_state = normalize_state(row.get("state_province", ""))
+        target_country = normalize_country(country_code)
+
+        if db_country != target_country:
+            continue
+        if db_state != state_norm:
+            continue
+
+        raw_city = row.get("city", "")
+        # Strip sub-area suffixes like "Toronto (Malvern)" → "Toronto"
+        city_label = raw_city.split(" (")[0].strip() if " (" in raw_city else raw_city
+        if not city_label:
+            continue
+        key = city_label.lower()
+        if key in seen:
+            continue
+        if q and q.lower() not in key:
+            continue
+        seen.add(key)
+        cities.append({"value": city_label, "label": city_label})
+        if len(cities) >= limit:
+            break
+
+    cities.sort(key=lambda x: x["label"])
+    return {"status": "success", "count": len(cities), "data": cities}
 
 
 @router.get("/cities-global")
