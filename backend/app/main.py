@@ -93,3 +93,4 @@ async def health_check():
         "service": "Padly API",
         "version": "1.0.0"
     }
+
