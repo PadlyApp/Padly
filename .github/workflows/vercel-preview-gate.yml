@@ -1,0 +1,100 @@
+name: Vercel Preview Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  statuses: read
+
+concurrency:
+  group: vercel-preview-gate-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  wait-for-vercel-status:
+    name: wait-for-vercel-status
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Await Vercel commit status
+        uses: actions/github-script@v7
+        env:
+          VERCEL_CONTEXT: Vercel
+          POLL_INTERVAL_SECONDS: "20"
+          TIMEOUT_SECONDS: "1200"
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.payload.pull_request.head.sha;
+            const targetContext = process.env.VERCEL_CONTEXT || "Vercel";
+            const pollIntervalMs = Number(process.env.POLL_INTERVAL_SECONDS || "20") * 1000;
+            const timeoutMs = Number(process.env.TIMEOUT_SECONDS || "1200") * 1000;
+            const deadline = Date.now() + timeoutMs;
+
+            core.info(`Checking commit ${sha} for status context "${targetContext}"`);
+
+            let printedContexts = false;
+
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref: sha,
+              });
+
+              const statuses = Array.isArray(data.statuses) ? data.statuses : [];
+
+              if (!printedContexts) {
+                const contexts = [...new Set(statuses.map((s) => s.context).filter(Boolean))];
+                core.info(
+                  contexts.length
+                    ? `Available status contexts: ${contexts.join(", ")}`
+                    : "No commit statuses published yet."
+                );
+                printedContexts = true;
+              }
+
+              const vercelStatuses = statuses
+                .filter((s) => s.context === targetContext)
+                .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+              if (vercelStatuses.length > 0) {
+                const latest = vercelStatuses[0];
+                core.info(
+                  `Latest "${targetContext}" status: ${latest.state}` +
+                  (latest.target_url ? ` (${latest.target_url})` : "")
+                );
+
+                if (latest.state === "success") {
+                  core.info("Vercel deployment check passed.");
+                  return;
+                }
+
+                if (latest.state === "failure" || latest.state === "error") {
+                  core.setFailed(
+                    `Vercel deployment check failed with state "${latest.state}".` +
+                    (latest.target_url ? ` Details: ${latest.target_url}` : "")
+                  );
+                  return;
+                }
+              } else {
+                core.info(`"${targetContext}" status not available yet. Retrying...`);
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+            }
+
+            core.setFailed(
+              `Timed out waiting for status context "${targetContext}". ` +
+              "Confirm Vercel Git integration is installed and linked to this repository."
+            );
