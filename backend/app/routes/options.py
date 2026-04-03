@@ -31,10 +31,49 @@ async def get_countries():
 async def get_states(
     country_code: str = Query(..., min_length=2, max_length=2),
 ):
-    data = list_states(country_code)
-    if not data:
-        raise HTTPException(status_code=400, detail="Unsupported country_code. Use US or CA.")
-    return {"status": "success", "count": len(data), "data": data}
+    """Return only states/provinces that have active listings in the DB."""
+    from app.dependencies.supabase import get_admin_client
+    from app.services.location_matching import normalize_country
+
+    supabase = get_admin_client()
+    target_country = normalize_country(country_code)
+
+    try:
+        # Paginate to get all listings
+        rows = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = supabase.table("listings").select("state_province, country").eq("status", "active").range(offset, offset + page_size - 1).execute()
+            page = resp.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+
+        # Get all states from controlled vocab for label lookup
+        all_states = {s["value"]: s["label"] for s in list_states(country_code)}
+
+        seen = set()
+        states = []
+        for row in rows:
+            if normalize_country(row.get("country", "")) != target_country:
+                continue
+            code = (row.get("state_province") or "").strip()
+            if not code or code.lower() in seen:
+                continue
+            seen.add(code.lower())
+            label = all_states.get(code, code)
+            states.append({"value": code, "label": label})
+
+        states.sort(key=lambda x: x["label"])
+        if not states:
+            # Fallback to full list if DB query returns nothing
+            states = list_states(country_code)
+    except Exception:
+        states = list_states(country_code)
+
+    return {"status": "success", "count": len(states), "data": states}
 
 
 @router.get("/cities")
