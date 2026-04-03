@@ -222,6 +222,11 @@ export function PreferencesForm() {
 
       setExistingLifestyle(lifestyle);
 
+      // Pre-seed city options with the saved city so the Select renders it correctly
+      if (data.target_city) {
+        setCityOptions([{ value: data.target_city, label: data.target_city }]);
+      }
+
       setHardPrefs((prev) => ({
         ...prev,
         target_country: data.target_country || 'US',
