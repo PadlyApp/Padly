@@ -57,8 +57,17 @@ async def get_cities(
     # Map state_code to DB state values
     state_norm = normalize_state(state_code)
     try:
-        resp = supabase.table("listings").select("city, state_province, country").eq("status", "active").execute()
-        rows = resp.data or []
+        # Paginate to get all listings (Supabase default page size is 1000)
+        rows = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = supabase.table("listings").select("city, state_province, country").eq("status", "active").range(offset, offset + page_size - 1).execute()
+            page = resp.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
     except Exception:
         # Fallback to geonamescache if DB unavailable
         data = search_cities(country_code, state_code, q, limit)
