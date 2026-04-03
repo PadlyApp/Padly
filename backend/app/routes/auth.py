@@ -273,12 +273,13 @@ async def get_current_user(token: str = Depends(get_user_token)):
                 detail="Invalid token"
             )
         
-        # Get user profile
-        profile_response = supabase_anon.table("users").select("*").eq("auth_id", user_response.user.id).execute()
+        # Get user profile — must use the admin client so that Row Level Security
+        # on the users table does not block the lookup.
+        from app.db import supabase_admin
+        profile_response = supabase_admin.table("users").select("*").eq("auth_id", user_response.user.id).execute()
         
         # If profile doesn't exist, create it
         if not profile_response.data:
-            from app.db import supabase_admin
             
             # Get user metadata from auth
             user_metadata = user_response.user.user_metadata or {}

@@ -21,6 +21,7 @@ import { DatePickerInput } from '@mantine/dates';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
+import { parseApiErrorResponse } from '../../../lib/errorHandling';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -47,6 +48,18 @@ function emptyToNull(value) {
   if (value == null) return null;
   const text = String(value).trim();
   return text.length ? text : null;
+}
+
+function normalizeNumericInput(value) {
+  if (value === '' || value == null) return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeIntInput(value) {
+  const parsed = normalizeNumericInput(value);
+  if (parsed == null) return null;
+  return Math.trunc(parsed);
 }
 
 export function PreferencesForm() {
@@ -201,6 +214,7 @@ export function PreferencesForm() {
   const loadPreferences = async () => {
     const userId = user?.profile?.id;
     if (!userId || !authState?.accessToken) {
+      setLoading(false);
       return;
     }
 
@@ -318,6 +332,11 @@ export function PreferencesForm() {
     try {
       const payload = {
         ...hardPrefs,
+        budget_min: normalizeNumericInput(hardPrefs.budget_min),
+        budget_max: normalizeNumericInput(hardPrefs.budget_max),
+        target_deposit_amount: normalizeNumericInput(hardPrefs.target_deposit_amount),
+        target_lease_duration_months: normalizeIntInput(hardPrefs.target_lease_duration_months),
+        target_lease_type: hardPrefs.target_lease_type || 'any',
         target_house_rules: emptyToNull(softPrefs.target_house_rules),
         preferred_neighborhoods: softPrefs.preferred_neighborhoods || [],
         lifestyle_preferences: buildLifestylePayload(),
@@ -333,8 +352,8 @@ export function PreferencesForm() {
       });
 
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to save preferences');
+        const parsedError = await parseApiErrorResponse(response, 'Failed to save preferences');
+        throw new Error(parsedError.message);
       }
 
       setSuccess(true);
@@ -435,6 +454,7 @@ export function PreferencesForm() {
           <Grid.Col span={{ base: 12, md: 4 }}>
             <Select
               label="City"
+              description="Choose a city or metro (for example New York, NYC, Bay Area, or GTA). Add areas like Astoria under Preferred Neighborhoods."
               placeholder={hardPrefs.target_state_province ? 'Search city' : 'Select state/province first'}
               data={cityOptions}
               value={hardPrefs.target_city}
@@ -456,7 +476,7 @@ export function PreferencesForm() {
               label="Max Monthly Budget (Your Share)"
               placeholder="Maximum monthly amount"
               value={hardPrefs.budget_max}
-              onChange={(v) => updateHard('budget_max', v)}
+              onChange={(v) => updateHard('budget_max', normalizeNumericInput(v))}
               min={0}
               prefix="$"
               required
@@ -468,7 +488,7 @@ export function PreferencesForm() {
               label="Min Monthly Budget (Optional)"
               placeholder="Minimum monthly amount"
               value={hardPrefs.budget_min}
-              onChange={(v) => updateHard('budget_min', v)}
+              onChange={(v) => updateHard('budget_min', normalizeNumericInput(v))}
               min={0}
               prefix="$"
             />
@@ -513,9 +533,10 @@ export function PreferencesForm() {
           <Grid.Col span={{ base: 12, md: 6 }}>
             <NumberInput
               label="Max Deposit You Can Pay"
+              description="Optional. Leave blank if you do not want to set a deposit cap."
               placeholder="Highest acceptable deposit"
               value={hardPrefs.target_deposit_amount}
-              onChange={(v) => updateHard('target_deposit_amount', v)}
+              onChange={(v) => updateHard('target_deposit_amount', normalizeNumericInput(v))}
               min={0}
               prefix="$"
             />
@@ -582,7 +603,7 @@ export function PreferencesForm() {
               label="Lease Duration (Months)"
               placeholder="e.g. 12"
               value={hardPrefs.target_lease_duration_months}
-              onChange={(v) => updateHard('target_lease_duration_months', v)}
+              onChange={(v) => updateHard('target_lease_duration_months', normalizeIntInput(v))}
               min={1}
               max={24}
               required

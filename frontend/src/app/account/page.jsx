@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -124,7 +124,10 @@ function ProfilePanel() {
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!authState?.accessToken) return;
+      if (!authState?.accessToken) {
+        setLoading(false);
+        return;
+      }
 
       try {
         const token = await getValidToken();

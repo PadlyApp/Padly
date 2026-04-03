@@ -15,6 +15,7 @@ from typing import List, Dict, Optional, Tuple, Set
 from datetime import datetime
 import logging
 from supabase import Client
+from app.services.location_matching import cities_match
 
 from .deferred_acceptance import MatchResult, DiagnosticMetrics
 
@@ -78,10 +79,13 @@ class MatchPersistenceEngine:
                 groups_response = self.supabase.table('roommate_groups')\
                     .select('id, target_city')\
                     .in_('id', group_ids)\
-                    .eq('target_city', city)\
                     .execute()
                 
-                city_group_ids = {g['id'] for g in (groups_response.data or [])}
+                city_group_ids = {
+                    g['id']
+                    for g in (groups_response.data or [])
+                    if g.get("target_city") and cities_match(city, g.get("target_city"))
+                }
                 confirmed_matches = [m for m in all_confirmed if m['group_id'] in city_group_ids]
             else:
                 confirmed_matches = all_confirmed
@@ -114,14 +118,19 @@ class MatchPersistenceEngine:
         try:
             # Get group IDs in this city first
             groups_response = self.supabase.table('roommate_groups')\
-                .select('id')\
-                .eq('target_city', city)\
+                .select('id, target_city')\
                 .execute()
             
             if not groups_response.data:
                 return 0
             
-            group_ids = [g['id'] for g in groups_response.data]
+            group_ids = [
+                g['id']
+                for g in groups_response.data
+                if g.get("target_city") and cities_match(city, g.get("target_city"))
+            ]
+            if not group_ids:
+                return 0
             
             # Delete all unconfirmed matches for these groups in a single query
             # Unconfirmed = group_confirmed_at IS NULL OR listing_confirmed_at IS NULL
@@ -333,8 +342,6 @@ class MatchPersistenceEngine:
             query = self.supabase.table('v_active_stable_matches').select('*')
             
             # Apply filters
-            if city:
-                query = query.eq('city', city)
             if group_id:
                 query = query.eq('group_id', group_id)
             if listing_id:
@@ -344,8 +351,10 @@ class MatchPersistenceEngine:
             query = query.order('group_rank', desc=False)
             
             response = query.execute()
-            
-            return response.data if response.data else []
+            rows = response.data if response.data else []
+            if city:
+                rows = [row for row in rows if row.get("city") and cities_match(city, row.get("city"))]
+            return rows
             
         except Exception as e:
             logger.error(f"Failed to retrieve active matches: {str(e)}")
@@ -368,16 +377,18 @@ class MatchPersistenceEngine:
         """
         try:
             query = self.supabase.table('match_diagnostics').select('*')
-            
-            if city:
-                query = query.eq('city', city)
-            
-            # Order by most recent first
-            query = query.order('executed_at', desc=True).limit(limit)
+            query = query.order('executed_at', desc=True)
+            if not city:
+                query = query.limit(limit)
             
             response = query.execute()
-            
-            return response.data if response.data else []
+            rows = response.data if response.data else []
+            if city:
+                rows = [
+                    row for row in rows
+                    if row.get("city") and cities_match(city, row.get("city"))
+                ][:limit]
+            return rows
             
         except Exception as e:
             logger.error(f"Failed to retrieve diagnostics: {str(e)}")
