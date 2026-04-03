@@ -60,6 +60,12 @@ function MatchesPageContent() {
         }
         setMissingCorePreferences(!hasCorePreferences);
 
+        if (!hasCorePreferences) {
+          setLoading(false);
+          setListings([]);
+          return;
+        }
+
         try {
           const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
             headers: { Authorization: `Bearer ${authState.accessToken}` },

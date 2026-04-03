@@ -90,6 +90,13 @@ function DiscoverContent() {
         }
         setMissingCorePreferences(!hasCorePreferences);
 
+        if (!hasCorePreferences) {
+          setLoading(false);
+          setListings([]);
+          setEmptyResultReason('missing_preferences');
+          return;
+        }
+
         try {
           const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
             headers: { Authorization: `Bearer ${authState.accessToken}` },
