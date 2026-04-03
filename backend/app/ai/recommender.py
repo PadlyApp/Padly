@@ -702,10 +702,19 @@ def _heuristic_match_score(user: Dict, listing: Dict) -> float:
         weights.append(0.20)
 
     # Bathroom preference
-    desired_baths = _safe_float(user.get("desired_baths"))
+    desired_baths = _safe_float(user.get("desired_baths") or user.get("target_bathrooms"))
     baths = _safe_float(listing.get("number_of_bathrooms"))
     if desired_baths > 0:
-        components.append(_relative_closeness(baths, desired_baths, max(1.0, desired_baths)))
+        if baths <= 0:
+            bath_score = 0.5
+        elif baths < desired_baths:
+            # Below minimum should degrade quickly.
+            bath_score = _clamp01(baths / desired_baths)
+        else:
+            # At-least-minimum is good; give a modest bonus for extra bathrooms.
+            extra_baths = min(3.0, baths - desired_baths)
+            bath_score = _clamp01(0.85 + (0.05 * extra_baths))
+        components.append(bath_score)
         weights.append(0.15)
 
     # Furnished preference

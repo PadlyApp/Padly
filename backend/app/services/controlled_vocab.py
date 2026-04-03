@@ -318,7 +318,8 @@ def validate_neighborhoods(city_name: str, neighborhoods: Optional[List[str]]) -
 def validate_location(country_code: str, state_code: str, city_name: str) -> Tuple[str, str, str]:
     cache = _build_vocab_cache()
     cc = (country_code or "").upper().strip()
-    sc = (state_code or "").upper().strip()
+    state_input = (state_code or "").strip()
+    sc = state_input.upper()
     cnorm = _norm(city_name)
 
     if cc not in {"US", "CA"}:
@@ -326,7 +327,18 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
 
     states = cache["states_by_country"].get(cc, {})
     if sc not in states:
-        raise ValueError(f"state_code '{sc}' is not valid for country '{cc}'")
+        state_input_norm = _norm(state_input)
+        matched_code = next(
+            (
+                code
+                for code, label in states.items()
+                if _norm(code) == state_input_norm or _norm(label) == state_input_norm
+            ),
+            None,
+        )
+        if not matched_code:
+            raise ValueError(f"state_code '{sc}' is not valid for country '{cc}'")
+        sc = matched_code
 
     city_map = cache["city_name_index"].get((cc, sc), {})
     canonical_city = city_map.get(cnorm)
