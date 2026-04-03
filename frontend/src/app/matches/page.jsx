@@ -10,6 +10,7 @@ import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageTracking } from '../hooks/usePageTracking';
 import { getLikedListings } from '../discover/likedListings';
 import {
   createAppError,
@@ -30,6 +31,8 @@ function MatchesPageContent() {
   const router = useRouter();
   const { user, authState } = useAuth();
   const userId = user?.profile?.id;
+
+  usePageTracking('matches', authState?.accessToken);
 
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
