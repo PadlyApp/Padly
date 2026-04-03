@@ -284,6 +284,7 @@ export default function EditGroupPage() {
 
                 <Select
                   label="Target City"
+                  description="You can select a city or metro (NYC, Bay Area, GTA)."
                   placeholder="Search and select a city"
                   required
                   data={cityOptions}

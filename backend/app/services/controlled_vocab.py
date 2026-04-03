@@ -13,6 +13,13 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import geonamescache
+from app.services.location_matching import (
+    get_metro_options,
+    metro_option,
+    normalize_city_name,
+    normalize_country,
+    normalize_state,
+)
 
 
 COUNTRIES = [
@@ -156,6 +163,12 @@ GENERIC_NEIGHBORHOODS = [
     "City Center",
 ]
 
+_METRO_TO_NEIGHBORHOOD_CITY = {
+    "gta": "toronto",
+    "nyc": "new york",
+    "bay_area": "san francisco",
+}
+
 
 def _norm(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
@@ -268,11 +281,35 @@ def search_cities_global(query: str = "", limit: int = 100) -> List[Dict[str, st
     q = _norm(query)
     names = sorted(cache["city_global_map"].values())
     filtered = [name for name in names if not q or q in _norm(name)]
-    return [{"value": name, "label": name} for name in filtered[:limit]]
+    metros = get_metro_options(query=query)
+
+    out: List[Dict[str, str]] = []
+    seen = set()
+
+    for option in metros + [{"value": name, "label": name} for name in filtered]:
+        value = str(option.get("value") or "").strip()
+        if not value:
+            continue
+        key = _norm(value)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"value": value, "label": str(option.get("label") or value)})
+        if len(out) >= limit:
+            break
+
+    return out
+
+
+def _neighborhood_city_key(city_name: str) -> str:
+    metro = metro_option(city_name)
+    if metro:
+        return _METRO_TO_NEIGHBORHOOD_CITY.get(metro["id"], _norm(metro["value"]))
+    return _norm(normalize_city_name(city_name))
 
 
 def search_neighborhoods(city_name: str, query: str = "", limit: int = 200) -> List[Dict[str, str]]:
-    city_key = _norm(city_name)
+    city_key = _neighborhood_city_key(city_name)
     q = _norm(query)
 
     neighborhoods = CURATED_NEIGHBORHOODS.get(city_key, GENERIC_NEIGHBORHOODS)
@@ -319,7 +356,7 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
     cache = _build_vocab_cache()
     cc = (country_code or "").upper().strip()
     sc = (state_code or "").upper().strip()
-    cnorm = _norm(city_name)
+    cnorm = _norm(normalize_city_name(city_name))
 
     if cc not in {"US", "CA"}:
         raise ValueError("country_code must be one of: US, CA")
@@ -327,6 +364,17 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
     states = cache["states_by_country"].get(cc, {})
     if sc not in states:
         raise ValueError(f"state_code '{sc}' is not valid for country '{cc}'")
+
+    selected_metro = metro_option(city_name)
+    if selected_metro:
+        state_name = states.get(sc, "")
+        cc_norm = normalize_country(cc)
+        sc_norm = normalize_state(state_name)
+        if cc_norm != selected_metro["country"] or sc_norm not in selected_metro["states"]:
+            raise ValueError(
+                f"city '{city_name}' is not valid for state '{sc}', country '{cc}'"
+            )
+        return cc, sc, selected_metro["value"]
 
     city_map = cache["city_name_index"].get((cc, sc), {})
     canonical_city = city_map.get(cnorm)
@@ -340,6 +388,9 @@ def validate_city_name(value: str) -> str:
     text = (value or "").strip()
     if not text:
         raise ValueError("target_city is required")
+    selected_metro = metro_option(text)
+    if selected_metro:
+        return selected_metro["value"]
     mapped = _build_vocab_cache()["city_global_map"].get(_norm(text))
     if not mapped:
         raise ValueError("target_city must be selected from predefined city options")

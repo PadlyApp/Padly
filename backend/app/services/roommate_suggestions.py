@@ -19,6 +19,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.dependencies.supabase import get_admin_client
+from app.services.location_matching import cities_match, metro_for_city
 from app.services.preferences_contract import (
     lease_types_compatible,
     resolve_furnished_preference,
@@ -113,26 +114,38 @@ def _load_city_candidate_rows(
     Load personal_preferences rows for the target city excluding seeker.
     cap=None means fetch all pages.
     """
+    city_value = str(target_city or "").strip()
+    metro_mode = metro_for_city(city_value) is not None
+
     base = (
         supabase.table("personal_preferences")
         .select("*")
         .neq("user_id", seeker_id)
-        .ilike("target_city", target_city)
         .order("updated_at", desc=True)
     )
-    if cap is not None:
-        resp = base.limit(cap).execute()
-        return list(resp.data or [])
+    if not metro_mode:
+        base = base.ilike("target_city", city_value)
+        if cap is not None:
+            resp = base.limit(cap).execute()
+            return list(resp.data or [])
 
     out: List[Dict[str, Any]] = []
     start = 0
     while True:
         resp = base.range(start, start + _CANDIDATE_PAGE_SIZE - 1).execute()
-        rows = list(resp.data or [])
-        if not rows:
+        page_rows = list(resp.data or [])
+        if not page_rows:
             break
+        rows = page_rows
+        if metro_mode:
+            rows = [
+                row for row in rows
+                if row.get("target_city") and cities_match(city_value, row.get("target_city"))
+            ]
         out.extend(rows)
-        if len(rows) < _CANDIDATE_PAGE_SIZE:
+        if cap is not None and len(out) >= cap:
+            return out[:cap]
+        if len(page_rows) < _CANDIDATE_PAGE_SIZE:
             break
         start += _CANDIDATE_PAGE_SIZE
     return out
@@ -168,7 +181,7 @@ def cities_compatible_if_both_set(
     cc = _city_str(cand_prefs.get("target_city"))
     if not sc or not cc:
         return True
-    return sc == cc
+    return cities_match(sc, cc)
 
 
 def states_compatible_if_both_set(
@@ -362,7 +375,7 @@ def seeker_compatible_with_group_hard(seeker_prefs: Dict[str, Any], group: Dict[
 
     sc = _city_str(seeker_prefs.get("target_city"))
     gc = _city_str(group.get("target_city"))
-    if not sc or not gc or sc != gc:
+    if not sc or not gc or not cities_match(sc, gc):
         return False
 
     ss = _norm(seeker_prefs.get("target_state_province"))

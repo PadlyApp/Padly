@@ -77,3 +77,18 @@ def test_user_group_lifestyle_now_carries_30_points():
     assert score["eligible"] is True
     # With perfect hard and lifestyle alignment this should include the 30-pt lifestyle weight.
     assert score["score"] >= 80
+
+
+def test_user_group_city_match_supports_metro_aliases():
+    user = _base_user()
+    prefs = _base_user_prefs()
+    prefs["target_city"] = "NYC"
+
+    group = _base_group()
+    group["target_city"] = "Queens"
+    group["target_move_in_date"] = "2026-04-01"
+    group["budget_per_person_min"] = 1000
+    group["budget_per_person_max"] = 1600
+
+    score = calculate_user_group_compatibility(user, prefs, group)
+    assert score["eligible"] is True

@@ -10,7 +10,7 @@ from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
 from app.services.controlled_vocab import validate_city_name, validate_neighborhoods
 from app.services.behavior_features import build_group_behavior_vector
-from app.services.location_matching import filter_listings_for_location
+from app.services.location_matching import cities_match, filter_listings_for_location
 from app.services.preferences_contract import (
     normalize_lease_type,
     resolve_furnished_preference,
@@ -2665,7 +2665,7 @@ async def get_compatible_users(
     # Filter users based on hard constraints
     compatible_users = []
     
-    group_city = group.get('target_city', '').lower().strip()
+    group_city = group.get('target_city', '').strip()
     group_budget_min = group.get('budget_per_person_min') or 0
     group_budget_max = group.get('budget_per_person_max') or float('inf')
     group_move_in = group.get('target_move_in_date')
@@ -2680,11 +2680,9 @@ async def get_compatible_users(
         prefs = prefs_map.get(user_id, {})
         
         # Hard constraint 1: City match
-        user_city = (prefs.get('target_city') or '').lower().strip()
-        if group_city and user_city and group_city != user_city:
-            # Allow partial match (e.g., "sf" matches "san francisco")
-            if group_city not in user_city and user_city not in group_city:
-                continue
+        user_city = (prefs.get('target_city') or '').strip()
+        if group_city and user_city and not cities_match(group_city, user_city):
+            continue
         
         # Hard constraint 2: Budget overlap
         user_budget_min = prefs.get('budget_min') or 0

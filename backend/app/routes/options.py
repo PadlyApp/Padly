@@ -18,6 +18,7 @@ from app.services.controlled_vocab import (
     search_companies,
     search_schools,
 )
+from app.services.location_matching import get_metro_options
 
 router = APIRouter(prefix="/api/options", tags=["options"])
 
@@ -141,17 +142,12 @@ async def get_cities(
 
     cities.sort(key=lambda x: x["label"])
 
-    # Prepend metro options at the top if they match this country/state
-    metro_options = []
-    if country_code.upper() == "CA" and normalize_state(state_code) == "ontario":
-        metro_options.append({"value": "GTA", "label": "GTA (Greater Toronto Area)"})
-    if country_code.upper() == "US" and normalize_state(state_code) == "new york":
-        metro_options.append({"value": "NYC", "label": "NYC (New York City Metro)"})
-    if country_code.upper() == "US" and normalize_state(state_code) == "california":
-        metro_options.append({"value": "Bay Area", "label": "Bay Area (San Francisco Metro)"})
-
-    if q:
-        metro_options = [m for m in metro_options if q.lower() in m["label"].lower()]
+    # Prepend metro options from shared location contract.
+    metro_options = get_metro_options(
+        country_code=country_code,
+        state_code=state_code,
+        query=q,
+    )
 
     cities = metro_options + cities
     return {"status": "success", "count": len(cities), "data": cities}

@@ -110,6 +110,38 @@ _METRO_DISPLAY_NAMES = {
     "san francisco bay area": "bay_area",
 }
 
+_METRO_CATALOG = (
+    {
+        "id": "gta",
+        "value": "GTA",
+        "label": "GTA (Greater Toronto Area)",
+        "country": "ca",
+        "states": {"ontario"},
+    },
+    {
+        "id": "nyc",
+        "value": "NYC",
+        "label": "NYC (New York City Metro)",
+        "country": "us",
+        "states": {"new york"},
+    },
+    {
+        "id": "bay_area",
+        "value": "Bay Area",
+        "label": "Bay Area (San Francisco Metro)",
+        "country": "us",
+        "states": {"california"},
+    },
+)
+
+_METRO_BY_ID = {m["id"]: m for m in _METRO_CATALOG}
+
+for metro in _METRO_CATALOG:
+    value_key = re.sub(r"\s+", " ", metro["value"].strip().lower())
+    label_key = re.sub(r"\s+", " ", metro["label"].strip().lower())
+    _METRO_DISPLAY_NAMES[value_key] = metro["id"]
+    _METRO_DISPLAY_NAMES[label_key] = metro["id"]
+
 
 def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
@@ -133,10 +165,72 @@ def normalize_city_name(value: Any) -> str:
     return city
 
 
+def metro_id_for_city(value: Any) -> Optional[str]:
+    raw = normalize_text(value)
+    if not raw:
+        return None
+    if " (" in raw:
+        raw = raw.split(" (", 1)[0].strip()
+
+    direct = _METRO_DISPLAY_NAMES.get(raw)
+    if direct:
+        return direct
+    city = normalize_city_name(value)
+    direct = _METRO_DISPLAY_NAMES.get(city)
+    if direct:
+        return direct
+    return None
+
+
+def is_metro_city(value: Any) -> bool:
+    return metro_id_for_city(value) is not None
+
+
+def metro_option(value: Any) -> Optional[Dict[str, Any]]:
+    metro_id = metro_id_for_city(value)
+    if not metro_id:
+        return None
+    metro = _METRO_BY_ID.get(metro_id)
+    if not metro:
+        return None
+    return {
+        "id": metro["id"],
+        "value": metro["value"],
+        "label": metro["label"],
+        "country": metro["country"],
+        "states": set(metro["states"]),
+    }
+
+
+def get_metro_options(
+    *,
+    country_code: Any = None,
+    state_code: Any = None,
+    query: str = "",
+) -> List[Dict[str, str]]:
+    cc = normalize_country(country_code) if country_code is not None else ""
+    sc = normalize_state(state_code) if state_code is not None else ""
+    q = normalize_text(query)
+
+    out: List[Dict[str, str]] = []
+    for metro in _METRO_CATALOG:
+        if cc and metro["country"] != cc:
+            continue
+        if sc and sc not in metro["states"]:
+            continue
+        if q and q not in normalize_text(metro["value"]) and q not in normalize_text(metro["label"]):
+            continue
+        out.append({"value": metro["value"], "label": metro["label"]})
+    return out
+
+
 def metro_for_city(value: Any) -> Optional[str]:
     city = normalize_city_name(value)
     if not city:
         return None
+    as_metro = _METRO_DISPLAY_NAMES.get(city)
+    if as_metro:
+        return as_metro
     for metro, aliases in _METRO_ALIASES.items():
         if city in aliases:
             return metro
@@ -149,11 +243,10 @@ def cities_match(target_city: Any, listing_city: Any) -> bool:
     if not target or not listing:
         return True
 
-    # If user picked a metro name (GTA, NYC, Bay Area), match all cities in that metro
-    target_as_metro = _METRO_DISPLAY_NAMES.get(target)
-    if target_as_metro:
-        listing_metro = metro_for_city(listing)
-        return listing_metro == target_as_metro
+    target_as_metro = metro_for_city(target)
+    listing_as_metro = metro_for_city(listing)
+    if target_as_metro or listing_as_metro:
+        return bool(target_as_metro) and target_as_metro == listing_as_metro
 
     # Otherwise strict exact match only
     return target == listing

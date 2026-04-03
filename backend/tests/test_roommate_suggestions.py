@@ -61,6 +61,11 @@ def test_cities_compatible_when_matching():
     assert cities_compatible_if_both_set({"target_city": "Boston"}, {"target_city": "boston"}) is True
 
 
+def test_cities_compatible_with_metro_aliases():
+    assert cities_compatible_if_both_set({"target_city": "NYC"}, {"target_city": "New York"}) is True
+    assert cities_compatible_if_both_set({"target_city": "Bay Area"}, {"target_city": "Oakland"}) is True
+
+
 def test_cities_incompatible_when_different():
     assert cities_compatible_if_both_set({"target_city": "Boston"}, {"target_city": "Cambridge"}) is False
 
@@ -228,6 +233,25 @@ def test_seeker_compatible_with_group_hard():
     assert seeker_compatible_with_group_hard(prefs, bad_city) is False
     assert seeker_compatible_with_group_hard(prefs, bad_budget) is False
     assert seeker_compatible_with_group_hard(prefs, bad_lease) is False
+
+
+def test_seeker_compatible_with_group_hard_allows_metro_city():
+    prefs = {
+        "target_country": "US",
+        "target_city": "NYC",
+        "target_state_province": "NY",
+        "budget_min": 1000,
+        "budget_max": 2500,
+    }
+    group = {
+        "status": "active",
+        "target_country": "US",
+        "target_city": "Queens",
+        "target_state_province": "NY",
+        "budget_per_person_min": 1200,
+        "budget_per_person_max": 2000,
+    }
+    assert seeker_compatible_with_group_hard(prefs, group) is True
 
 
 def test_candidate_excluded_for_incompatible_group():
