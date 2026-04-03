@@ -134,15 +134,26 @@ async def get_recommendations(preferences: UserPreferences):
     }
     """
     try:
-        from app.services.supabase_client import SupabaseHTTPClient
-        client = SupabaseHTTPClient()
-        listings = await client.select(
-            table="listings",
-            columns="*,listing_photos(photo_url,sort_order)",
-            filters={"status": "eq.active"},
-            limit=5000,
-        )
-        listings = hydrate_listing_image_collection(listings)
+        from app.dependencies.supabase import get_admin_client
+        supabase = get_admin_client()
+        # Paginate to fetch all listings (Supabase default page size is 1000)
+        all_listings = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                supabase.table("listings")
+                .select("*,listing_photos(photo_url,sort_order)")
+                .eq("status", "active")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            page = resp.data or []
+            all_listings.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        listings = hydrate_listing_image_collection(all_listings)
     except Exception as e:
         print(f"[recommendations] listings fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch listings: {str(e)}")
