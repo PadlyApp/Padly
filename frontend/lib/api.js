@@ -1,23 +1,14 @@
+import { createAppError, parseApiErrorResponse } from './errorHandling';
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-function parseFastApiDetail(payload) {
-  const d = payload?.detail;
-  if (typeof d === 'string') return d;
-  if (Array.isArray(d)) {
-    return d
-      .map((x) => (typeof x === 'string' ? x : x?.msg || JSON.stringify(x)))
-      .join(', ');
-  }
-  return payload?.message || 'Request failed';
-}
-
-async function readApiError(response) {
-  try {
-    const j = await response.json();
-    return parseFastApiDetail(j);
-  } catch {
-    return response.statusText || 'Request failed';
-  }
+async function throwApiError(response, fallbackMessage = 'Request failed') {
+  const info = await parseApiErrorResponse(response, fallbackMessage);
+  throw createAppError(info.message, {
+    status: info.status,
+    payload: info.payload,
+    rawMessage: info.message,
+  });
 }
 
 export const api = {
@@ -39,7 +30,7 @@ export const api = {
     
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error('Failed to fetch listings');
+      await throwApiError(response, 'Failed to fetch listings');
     }
     const data = await response.json();
     return data;
@@ -48,7 +39,7 @@ export const api = {
   async getListing(id) {
     const response = await fetch(`${API_BASE_URL}/api/listings/${id}`);
     if (!response.ok) {
-      throw new Error('Failed to fetch listing');
+      await throwApiError(response, 'Failed to fetch listing');
     }
     const data = await response.json();
     return data;
@@ -64,7 +55,7 @@ export const api = {
       body: JSON.stringify(listingData),
     });
     if (!response.ok) {
-      throw new Error('Failed to create listing');
+      await throwApiError(response, 'Failed to create listing');
     }
     const data = await response.json();
     return data;
@@ -74,7 +65,7 @@ export const api = {
   async getUsers(limit = 100, offset = 0) {
     const response = await fetch(`${API_BASE_URL}/api/users?limit=${limit}&offset=${offset}`);
     if (!response.ok) {
-      throw new Error('Failed to fetch users');
+      await throwApiError(response, 'Failed to fetch users');
     }
     const data = await response.json();
     return data;
@@ -91,7 +82,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to search users');
     }
     return response.json();
   },
@@ -99,7 +90,7 @@ export const api = {
   async getUser(id) {
     const response = await fetch(`${API_BASE_URL}/api/users/${id}`);
     if (!response.ok) {
-      throw new Error('Failed to fetch user');
+      await throwApiError(response, 'Failed to fetch user');
     }
     const data = await response.json();
     return data;
@@ -111,8 +102,7 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      const msg = await readApiError(response);
-      throw new Error(msg);
+      await throwApiError(response, 'Failed to fetch user');
     }
     return response.json();
   },
@@ -129,7 +119,7 @@ export const api = {
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to fetch roommate suggestions');
     }
     return response.json();
   },
@@ -144,7 +134,7 @@ export const api = {
       body: JSON.stringify({ to_user_id: toUserId }),
     });
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to send roommate interest');
     }
     return response.json();
   },
@@ -154,7 +144,7 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to fetch roommate inbox');
     }
     return response.json();
   },
@@ -172,7 +162,7 @@ export const api = {
       }
     );
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to respond to roommate intro');
     }
     return response.json();
   },
@@ -183,7 +173,7 @@ export const api = {
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!response.ok) {
-      throw new Error(await readApiError(response));
+      await throwApiError(response, 'Failed to fetch intro status');
     }
     return response.json();
   },
@@ -198,7 +188,7 @@ export const api = {
       body: JSON.stringify(userData),
     });
     if (!response.ok) {
-      throw new Error('Failed to create user');
+      await throwApiError(response, 'Failed to create user');
     }
     const data = await response.json();
     return data;
@@ -218,7 +208,7 @@ export const api = {
     
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error('Failed to fetch roommate posts');
+      await throwApiError(response, 'Failed to fetch roommate posts');
     }
     const data = await response.json();
     return data;
@@ -227,7 +217,7 @@ export const api = {
   async getRoommatePost(id) {
     const response = await fetch(`${API_BASE_URL}/api/roommate-posts/${id}`);
     if (!response.ok) {
-      throw new Error('Failed to fetch roommate post');
+      await throwApiError(response, 'Failed to fetch roommate post');
     }
     const data = await response.json();
     return data;
@@ -243,7 +233,7 @@ export const api = {
       body: JSON.stringify(postData),
     });
     if (!response.ok) {
-      throw new Error('Failed to create roommate post');
+      await throwApiError(response, 'Failed to create roommate post');
     }
     const data = await response.json();
     return data;

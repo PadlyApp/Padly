@@ -6,6 +6,7 @@ import { QueryProvider } from './providers/QueryProvider';
 import { AuthProvider } from './contexts/AuthContext';
 import { PadlyTourProvider } from './contexts/TourContext';
 import { TourProvider } from '@reactour/tour';
+import { Notifications } from '@mantine/notifications';
 import { AppTour } from './components/tour/AppTour';
 import { Analytics } from '@vercel/analytics/next';
 
@@ -60,6 +61,7 @@ export default function RootLayout({ children }) {
                   scrollSmooth
                 >
                   <AppTour />
+                  <Notifications position="top-right" />
                   {children}
                 </TourProvider>
               </PadlyTourProvider>

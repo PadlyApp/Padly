@@ -3,7 +3,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group, Progress, Modal, Badge, Divider } from '@mantine/core';
+import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group, Progress, Modal, Badge, Divider, ThemeIcon } from '@mantine/core';
 import { useHotkeys } from '@mantine/hooks';
 import { IconX, IconHeart, IconRefresh, IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from '../components/ImageWithFallback';
@@ -13,6 +13,12 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
 import { SwipeCard } from '../components/SwipeCard';
+import {
+  createAppError,
+  hasCompleteCorePreferences,
+  normalizeRecommendationsError,
+  parseApiErrorResponse,
+} from '../../../lib/errorHandling';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
@@ -55,6 +61,8 @@ function DiscoverContent() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [missingCorePreferences, setMissingCorePreferences] = useState(false);
+  const [emptyResultReason, setEmptyResultReason] = useState(null);
   const [expandedListing, setExpandedListing] = useState(null);
   const [expandedImageIndex, setExpandedImageIndex] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -64,10 +72,12 @@ function DiscoverContent() {
   const fetchRecommendations = useCallback(async ({ append = false } = {}) => {
     setLoading(true);
     setError(null);
+    if (!append) setEmptyResultReason(null);
 
     try {
       // Fetch user preferences
       let prefs = {};
+      let hasCorePreferences = false;
       const swipedIds = new Set();
       if (userId && authState?.accessToken) {
         const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
@@ -76,7 +86,9 @@ function DiscoverContent() {
         if (prefRes.ok) {
           const prefData = await prefRes.json();
           prefs = prefData.data || prefData || {};
+          hasCorePreferences = hasCompleteCorePreferences(prefs);
         }
+        setMissingCorePreferences(!hasCorePreferences);
 
         try {
           const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
@@ -162,7 +174,14 @@ function DiscoverContent() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error('Failed to fetch recommendations');
+      if (!res.ok) {
+        const apiError = await parseApiErrorResponse(res, 'Failed to fetch recommendations');
+        throw createAppError(apiError.message, {
+          status: apiError.status,
+          payload: apiError.payload,
+          rawMessage: apiError.message,
+        });
+      }
 
       const data = await res.json();
 
@@ -180,10 +199,15 @@ function DiscoverContent() {
       } else {
         setListings(fresh);
         setCurrentIndex(0);
+        setEmptyResultReason(
+          fresh.length === 0
+            ? (hasCorePreferences ? 'strict_constraints' : 'missing_preferences')
+            : null
+        );
         nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
       }
     } catch (err) {
-      setError(err.message);
+      setError(normalizeRecommendationsError(err));
     } finally {
       setLoading(false);
     }
@@ -310,7 +334,8 @@ function DiscoverContent() {
   }, [expandedListing]);
 
   const remaining = listings.length - currentIndex;
-  const isDone = !loading && !error && remaining === 0 && !hasMore;
+  const noRecommendations = !loading && !error && listings.length === 0 && !hasMore;
+  const isDone = !loading && !error && listings.length > 0 && remaining === 0 && !hasMore;
 
   useHotkeys([
     ['ArrowLeft', () => handleButton('left')],
@@ -327,7 +352,7 @@ function DiscoverContent() {
           <Title order={2} style={{ color: '#111', fontWeight: 500 }}>
             Discover
           </Title>
-          {!loading && !isDone && (
+          {!loading && !isDone && !noRecommendations && (
             <Text size="sm" c="dimmed" data-tour="discover-counter">
               {remaining} listing{remaining !== 1 ? 's' : ''} left
             </Text>
@@ -352,6 +377,46 @@ function DiscoverContent() {
               <Button onClick={fetchRecommendations} variant="light" color="teal">
                 Try again
               </Button>
+            </Stack>
+          )}
+
+          {/* No recommendations */}
+          {noRecommendations && (
+            <Stack align="center" gap="lg" style={{ height: 520, justifyContent: 'center' }}>
+              <ThemeIcon size={72} radius="xl" variant="light" color="teal">
+                <IconInfoCircle size={36} />
+              </ThemeIcon>
+              <Title order={3} style={{ color: '#111' }}>
+                {emptyResultReason === 'missing_preferences'
+                  ? 'Complete your preferences'
+                  : 'No listings match right now'}
+              </Title>
+              <Text c="dimmed" ta="center" maw={420}>
+                {emptyResultReason === 'missing_preferences'
+                  ? 'Set your country, state/province, and city to get location-aware recommendations.'
+                  : 'Try broadening one hard constraint like budget, room preference, or move-in date.'}
+              </Text>
+              <Group gap="md" justify="center">
+                <Button
+                  variant="light"
+                  color="teal"
+                  onClick={() => router.push('/account?tab=preferences')}
+                >
+                  Open Preferences
+                </Button>
+                <Button
+                  leftSection={<IconRefresh size={16} />}
+                  onClick={fetchRecommendations}
+                  color="teal"
+                >
+                  Retry
+                </Button>
+              </Group>
+              {missingCorePreferences && (
+                <Text size="sm" c="dimmed" ta="center">
+                  Listing ranking improves once your core location constraints are set.
+                </Text>
+              )}
             </Stack>
           )}
 
@@ -382,7 +447,7 @@ function DiscoverContent() {
           )}
 
           {/* Card stack + buttons */}
-          {!loading && !error && !isDone && (
+          {!loading && !error && !isDone && !noRecommendations && (
             <>
               <Box style={{ width: '100%', maxWidth: 400, marginBottom: 16 }}>
                 <Group justify="space-between" mb={6}>

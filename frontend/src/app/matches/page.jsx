@@ -11,6 +11,12 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useAuth } from '../contexts/AuthContext';
 import { getLikedListings } from '../discover/likedListings';
+import {
+  createAppError,
+  hasCompleteCorePreferences,
+  normalizeRecommendationsError,
+  parseApiErrorResponse,
+} from '../../../lib/errorHandling';
 
 export default function MatchesPage() {
   return (
@@ -28,6 +34,7 @@ function MatchesPageContent() {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [missingCorePreferences, setMissingCorePreferences] = useState(false);
   const [userGroup, setUserGroup] = useState(null);
   const [savedListingIds, setSavedListingIds] = useState(new Set());
 
@@ -37,6 +44,7 @@ function MatchesPageContent() {
 
     try {
       let prefs = {};
+      let hasCorePreferences = false;
       let behaviorSampleSize;
       const liked = getLikedListings();
       const likedExtras = {};
@@ -48,7 +56,9 @@ function MatchesPageContent() {
         if (prefRes.ok) {
           const prefData = await prefRes.json();
           prefs = prefData.data || prefData || {};
+          hasCorePreferences = hasCompleteCorePreferences(prefs);
         }
+        setMissingCorePreferences(!hasCorePreferences);
 
         try {
           const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
@@ -111,12 +121,19 @@ function MatchesPageContent() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error('Failed to fetch ranked matches');
+      if (!res.ok) {
+        const apiError = await parseApiErrorResponse(res, 'Failed to fetch ranked matches');
+        throw createAppError(apiError.message, {
+          status: apiError.status,
+          payload: apiError.payload,
+          rawMessage: apiError.message,
+        });
+      }
 
       const data = await res.json();
       setListings(data.recommendations || []);
     } catch (err) {
-      setError(err.message);
+      setError(normalizeRecommendationsError(err));
     } finally {
       setLoading(false);
     }
@@ -228,14 +245,28 @@ function MatchesPageContent() {
               <IconSparkles size={36} />
             </ThemeIcon>
             <Stack align="center" gap="xs">
-              <Title order={3} style={{ color: '#212529' }}>No ranked matches yet</Title>
+              <Title order={3} style={{ color: '#212529' }}>
+                {missingCorePreferences ? 'Complete your preferences to get matches' : 'No ranked matches yet'}
+              </Title>
               <Text size="md" c="dimmed" ta="center" maw={420}>
-                Update your preferences or broaden a hard constraint to surface more listings.
+                {missingCorePreferences
+                  ? 'Set your country, state/province, and city to start receiving location-aware listings.'
+                  : 'Update your preferences or broaden a hard constraint to surface more listings.'}
               </Text>
             </Stack>
-            <Button size="md" color="teal" onClick={() => router.push('/discover')}>
-              Go To Discover
-            </Button>
+            <Stack gap="sm" align="center">
+              <Button
+                size="md"
+                variant="light"
+                color="teal"
+                onClick={() => router.push('/account?tab=preferences')}
+              >
+                Open Preferences
+              </Button>
+              <Button size="md" color="teal" onClick={() => router.push('/discover')}>
+                Go To Discover
+              </Button>
+            </Stack>
           </Stack>
         )}
 

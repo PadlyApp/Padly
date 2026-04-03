@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
+  Alert,
   TextInput,
   PasswordInput,
   Button,
@@ -13,13 +14,15 @@ import {
   Box,
   Group,
 } from '@mantine/core';
-import { IconHome, IconCheck } from '@tabler/icons-react';
+import { IconHome, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../contexts/AuthContext';
+import { getErrorMessage, normalizeAuthErrorMessage } from '../../../lib/errorHandling';
 
 export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const { signup } = useAuth();
   const router = useRouter();
 
@@ -40,8 +43,19 @@ export default function SignupPage() {
     },
   });
 
+  useEffect(() => {
+    if (submitError) setSubmitError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.values.fullName, form.values.email, form.values.password, form.values.confirmPassword]);
+
+  const fullNameInputProps = form.getInputProps('fullName');
+  const emailInputProps = form.getInputProps('email');
+  const passwordInputProps = form.getInputProps('password');
+  const confirmPasswordInputProps = form.getInputProps('confirmPassword');
+
   const handleSubmit = async (values) => {
     setIsLoading(true);
+    setSubmitError(null);
 
     try {
       await signup(values.email, values.password, values.fullName);
@@ -53,20 +67,25 @@ export default function SignupPage() {
       // Redirect to onboarding to complete profile
       router.push('/onboarding');
     } catch (err) {
-      // Check if it's an email confirmation message
-      if (err.message && err.message.includes('check your email')) {
+      if (err?.code === 'EMAIL_CONFIRMATION_REQUIRED') {
+        const message = getErrorMessage(
+          err,
+          'Account created successfully. Please check your email to confirm your account before signing in.'
+        );
         notifications.show({
           title: 'Account Created!',
-          message: err.message,
+          message,
           color: 'blue',
           autoClose: 8000,
         });
         // Redirect to login page
         router.push('/login');
       } else {
+        const message = normalizeAuthErrorMessage(err, { flow: 'signup' });
+        setSubmitError(message);
         notifications.show({
-          title: 'Registration Failed',
-          message: err.message || 'Failed to create account. Please try again.',
+          title: 'Registration failed',
+          message,
           color: 'red',
         });
       }
@@ -146,32 +165,54 @@ export default function SignupPage() {
 
           <form onSubmit={form.onSubmit(handleSubmit)}>
             <Stack>
+              {submitError && (
+                <Alert color="red" variant="light" icon={<IconAlertCircle size={16} />}>
+                  {submitError}
+                </Alert>
+              )}
+
               <TextInput
                 label="Full Name"
                 placeholder="Your full name"
                 required
-                {...form.getInputProps('fullName')}
+                {...fullNameInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  fullNameInputProps.onChange(event);
+                }}
               />
 
               <TextInput
                 label="Email"
                 placeholder="your@email.com"
                 required
-                {...form.getInputProps('email')}
+                {...emailInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  emailInputProps.onChange(event);
+                }}
               />
 
               <PasswordInput
                 label="Password"
                 placeholder="Your password"
                 required
-                {...form.getInputProps('password')}
+                {...passwordInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  passwordInputProps.onChange(event);
+                }}
               />
 
               <PasswordInput
                 label="Confirm Password"
                 placeholder="Confirm your password"
                 required
-                {...form.getInputProps('confirmPassword')}
+                {...confirmPasswordInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  confirmPasswordInputProps.onChange(event);
+                }}
               />
 
               <Button

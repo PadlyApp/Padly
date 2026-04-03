@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
+  Alert,
   TextInput,
   PasswordInput,
   Button,
@@ -13,13 +14,15 @@ import {
   Box,
   Group,
 } from '@mantine/core';
-import { IconHome, IconCheck } from '@tabler/icons-react';
+import { IconHome, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeAuthErrorMessage } from '../../../lib/errorHandling';
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const { signin } = useAuth();
   const router = useRouter();
 
@@ -34,14 +37,20 @@ export default function LoginPage() {
     },
   });
 
+  useEffect(() => {
+    if (submitError) setSubmitError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.values.email, form.values.password]);
+
+  const emailInputProps = form.getInputProps('email');
+  const passwordInputProps = form.getInputProps('password');
+
   const handleSubmit = async (values) => {
-    console.log("clicked - attempting signin with:", values.email);
     setIsLoading(true);
+    setSubmitError(null);
 
     try {
-      console.log("Calling signin...");
       await signin(values.email, values.password);
-      console.log("Signin successful!");
       notifications.show({
         title: 'Welcome back!',
         message: 'Successfully signed in',
@@ -56,10 +65,11 @@ export default function LoginPage() {
         router.push('/');
       }
     } catch (err) {
-      console.error("Signin error:", err);
+      const message = normalizeAuthErrorMessage(err, { flow: 'signin' });
+      setSubmitError(message);
       notifications.show({
-        title: 'Login Failed',
-        message: err.message || 'Invalid credentials. Please try again.',
+        title: 'Sign-in failed',
+        message,
         color: 'red',
       });
     } finally {
@@ -138,18 +148,32 @@ export default function LoginPage() {
 
           <form onSubmit={form.onSubmit(handleSubmit)}>
             <Stack>
+              {submitError && (
+                <Alert color="red" variant="light" icon={<IconAlertCircle size={16} />}>
+                  {submitError}
+                </Alert>
+              )}
+
               <TextInput
                 label="Email"
                 placeholder="your@email.com"
                 required
-                {...form.getInputProps('email')}
+                {...emailInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  emailInputProps.onChange(event);
+                }}
               />
 
               <PasswordInput
                 label="Password"
                 placeholder="Your password"
                 required
-                {...form.getInputProps('password')}
+                {...passwordInputProps}
+                onChange={(event) => {
+                  setSubmitError(null);
+                  passwordInputProps.onChange(event);
+                }}
               />
 
               <Button
