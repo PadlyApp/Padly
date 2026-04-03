@@ -607,6 +607,27 @@ def _resolve_host_user_id(explicit_user_id: Optional[str]) -> str:
     raise RuntimeError("Could not resolve a host_user_id. Pass --host-user-id explicitly.")
 
 
+_FURNISHED_KEYWORDS = [
+    "fully furnished", "fully-furnished", "comes furnished",
+    "furnished unit", "furnished apartment", "furnished suite",
+    "furnished condo", "furnished room", "furnished home",
+    "furniture included", "all furniture", "furnished and",
+    "is furnished", "are furnished",
+]
+
+_UNFURNISHED_KEYWORDS = [
+    "unfurnished", "un-furnished", "not furnished",
+]
+
+def _description_says_furnished(description: Optional[str]) -> bool:
+    if not description:
+        return False
+    text = description.lower()
+    if any(kw in text for kw in _UNFURNISHED_KEYWORDS):
+        return False
+    return any(kw in text for kw in _FURNISHED_KEYWORDS)
+
+
 def _prepare_listing(raw: Dict[str, Any], bucket: str, host_user_id: str) -> Optional[PreparedListing]:
     price = _extract_price(raw)
     bedrooms = _extract_bedrooms(raw)
@@ -639,7 +660,11 @@ def _prepare_listing(raw: Dict[str, Any], bucket: str, host_user_id: str) -> Opt
         "number_of_bedrooms": bedrooms,
         "number_of_bathrooms": bathrooms,
         "area_sqft": area,
-        "furnished": bool(amenities.get("furnished") or amenities.get("fully_furnished")),
+        "furnished": bool(
+            amenities.get("furnished")
+            or amenities.get("fully_furnished")
+            or _description_says_furnished(description)
+        ),
         "price_per_month": round(price, 2),
         "price_per_room": round(price / max(bedrooms, 1), 2),
         "utilities_included": bool(amenities.get("utilities_included") or amenities.get("all_utilities_included")),

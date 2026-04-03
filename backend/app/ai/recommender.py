@@ -607,13 +607,7 @@ def _passes_hard_constraints(user: Dict, listing: Dict) -> bool:
         if listing_deposit > 0 and listing_deposit > target_deposit:
             return False
 
-    # Furnished is hard only when explicitly required
-    furnished_pref = resolve_furnished_preference(
-        user.get("furnished_preference"),
-        user.get("target_furnished"),
-    )
-    if furnished_pref == "required" and not _as_bool(listing.get("furnished")):
-        return False
+    # Furnished is treated as a soft preference — boosts ranking but never hard-filters
 
     # Move-in date hard window (+/- 60 days)
     target_move_in = _parse_iso_date(user.get("move_in_date"))

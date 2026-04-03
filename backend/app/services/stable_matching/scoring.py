@@ -107,16 +107,8 @@ def check_hard_constraints(group: Dict, listing: Dict) -> Tuple[bool, Optional[s
         except (TypeError, ValueError):
             return False, "invalid_deposit_data"
 
-    # Furnished requirement: only hard when explicitly required.
-    furnished_pref = (group.get('furnished_preference') or '').strip().lower()
-    furnished_is_hard = bool(group.get('furnished_is_hard')) or furnished_pref == 'required'
-    if furnished_is_hard and group.get('target_furnished') is True:
-        listing_furnished = listing.get('furnished')
-        if isinstance(listing_furnished, str):
-            listing_furnished = listing_furnished.lower() in ['true', 't', '1', 'yes']
-        if listing_furnished is not True:
-            return False, "furnished_requirement_not_met"
-    
+    # Furnished is a soft preference — boosts ranking but never hard-filters
+
     return True, None
 
 
