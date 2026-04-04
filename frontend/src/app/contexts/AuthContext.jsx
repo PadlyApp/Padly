@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { AuthService } from '../../../lib/authService';
 
 /**
@@ -26,6 +26,8 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [authState, setAuthState] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshPromiseRef = useRef(null);
+  const sessionVersionRef = useRef(0);
 
   // Load auth state from localStorage on mount
   useEffect(() => {
@@ -93,6 +95,7 @@ export function AuthProvider({ children }) {
   };
 
   const clearAuthState = () => {
+    sessionVersionRef.current += 1;
     setUser(null);
     setAuthState(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -113,35 +116,53 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const refreshAuthToken = async (refreshToken) => {
-    try {
-      const response = await AuthService.refreshToken(refreshToken);
-      saveAuthState(response);
-      await loadCurrentUser(response.access_token);
-      return response.access_token;
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      clearAuthState();
-      return null;
+  const refreshAuthToken = useCallback(async (token) => {
+    // If a refresh is already in flight, reuse the same promise to avoid
+    // concurrent calls burning the single-use Supabase refresh token.
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current;
     }
-  };
+
+    // Capture the session version before the async call so we can detect
+    // a signout that happens while the refresh is in-flight.
+    const sessionAtStart = sessionVersionRef.current;
+
+    refreshPromiseRef.current = (async () => {
+      try {
+        const response = await AuthService.refreshToken(token);
+        // If the user signed out while the refresh was in-flight, discard the
+        // result to avoid re-authenticating an already-signed-out session.
+        if (sessionVersionRef.current !== sessionAtStart) {
+          return null;
+        }
+        saveAuthState(response);
+        await loadCurrentUser(response.access_token);
+        return response.access_token;
+      } catch (error) {
+        console.error('Token refresh failed:', error);
+        clearAuthState();
+        return null;
+      } finally {
+        refreshPromiseRef.current = null;
+      }
+    })();
+
+    return refreshPromiseRef.current;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- saveAuthState/loadCurrentUser/clearAuthState are stable non-memoized helpers; sessionVersionRef/refreshPromiseRef are refs that never change identity
 
   // Get a valid access token, refreshing if needed
-  const getValidToken = async () => {
+  const getValidToken = useCallback(async () => {
     if (!authState) return null;
-    
-    // Check if token is expired or about to expire (within 60 seconds)
-    const bufferTime = 60 * 1000; // 60 seconds buffer
+
+    const bufferTime = 60 * 1000;
     const isExpired = authState.expiresAt && Date.now() >= (authState.expiresAt - bufferTime);
-    
+
     if (isExpired && authState.refreshToken) {
-      console.log('Token expired or expiring soon, refreshing...');
-      const newToken = await refreshAuthToken(authState.refreshToken);
-      return newToken;
+      return refreshAuthToken(authState.refreshToken);
     }
-    
+
     return authState.accessToken;
-  };
+  }, [authState, refreshAuthToken]);
 
   const signup = async (email, password, fullName) => {
     try {
@@ -201,11 +222,12 @@ export function useAuth() {
   return /** @type {AuthContextValue} */ (context);
 }
 
-// Hook to get authorization header for API requests
+// Hook that returns an async function to get a fresh Authorization header.
+// Always calls getValidToken() so expired tokens are refreshed automatically.
 export function useAuthHeader() {
-  const { authState } = useAuth();
-  
-  return authState?.accessToken ? {
-    'Authorization': `Bearer ${authState.accessToken}`
-  } : {};
+  const { getValidToken } = useAuth();
+  return useCallback(async () => {
+    const token = await getValidToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, [getValidToken]);
 }
