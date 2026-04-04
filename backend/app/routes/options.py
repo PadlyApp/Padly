@@ -18,6 +18,7 @@ from app.services.controlled_vocab import (
     search_companies,
     search_schools,
 )
+from app.services.location_matching import get_metro_options
 
 router = APIRouter(prefix="/api/options", tags=["options"])
 

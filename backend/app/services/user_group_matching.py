@@ -10,6 +10,7 @@ from decimal import Decimal
 from app.services.preferences_contract import (
     lease_types_compatible,
 )
+from app.services.location_matching import cities_match, metro_for_city
 
 # Scoring weights (100 pts total)
 SCORING_WEIGHTS = {
@@ -40,11 +41,11 @@ def calculate_user_group_compatibility(
     
     # --- HARD CONSTRAINTS (all must pass) ---
     
-    # City must match
-    user_city = str(user_prefs.get('target_city') or '').lower().strip()
-    group_city = str(group.get('target_city') or '').lower().strip()
-    
-    if not user_city or not group_city or user_city != group_city:
+    # City must match (metro-aware)
+    user_city = str(user_prefs.get('target_city') or '').strip()
+    group_city = str(group.get('target_city') or '').strip()
+
+    if not user_city or not group_city or not cities_match(user_city, group_city):
         return {
             'score': 0,
             'eligible': False,
@@ -465,22 +466,45 @@ async def find_compatible_groups(
     if not target_city:
         return []
     
-    # Get open groups in target city (exclude solo groups)
-    groups_response = supabase.table("roommate_groups")\
-        .select("*, group_members(user_id, status)")\
-        .eq("status", "active")\
-        .ilike("target_city", target_city)\
-        .execute()
-    
-    if groups_response.data:
-        groups_response.data = [g for g in groups_response.data if g.get('is_solo') != True]
-    
-    if not groups_response.data:
+    # Get open groups in target city (exclude solo groups).
+    if metro_for_city(target_city) is not None:
+        groups_data: List[Dict[str, Any]] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                supabase.table("roommate_groups")
+                .select("*, group_members(user_id, status)")
+                .eq("status", "active")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            page = resp.data or []
+            groups_data.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    else:
+        groups_response = (
+            supabase.table("roommate_groups")
+            .select("*, group_members(user_id, status)")
+            .eq("status", "active")
+            .ilike("target_city", target_city)
+            .execute()
+        )
+        groups_data = groups_response.data or []
+
+    groups_data = [
+        g for g in groups_data
+        if g.get("is_solo") != True and g.get("target_city") and cities_match(target_city, g.get("target_city"))
+    ]
+
+    if not groups_data:
         return []
     
     # Filter to groups with open spots and not already a member
     open_groups = []
-    for group in groups_response.data:
+    for group in groups_data:
         members = group.get('group_members', []) or []
         member_ids = [m['user_id'] for m in members if m.get('status') == 'accepted']
         if user_id in member_ids:
