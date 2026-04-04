@@ -27,6 +27,7 @@ export function AuthProvider({ children }) {
   const [authState, setAuthState] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshPromiseRef = useRef(null);
+  const sessionVersionRef = useRef(0);
 
   // Load auth state from localStorage on mount
   useEffect(() => {
@@ -94,6 +95,7 @@ export function AuthProvider({ children }) {
   };
 
   const clearAuthState = () => {
+    sessionVersionRef.current += 1;
     setUser(null);
     setAuthState(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -121,9 +123,18 @@ export function AuthProvider({ children }) {
       return refreshPromiseRef.current;
     }
 
+    // Capture the session version before the async call so we can detect
+    // a signout that happens while the refresh is in-flight.
+    const sessionAtStart = sessionVersionRef.current;
+
     refreshPromiseRef.current = (async () => {
       try {
         const response = await AuthService.refreshToken(token);
+        // If the user signed out while the refresh was in-flight, discard the
+        // result to avoid re-authenticating an already-signed-out session.
+        if (sessionVersionRef.current !== sessionAtStart) {
+          return null;
+        }
         saveAuthState(response);
         await loadCurrentUser(response.access_token);
         return response.access_token;
@@ -137,7 +148,7 @@ export function AuthProvider({ children }) {
     })();
 
     return refreshPromiseRef.current;
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- saveAuthState/loadCurrentUser/clearAuthState are stable non-memoized helpers; sessionVersionRef/refreshPromiseRef are refs that never change identity
 
   // Get a valid access token, refreshing if needed
   const getValidToken = useCallback(async () => {
