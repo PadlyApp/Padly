@@ -23,6 +23,26 @@ from app.services.location_matching import get_metro_options
 router = APIRouter(prefix="/api/options", tags=["options"])
 
 
+def _norm(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _resolve_state_code(country_code: str, state_input: str) -> str:
+    """Map incoming state/province value or label to canonical code when possible."""
+    raw = (state_input or "").strip()
+    if not raw:
+        return raw
+
+    states = list_states(country_code)
+    raw_norm = _norm(raw)
+    for state in states:
+        value = (state.get("value") or "").strip()
+        label = (state.get("label") or "").strip()
+        if _norm(value) == raw_norm or _norm(label) == raw_norm:
+            return value
+    return raw
+
+
 @router.get("/countries")
 async def get_countries():
     return {"status": "success", "count": 2, "data": list_countries()}
@@ -80,7 +100,7 @@ async def get_states(
 @router.get("/cities")
 async def get_cities(
     country_code: str = Query(..., min_length=2, max_length=2),
-    state_code: str = Query(..., min_length=2, max_length=3),
+    state_code: str = Query(..., min_length=2, max_length=64),
     q: str = Query("", max_length=100),
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -90,9 +110,7 @@ async def get_cities(
 
     supabase = get_admin_client()
 
-    # Map country_code to DB country values
-    country_map = {"US": ["usa", "us", "united states"], "CA": ["canada", "ca", "can"]}
-    db_countries = country_map.get(country_code.upper(), [country_code.lower()])
+    resolved_state_code = _resolve_state_code(country_code, state_code)
 
     # Map state_code to DB state values
     state_norm = normalize_state(state_code)
@@ -110,7 +128,7 @@ async def get_cities(
             offset += page_size
     except Exception:
         # Fallback to geonamescache if DB unavailable
-        data = search_cities(country_code, state_code, q, limit)
+        data = search_cities(country_code, resolved_state_code, q, limit)
         return {"status": "success", "count": len(data), "data": data}
 
     seen = set()
@@ -142,12 +160,21 @@ async def get_cities(
 
     cities.sort(key=lambda x: x["label"])
 
-    # Prepend metro options from shared location contract.
-    metro_options = get_metro_options(
-        country_code=country_code,
-        state_code=state_code,
-        query=q,
-    )
+    if not cities:
+        # If no active listings match this location, keep the picker usable via controlled vocab.
+        cities = search_cities(country_code, resolved_state_code, q, limit)
+
+    # Prepend metro options at the top if they match this country/state
+    metro_options = []
+    if country_code.upper() == "CA" and normalize_state(state_code) == "ontario":
+        metro_options.append({"value": "GTA", "label": "GTA (Greater Toronto Area)"})
+    if country_code.upper() == "US" and normalize_state(state_code) == "new york":
+        metro_options.append({"value": "NYC", "label": "NYC (New York City Metro)"})
+    if country_code.upper() == "US" and normalize_state(state_code) == "california":
+        metro_options.append({"value": "Bay Area", "label": "Bay Area (San Francisco Metro)"})
+
+    if q:
+        metro_options = [m for m in metro_options if q.lower() in m["label"].lower()]
 
     cities = metro_options + cities
     return {"status": "success", "count": len(cities), "data": cities}
