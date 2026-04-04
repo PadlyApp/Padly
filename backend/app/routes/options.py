@@ -22,7 +22,7 @@ from app.services.controlled_vocab import (
 router = APIRouter(prefix="/api/options", tags=["options"])
 
 
-def _norm(value: str) -> str:
+def _norm(value: str | None) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
