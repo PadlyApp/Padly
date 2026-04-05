@@ -166,6 +166,13 @@ async def signin(credentials: SignInRequest):
                 status_code=401,
                 detail="Invalid email or password"
             )
+
+        # Block sign-in if email is not confirmed
+        if not auth_response.user.email_confirmed_at:
+            raise HTTPException(
+                status_code=403,
+                detail="Please verify your email address before signing in. Check your inbox for a confirmation link."
+            )
         
         # Get user profile from users table
         from app.db import supabase_admin
