@@ -202,27 +202,37 @@ async def signin(credentials: SignInRequest):
         )
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 @router.post("/refresh")
-async def refresh_token(token: str = Depends(get_user_token)):
+async def refresh_token(body: RefreshRequest):
     """
-    Refresh JWT token.
+    Refresh JWT token using the provided refresh token.
     """
-    if not token:
+    if not body.refresh_token:
         raise HTTPException(
             status_code=401,
             detail="Refresh token required"
         )
-    
+
     try:
-        auth_response = supabase_anon.auth.refresh_session()
-        
+        from app.db import supabase_admin
+        auth_response = supabase_admin.auth.refresh_session(body.refresh_token)
+
+        if not auth_response.session:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
         return {
             "access_token": auth_response.session.access_token,
             "refresh_token": auth_response.session.refresh_token,
-            "expires_in": auth_response.session.expires_in
+            "expires_in": auth_response.session.expires_in,
         }
-        
-    except Exception as e:
+
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(
             status_code=401,
             detail="Invalid refresh token"
@@ -241,14 +251,13 @@ async def signout(token: str = Depends(get_user_token)):
         )
     
     try:
-        supabase_anon.auth.sign_out()
+        from app.db import supabase_admin
+        supabase_admin.auth.admin.sign_out(token)
         return {"message": "Successfully signed out"}
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Sign out failed: {str(e)}"
-        )
+
+    except Exception:
+        # Best-effort — always return success so the client clears its state
+        return {"message": "Successfully signed out"}
 
 
 @router.get("/me")

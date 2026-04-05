@@ -136,9 +136,9 @@ export class AuthService {
       const response = await fetch(`${this.API_BASE}/refresh`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${refreshToken}`,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ refresh_token: refreshToken }),
       });
 
       if (!response.ok) {
