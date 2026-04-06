@@ -661,6 +661,19 @@ async def create_recommendation_feedback(
             session_id=payload.recommendation_session_id,
             user_id=user_id,
         )
+        swipe_count = None
+        if session.get("client_session_id"):
+            try:
+                swipe_count = (
+                    supabase.table("swipe_interactions")
+                    .select("event_id", count="exact")
+                    .eq("actor_user_id", user_id)
+                    .eq("session_id", session["client_session_id"])
+                    .execute()
+                    .count
+                )
+            except Exception:
+                swipe_count = None
         existing = (
             supabase.table("user_recommendation_feedback")
             .select("*")
@@ -685,7 +698,7 @@ async def create_recommendation_feedback(
                     "model_version": session.get("model_version"),
                     "experiment_name": session.get("experiment_name"),
                     "experiment_variant": session.get("experiment_variant"),
-                    "swipes_in_session": None,
+                    "swipes_in_session": int(swipe_count) if swipe_count is not None else None,
                     "likes_in_session": int(session.get("likes_count") or 0),
                     "saves_in_session": int(session.get("saves_count") or 0),
                     "detail_opens_in_session": int(session.get("detail_opens_count") or 0),

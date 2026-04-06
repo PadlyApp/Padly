@@ -10,13 +10,19 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Any, Optional
+from app.dependencies.auth import require_admin_key, require_user_token
+from app.dependencies.supabase import get_admin_client
 from app.services.supabase_client import SupabaseHTTPClient
-from app.dependencies.auth import require_admin_key
 
 router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
     dependencies=[Depends(require_admin_key)],
+)
+
+authenticated_router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
 )
 
 
@@ -244,18 +250,34 @@ def _build_group_summary(
     }
 
 
-@router.get("/evaluation/summary")
-async def admin_evaluation_summary(
+def _require_admin_user(token: str) -> dict[str, Any]:
+    supabase = get_admin_client()
+    user_response = supabase.auth.get_user(token)
+    if not user_response or not user_response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    auth_user_id = user_response.user.id
+    profile_response = (
+        supabase.table("users")
+        .select("id,email,full_name,role")
+        .eq("auth_id", auth_user_id)
+        .limit(1)
+        .execute()
+    )
+    if not profile_response.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    profile = profile_response.data[0]
+    if profile.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return profile
+
+
+async def _evaluation_summary_payload(
     days: int = 30,
     surface: Optional[str] = None,
     variant: Optional[str] = None,
-):
-    """
-    Admin: Recommendation evaluation summary for dashboarding.
-
-    Aggregates Phase 2/3 recommendation sessions, explicit feedback, and
-    passive engagement into one dashboard-friendly payload.
-    """
+) -> dict[str, Any]:
     if days < 1 or days > 365:
         raise HTTPException(status_code=422, detail="days must be between 1 and 365")
 
@@ -477,3 +499,35 @@ async def admin_evaluation_summary(
             "daily_trends": daily_trends,
         },
     }
+
+
+@router.get("/evaluation/summary")
+async def admin_evaluation_summary(
+    days: int = 30,
+    surface: Optional[str] = None,
+    variant: Optional[str] = None,
+):
+    """
+    Admin: Recommendation evaluation summary for dashboarding.
+
+    Aggregates Phase 2/3 recommendation sessions, explicit feedback, and
+    passive engagement into one dashboard-friendly payload.
+    """
+    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant)
+
+
+@authenticated_router.get("/evaluation/summary/authenticated")
+async def authenticated_admin_evaluation_summary(
+    days: int = 30,
+    surface: Optional[str] = None,
+    variant: Optional[str] = None,
+    token: str = Depends(require_user_token),
+):
+    """
+    Authenticated admin summary endpoint for the frontend dashboard.
+
+    This keeps aggregation server-side with service-role access while allowing
+    the dashboard to authenticate via a signed-in user whose role is admin.
+    """
+    _require_admin_user(token)
+    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant)

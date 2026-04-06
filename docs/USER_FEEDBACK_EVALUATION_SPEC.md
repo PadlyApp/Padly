@@ -774,7 +774,7 @@ Phase 1 exit criteria:
 - add negative reason breakdown
 - add initial filtering by date range, surface, and variant
 - keep the backend admin aggregation endpoint as the dashboard source
-- proxy admin dashboard reads through a frontend server route so `ADMIN_SECRET` stays off the client
+- expose the dashboard through an authenticated admin-only backend path
 - gate the page to signed-in users whose `users.role` is `admin`
 - treat recommendation-session tables as the evaluation source of truth, with broader analytics remaining supportive context
 
@@ -783,6 +783,7 @@ Phase 1 exit criteria:
 - add the feedback prompt to `Discover`
 - add prompt suppression and cooldown tuning
 - improve session modeling across surfaces
+- use Discover recommendation sessions as the shared evaluation unit for swipes, quick-view opens, and explicit usefulness feedback
 - add dashboard filters and exports
 - validate that prompt timing does not hurt user experience
 

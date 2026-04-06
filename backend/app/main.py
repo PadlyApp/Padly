@@ -14,6 +14,7 @@ from app.routes import (
     roommates_router,
     preferences_router,
     admin_router,
+    authenticated_admin_router,
     auth_router,
     matches_router,
     recommendations_router,
@@ -65,6 +66,7 @@ app.include_router(groups_router)  # Roommate groups endpoints
 app.include_router(preferences_router)
 app.include_router(matches_router)
 app.include_router(admin_router)
+app.include_router(authenticated_admin_router)
 app.include_router(recommendations_router)
 app.include_router(interactions_router)
 app.include_router(options_router)
