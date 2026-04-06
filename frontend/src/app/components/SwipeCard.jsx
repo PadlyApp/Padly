@@ -28,6 +28,7 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhoto
     if (!dragging) return;
 
     const onMove = (e) => {
+      if (e.cancelable) e.preventDefault();
       const clientX = e.clientX ?? e.touches?.[0]?.clientX;
       if (clientX == null) return;
       updateOffsetX(clientX - startXRef.current);
@@ -51,7 +52,7 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhoto
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: false });
     window.addEventListener('touchend', onUp);
     return () => {
       window.removeEventListener('mousemove', onMove);
