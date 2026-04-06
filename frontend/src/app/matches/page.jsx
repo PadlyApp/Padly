@@ -41,7 +41,7 @@ function parseListingTitle(title) {
 
 function MatchesPageContent() {
   const router = useRouter();
-  const { user, getValidToken } = useAuth();
+  const { user, getValidToken, authState } = useAuth();
   const userId = user?.profile?.id;
 
   usePageTracking('matches', authState?.accessToken);
