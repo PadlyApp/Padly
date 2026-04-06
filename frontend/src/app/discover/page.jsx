@@ -166,6 +166,7 @@ function DiscoverContent() {
   const [emptyResultReason, setEmptyResultReason] = useState(null);
   const [expandedListing, setExpandedListing] = useState(null);
   const [expandedImageIndex, setExpandedImageIndex] = useState(0);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const swipeSessionIdRef = useRef(null);
   const recommendationClientSessionIdRef = useRef(null);
@@ -1351,11 +1352,16 @@ function DiscoverContent() {
             <Box>
               {/* Hero image */}
               <Box style={{ position: 'relative', height: 300, overflow: 'hidden', borderRadius: '12px 12px 0 0' }}>
-                <ImageWithFallback
-                  src={heroImage}
-                  alt={expandedListing.title || 'Listing'}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                />
+                <Box
+                  onClick={() => setFullscreenOpen(true)}
+                  style={{ width: '100%', height: '100%', cursor: 'zoom-in' }}
+                >
+                  <ImageWithFallback
+                    src={heroImage}
+                    alt={expandedListing.title || 'Listing'}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                </Box>
 
                 {imgs.length > 1 && (
                   <>
@@ -1623,6 +1629,95 @@ function DiscoverContent() {
           );
         })()}
       </Modal>
+
+      {/* Fullscreen image viewer */}
+      {expandedListing && fullscreenOpen && (() => {
+        const imgs = (() => {
+          const i = expandedListing?.images;
+          if (Array.isArray(i)) return i;
+          if (typeof i === 'string') { try { return JSON.parse(i); } catch { return []; } }
+          return [];
+        })();
+        const safeIdx = imgs.length > 0 ? Math.min(expandedImageIndex, imgs.length - 1) : 0;
+        return (
+          <Modal
+            opened={fullscreenOpen}
+            onClose={() => setFullscreenOpen(false)}
+            size="min(92vw, 900px)"
+            padding={0}
+            radius="xl"
+            withCloseButton={false}
+            centered
+            overlayProps={{ backgroundOpacity: 0.75, blur: 10 }}
+            transitionProps={{ transition: 'fade', duration: 200 }}
+            styles={{
+              body: { backgroundColor: '#111', borderRadius: 'var(--mantine-radius-xl)' },
+              content: { backgroundColor: '#111', borderRadius: 'var(--mantine-radius-xl)' },
+            }}
+          >
+            <Box style={{ position: 'relative', width: '100%', aspectRatio: '16/10', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--mantine-radius-xl)', overflow: 'hidden' }}>
+              <ImageWithFallback
+                src={imgs[safeIdx]}
+                alt={`Image ${safeIdx + 1}`}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+
+              {/* Close */}
+              <ActionIcon
+                variant="filled"
+                color="dark"
+                size="lg"
+                radius="xl"
+                onClick={() => setFullscreenOpen(false)}
+                style={{ position: 'absolute', top: 16, right: 16, opacity: 0.85 }}
+              >
+                <IconX size={18} />
+              </ActionIcon>
+
+              {/* Counter */}
+              {imgs.length > 1 && (
+                <Badge
+                  variant="filled"
+                  color="dark"
+                  size="sm"
+                  radius="sm"
+                  style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)' }}
+                >
+                  {safeIdx + 1} / {imgs.length}
+                </Badge>
+              )}
+
+              {/* Prev */}
+              {imgs.length > 1 && (
+                <ActionIcon
+                  variant="filled"
+                  color="dark"
+                  radius="xl"
+                  size="lg"
+                  onClick={() => setExpandedImageIndex((prev) => (prev - 1 + imgs.length) % imgs.length)}
+                  style={{ position: 'absolute', top: '50%', left: 16, transform: 'translateY(-50%)', opacity: 0.85 }}
+                >
+                  <IconChevronLeft size={18} />
+                </ActionIcon>
+              )}
+
+              {/* Next */}
+              {imgs.length > 1 && (
+                <ActionIcon
+                  variant="filled"
+                  color="dark"
+                  radius="xl"
+                  size="lg"
+                  onClick={() => setExpandedImageIndex((prev) => (prev + 1) % imgs.length)}
+                  style={{ position: 'absolute', top: '50%', right: 16, transform: 'translateY(-50%)', opacity: 0.85 }}
+                >
+                  <IconChevronRight size={18} />
+                </ActionIcon>
+              )}
+            </Box>
+          </Modal>
+        );
+      })()}
 
     </Box>
   );
