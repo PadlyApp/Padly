@@ -18,6 +18,12 @@ import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+/** Format a raw enum/slug value like "entire_place" → "Entire Place". */
+function formatEnum(val) {
+  if (!val) return 'N/A';
+  return val.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** Title-case a string while preserving numbers and hyphens. */
 function toTitleCase(str) {
   if (!str) return '';
@@ -126,6 +132,7 @@ export default function ListingDetailPage() {
     queryFn: () => api.getListing(listingId),
     enabled: !!listingId,
   });
+
 
   const rawListing = listingData?.data || null;
   const parsedImages = (() => {
@@ -451,11 +458,11 @@ export default function ListingDetailPage() {
                 <Stack gap="xs">
                   <Group justify="space-between">
                     <Text c="dimmed">Property Type:</Text>
-                    <Text fw={500}>{listing.property_type || 'N/A'}</Text>
+                    <Text fw={500}>{formatEnum(listing.property_type)}</Text>
                   </Group>
                   <Group justify="space-between">
                     <Text c="dimmed">Lease Type:</Text>
-                    <Text fw={500}>{listing.lease_type || 'N/A'}</Text>
+                    <Text fw={500}>{formatEnum(listing.lease_type)}</Text>
                   </Group>
                   <Group justify="space-between">
                     <Text c="dimmed">Furnished:</Text>
@@ -525,6 +532,7 @@ export default function ListingDetailPage() {
           </Grid.Col>
         </Grid>
       </Container>
+
     </Box>
   );
 }
