@@ -147,7 +147,15 @@ def _get_recommendation_session(supabase, session_id: str, user_id: str) -> dict
     return session_response.data[0]
 
 
-def _recommendation_prompt_allowed(supabase, user_id: str, current_session_id: Optional[str] = None) -> bool:
+def _recommendation_prompt_allowed(
+    supabase,
+    user_id: str,
+    current_session_id: Optional[str] = None,
+    surface: Optional[str] = None,
+) -> bool:
+    if surface == "discover":
+        return True
+
     cooldown_since = (_now_utc() - timedelta(days=7)).isoformat()
     recent = (
         supabase.table("recommendation_sessions")
@@ -181,6 +189,7 @@ def _build_session_response(supabase, session_row: dict) -> dict:
             supabase,
             user_id=session_row["actor_user_id"],
             current_session_id=session_row["id"],
+            surface=session_row.get("surface"),
         ),
     }
 

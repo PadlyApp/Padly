@@ -24,6 +24,7 @@ import {
 import {
   MATCHES_FEEDBACK_CHOICES,
   MATCHES_NEGATIVE_REASON_CHOICES,
+  createRecommendationClientSessionId,
   createRecommendationEventId,
 } from '../../../lib/recommendationFeedback';
 
@@ -31,22 +32,8 @@ import { getLikedListings, saveLikedListing } from './likedListings';
 
 // ── session helpers ─────────────────────────────────────────────────────────
 
-const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
-
 /** Stable client label for swipe telemetry (backend requires algorithm_version). */
 const DISCOVER_ALGORITHM_VERSION = 'discover-v1';
-
-function getOrCreateSwipeSessionId() {
-  if (typeof window === 'undefined') return 'server-session';
-  const existing = sessionStorage.getItem(SWIPE_SESSION_KEY);
-  if (existing) return existing;
-
-  const generated = typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  sessionStorage.setItem(SWIPE_SESSION_KEY, generated);
-  return generated;
-}
 
 function collectDeviceContext() {
   if (typeof window === 'undefined') return {};
@@ -128,9 +115,11 @@ function DiscoverContent() {
   const [pendingFeedbackLabel, setPendingFeedbackLabel] = useState(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
+  const [feedbackCycle, setFeedbackCycle] = useState(0);
+  const [swipesInCycle, setSwipesInCycle] = useState(0);
 
   if (!swipeSessionIdRef.current && typeof window !== 'undefined') {
-    swipeSessionIdRef.current = createRecommendationEventId('discover-session');
+    swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
   }
 
   const deriveRankingContext = useCallback((payload) => {
@@ -149,7 +138,7 @@ function DiscoverContent() {
 
   const buildSessionPayload = useCallback((recommendations = listings, context = rankingContext) => {
     if (!swipeSessionIdRef.current) {
-      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
 
     const topListingIds = recommendations
@@ -170,6 +159,20 @@ function DiscoverContent() {
       experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (hasMlScores ? 'two_tower' : 'baseline') : null),
     };
   }, [listings, rankingContext]);
+
+  const startNextFeedbackCycle = useCallback(() => {
+    swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
+    sessionMetricsRef.current = { likesCount: 0, detailOpensCount: 0, swipesCount: 0 };
+    setSwipesInCycle(0);
+    setFeedbackSessionId(null);
+    setPromptAllowed(false);
+    setShowFeedbackPrompt(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    promptShownRef.current = false;
+    surfaceStartedAtRef.current = Date.now();
+    setFeedbackCycle((current) => current + 1);
+  }, []);
 
   const patchRecommendationSession = useCallback(async (payload, { keepalive = false } = {}) => {
     if (!authState?.accessToken || !feedbackSessionId) return null;
@@ -247,7 +250,7 @@ function DiscoverContent() {
     setError(null);
     if (!append) setEmptyResultReason(null);
     if (!append && typeof window !== 'undefined') {
-      swipeSessionIdRef.current = createRecommendationEventId('discover-session');
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
 
     try {
@@ -397,6 +400,8 @@ function DiscoverContent() {
         setListings(fresh);
         setCurrentIndex(0);
         sessionMetricsRef.current = { likesCount: 0, detailOpensCount: 0, swipesCount: 0 };
+        setSwipesInCycle(0);
+        setFeedbackCycle(0);
         promptShownRef.current = false;
         setFeedbackSessionId(null);
         setPromptAllowed(false);
@@ -447,7 +452,7 @@ function DiscoverContent() {
     const ensureRecommendationSession = async () => {
       try {
         if (!swipeSessionIdRef.current) {
-          swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+          swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
         }
 
         const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions`, {
@@ -481,7 +486,7 @@ function DiscoverContent() {
     return () => {
       cancelled = true;
     };
-  }, [authState?.accessToken, buildSessionPayload, error, listings, loading, rankingContext, userId]);
+  }, [authState?.accessToken, buildSessionPayload, error, feedbackCycle, listings, loading, rankingContext, userId]);
 
   useEffect(() => {
     if (
@@ -492,7 +497,7 @@ function DiscoverContent() {
       feedbackSubmitting ||
       loading ||
       error ||
-      currentIndex < DISCOVER_FEEDBACK_SWIPE_THRESHOLD
+      swipesInCycle < DISCOVER_FEEDBACK_SWIPE_THRESHOLD
     ) {
       return;
     }
@@ -512,7 +517,6 @@ function DiscoverContent() {
       experiment_variant: rankingContext?.experiment_variant ?? null,
     });
   }, [
-    currentIndex,
     error,
     feedbackSessionId,
     feedbackSubmitting,
@@ -522,6 +526,7 @@ function DiscoverContent() {
     promptAllowed,
     rankingContext,
     showFeedbackPrompt,
+    swipesInCycle,
   ]);
 
   useEffect(() => {
@@ -577,7 +582,7 @@ function DiscoverContent() {
     if (!authState?.accessToken || !userId || !listing?.listing_id) return;
 
     if (!swipeSessionIdRef.current) {
-      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
 
     const algorithmVersion =
@@ -620,7 +625,7 @@ function DiscoverContent() {
   const persistSwipeContextEvent = useCallback(async ({ listing, action }) => {
     if (!authState?.accessToken || !listing?.listing_id) return;
     if (!swipeSessionIdRef.current) {
-      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
     try {
       await fetch(`${API_BASE}/api/interactions/swipe-context`, {
@@ -642,7 +647,7 @@ function DiscoverContent() {
   const persistListingViewEvent = useCallback(async ({ listing, surface }) => {
     if (!authState?.accessToken || !listing?.listing_id) return;
     if (!swipeSessionIdRef.current) {
-      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
     const duration_ms =
       cardViewStartRef.current != null
@@ -669,7 +674,7 @@ function DiscoverContent() {
   const persistSearchQueryEvent = useCallback(async ({ filterBody, resultsCount, searchOffset }) => {
     if (!authState?.accessToken) return;
     if (!swipeSessionIdRef.current) {
-      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+      swipeSessionIdRef.current = createRecommendationClientSessionId('discover');
     }
     try {
       await fetch(`${API_BASE}/api/interactions/search-queries`, {
@@ -727,6 +732,7 @@ function DiscoverContent() {
       setFeedbackStep('question');
       setPendingFeedbackLabel(null);
       setFeedbackAcknowledged(true);
+      startNextFeedbackCycle();
     } catch {
       // Best-effort only.
     } finally {
@@ -739,20 +745,18 @@ function DiscoverContent() {
     listings,
     patchRecommendationSession,
     rankingContext,
+    startNextFeedbackCycle,
   ]);
 
   const dismissFeedbackPrompt = useCallback(async () => {
-    setShowFeedbackPrompt(false);
-    setPromptAllowed(false);
-    setFeedbackStep('question');
-    setPendingFeedbackLabel(null);
     await patchRecommendationSession({
       prompt_dismissed: true,
       likes_count: sessionMetricsRef.current.likesCount,
       detail_opens_count: sessionMetricsRef.current.detailOpensCount,
       surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
     });
-  }, [patchRecommendationSession]);
+    startNextFeedbackCycle();
+  }, [patchRecommendationSession, startNextFeedbackCycle]);
 
   const handleFeedbackChoice = useCallback(async (value) => {
     if (value === 'not_useful') {
@@ -803,6 +807,7 @@ function DiscoverContent() {
     });
 
     sessionMetricsRef.current.swipesCount += 1;
+    setSwipesInCycle(sessionMetricsRef.current.swipesCount);
     if (action === 'like') {
       sessionMetricsRef.current.likesCount += 1;
     }
