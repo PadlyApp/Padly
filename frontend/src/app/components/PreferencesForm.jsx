@@ -299,7 +299,9 @@ export function PreferencesForm() {
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
       queryClient.invalidateQueries({ queryKey: ['preferences', userId] });
+      queryClient.invalidateQueries({ queryKey: ['user-prefs', userId] });
       queryClient.invalidateQueries({ queryKey: ['discover-feed', userId] });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
 
       if (tourPhase === 'preferences') {
         window.dispatchEvent(new CustomEvent('padly-tour-prefs-saved'));
