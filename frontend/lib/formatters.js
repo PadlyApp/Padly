@@ -1,3 +1,31 @@
+const TITLE_LOWER_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'at', 'by', 'in', 'of', 'on', 'to', 'up']);
+
+function toTitleCase(str) {
+  if (!str) return '';
+  return str.toLowerCase().split(' ').map((word, i) => {
+    if (!word) return word;
+    if (i > 0 && TITLE_LOWER_WORDS.has(word)) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join(' ');
+}
+
+/**
+ * Splits a raw listing title on the first `|` into a street address and a
+ * location string.  Title-cases the street portion.
+ *
+ * e.g. "UPPER - 12 PERSICA STREET|Richmond Hill (Oak Ridges), Ontario L4E1L3"
+ *   → { street: "Upper - 12 Persica Street", location: "Richmond Hill (Oak Ridges), Ontario L4E1L3" }
+ */
+export function parseListingTitle(raw) {
+  if (!raw) return { street: '', location: '' };
+  const pipeIdx = raw.indexOf('|');
+  if (pipeIdx === -1) return { street: toTitleCase(raw.trim()), location: '' };
+  return {
+    street: toTitleCase(raw.slice(0, pipeIdx).trim()),
+    location: raw.slice(pipeIdx + 1).trim(),
+  };
+}
+
 const AMENITY_LABEL_OVERRIDES = {
   no_garage: 'No Garage',
   electric_vehicle_charge: 'EV Charging',

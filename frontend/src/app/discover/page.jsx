@@ -21,7 +21,7 @@ import {
   normalizeRecommendationsError,
   parseApiErrorResponse,
 } from '../../../lib/errorHandling';
-import { formatAmenityLabel } from '../../../lib/formatters';
+import { formatAmenityLabel, parseListingTitle } from '../../../lib/formatters';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
@@ -700,6 +700,16 @@ function DiscoverContent() {
             : 0;
           const heroImage = imgs[safeImageIndex] || 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
 
+          const { street: modalStreet, location: modalLocation } = parseListingTitle(expandedListing.title);
+          const modalCity = expandedListing.city || '';
+          const modalDisplayStreet = modalCity
+            ? modalStreet.replace(
+                new RegExp(`[,\\s–-]*${modalCity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'),
+                ''
+              ).trim() || modalStreet
+            : modalStreet;
+          const modalDisplayLocation = modalLocation || modalCity;
+
           const amenities = expandedListing.amenities && typeof expandedListing.amenities === 'object'
             ? expandedListing.amenities
             : {};
@@ -815,11 +825,11 @@ function DiscoverContent() {
                   padding: '2rem 1.25rem 1rem',
                 }}>
                   <Text fw={700} size="xl" style={{ color: '#fff', lineHeight: 1.2 }} lineClamp={2}>
-                    {expandedListing.title || 'Listing'}
+                    {modalDisplayStreet || 'Listing'}
                   </Text>
-                  {expandedListing.city && (
+                  {modalDisplayLocation && (
                     <Text size="sm" style={{ color: 'rgba(255,255,255,0.80)', marginTop: 2 }}>
-                      {expandedListing.city}
+                      {modalDisplayLocation}
                     </Text>
                   )}
                 </Box>
@@ -836,7 +846,7 @@ function DiscoverContent() {
                 >
                   {imgs.map((img, index) => (
                     <Box
-                      key={`${expandedListing.listing_id || expandedListing.title || 'listing'}-${index}`}
+                      key={`${expandedListing.listing_id || 'listing'}-${index}`}
                       onClick={() => setExpandedImageIndex(index)}
                       style={{
                         minWidth: 72,
@@ -853,7 +863,7 @@ function DiscoverContent() {
                     >
                       <ImageWithFallback
                         src={img}
-                        alt={`${expandedListing.title || 'Listing'} ${index + 1}`}
+                        alt={`${modalDisplayStreet || 'Listing'} ${index + 1}`}
                         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                       />
                     </Box>

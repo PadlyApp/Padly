@@ -4,7 +4,7 @@ import { useRef, useState, useEffect, memo } from 'react';
 import { Text, Badge, Box, Group, Button, ActionIcon } from '@mantine/core';
 import { IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from './ImageWithFallback';
-import { formatAmenityLabel } from '../../../lib/formatters';
+import { formatAmenityLabel, parseListingTitle } from '../../../lib/formatters';
 
 const SWIPE_THRESHOLD = 100;
 
@@ -250,63 +250,109 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhoto
       </Box>
 
       {/* Info */}
-      <Box style={{
-        padding: '1.25rem 1.5rem',
-        height: '42%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-      }}>
-        <Box>
-          <Text fw={600} size="lg" lineClamp={1} style={{ color: '#111', marginBottom: 4 }}>
-            {listing.title || 'Listing'}
-          </Text>
-          {listing.city && (
-            <Text size="sm" c="dimmed" style={{ marginBottom: 8 }}>
-              {listing.city}
-            </Text>
-          )}
-          <Text size="sm" c="dimmed">
-            {[
-              listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} bed`),
-              listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} bath`,
-              listing.area_sqft && `${listing.area_sqft} sqft`,
-              listing.furnished && 'Furnished',
-            ].filter(Boolean).join(' · ')}
-          </Text>
-        </Box>
+      {(() => {
+        const { street: rawStreet, location } = parseListingTitle(listing.title);
+        const city = listing.city || '';
+        // Strip city from end of street portion so it isn't shown twice
+        const street = city
+          ? rawStreet.replace(
+              new RegExp(`[,\\s–-]*${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'),
+              ''
+            ).trim() || rawStreet
+          : rawStreet;
+        const displayName = street || 'Listing';
+        const displayLocation = location || city;
+        const amenityEntries = listing.amenities && typeof listing.amenities === 'object'
+          ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 3)
+          : [];
+        const stats = [
+          listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} bed`),
+          listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} bath`,
+          listing.area_sqft && `${Number(listing.area_sqft).toLocaleString()} sqft`,
+        ].filter(Boolean).join(' · ');
 
-        {listing.amenities && typeof listing.amenities === 'object' && (
-          <Group gap="xs" mt={6}>
-            {Object.entries(listing.amenities)
-              .filter(([, v]) => v)
-              .slice(0, 2)
-              .map(([key]) => (
-                <Badge key={key} variant="light" size="xs">{formatAmenityLabel(key)}</Badge>
-              ))}
-          </Group>
-        )}
+        return (
+          <Box style={{
+            padding: '0.9rem 1.25rem 0.75rem',
+            height: '42%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            {/* Title + location */}
+            <Box style={{ marginBottom: 5, minHeight: 0 }}>
+              <Text
+                fw={700}
+                size="md"
+                style={{
+                  color: '#111',
+                  lineHeight: 1.3,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {displayName}
+              </Text>
+              {displayLocation && (
+                <Text
+                  size="xs"
+                  c="dimmed"
+                  style={{
+                    marginTop: 1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {displayLocation}
+                </Text>
+              )}
+            </Box>
 
-        {listing.price_per_month != null && (
-          <Text fw={700} size="xl" c="teal.6">
-            ${Number(listing.price_per_month).toLocaleString()}/mo
-          </Text>
-        )}
+            {/* Stats */}
+            {stats ? (
+              <Text size="xs" c="dimmed" style={{ marginBottom: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {stats}
+              </Text>
+            ) : <Box style={{ marginBottom: 5 }} />}
 
-        <Box style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
-          <Button
-            size="xs"
-            variant="subtle"
-            color="gray"
-            leftSection={<IconInfoCircle size={14} />}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); onExpand && onExpand(listing); }}
-            style={{ fontSize: 12, color: '#868e96' }}
-          >
-            View details
-          </Button>
-        </Box>
-      </Box>
+            {/* Amenity badges */}
+            {amenityEntries.length > 0 && (
+              <Group gap={4} style={{ marginBottom: 5, flexWrap: 'nowrap', overflow: 'hidden' }}>
+                {amenityEntries.map(([key]) => (
+                  <Badge key={key} variant="light" color="teal" size="xs" radius="sm" style={{ flexShrink: 0 }}>
+                    {formatAmenityLabel(key)}
+                  </Badge>
+                ))}
+              </Group>
+            )}
+
+            {/* Push price + button to bottom */}
+            <Box style={{ flex: 1 }} />
+
+            {/* Price row + view details */}
+            <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text fw={800} size="lg" c="teal.6" style={{ lineHeight: 1 }}>
+                {listing.price_per_month != null
+                  ? `$${Number(listing.price_per_month).toLocaleString()}/mo`
+                  : '—'}
+              </Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="gray"
+                leftSection={<IconInfoCircle size={13} />}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); onExpand && onExpand(listing); }}
+                style={{ fontSize: 11, color: '#868e96', paddingLeft: 6, paddingRight: 6 }}
+              >
+                Details
+              </Button>
+            </Box>
+          </Box>
+        );
+      })()}
     </Box>
   );
 }
