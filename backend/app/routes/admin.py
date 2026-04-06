@@ -6,8 +6,10 @@ All routes here require the X-Admin-Secret header to match the ADMIN_SECRET
 environment variable. Never expose these endpoints to the frontend.
 """
 
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from typing import Any, Optional
 from app.services.supabase_client import SupabaseHTTPClient
 from app.dependencies.auth import require_admin_key
 
@@ -141,4 +143,337 @@ async def admin_stats():
             "total_listings": listings_count,
             "active_listings": active_listings_count
         }
+    }
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _avg(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
+
+
+def _pct(numerator: float, denominator: float) -> float:
+    if not denominator:
+        return 0.0
+    return round((numerator / denominator) * 100, 2)
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _date_key(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+    try:
+        normalized = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized).date().isoformat()
+    except ValueError:
+        return None
+
+
+async def _fetch_all_rows(
+    client: SupabaseHTTPClient,
+    table: str,
+    *,
+    columns: str = "*",
+    filters: Optional[dict[str, Any]] = None,
+    order: Optional[str] = None,
+    batch_size: int = 1000,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+
+    while True:
+        batch = await client.select(
+            table=table,
+            columns=columns,
+            filters=filters,
+            order=order,
+            limit=batch_size,
+            offset=offset if offset > 0 else None,
+        )
+        rows.extend(batch)
+        if len(batch) < batch_size:
+            break
+        offset += batch_size
+
+    return rows
+
+
+def _build_group_summary(
+    group_label: str,
+    session_rows: list[dict[str, Any]],
+    feedback_by_session: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    total_sessions = len(session_rows)
+    feedback_rows = [
+        feedback_by_session[session["id"]]
+        for session in session_rows
+        if session.get("id") in feedback_by_session
+    ]
+    feedback_count = len(feedback_rows)
+    usefulness_counts = Counter(row.get("feedback_label") for row in feedback_rows if row.get("feedback_label"))
+
+    recommendation_total = sum(_int(row.get("recommendation_count_shown")) for row in session_rows)
+    detail_open_total = sum(_int(row.get("detail_opens_count")) for row in session_rows)
+    save_total = sum(_int(row.get("saves_count")) for row in session_rows)
+
+    return {
+        "variant": group_label,
+        "total_sessions": total_sessions,
+        "feedback_count": feedback_count,
+        "feedback_rate": _pct(feedback_count, total_sessions),
+        "very_useful_rate": _pct(usefulness_counts.get("very_useful", 0), feedback_count),
+        "not_useful_rate": _pct(usefulness_counts.get("not_useful", 0), feedback_count),
+        "avg_recommendation_count": _avg([_int(row.get("recommendation_count_shown")) for row in session_rows]),
+        "avg_detail_opens": _avg([_int(row.get("detail_opens_count")) for row in session_rows]),
+        "avg_saves": _avg([_int(row.get("saves_count")) for row in session_rows]),
+        "avg_surface_dwell_ms": _avg([_int(row.get("surface_dwell_ms")) for row in session_rows]),
+        "avg_detail_dwell_ms": _avg([_int(row.get("detail_dwell_ms")) for row in session_rows]),
+        "detail_open_rate": _pct(detail_open_total, recommendation_total),
+        "save_rate": _pct(save_total, recommendation_total),
+    }
+
+
+@router.get("/evaluation/summary")
+async def admin_evaluation_summary(
+    days: int = 30,
+    surface: Optional[str] = None,
+    variant: Optional[str] = None,
+):
+    """
+    Admin: Recommendation evaluation summary for dashboarding.
+
+    Aggregates Phase 2/3 recommendation sessions, explicit feedback, and
+    passive engagement into one dashboard-friendly payload.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=422, detail="days must be between 1 and 365")
+
+    normalized_surface = None if not surface or surface == "all" else surface
+    normalized_variant = None if not variant or variant == "all" else variant
+    if normalized_surface and normalized_surface not in {"matches", "discover"}:
+        raise HTTPException(status_code=422, detail="surface must be matches, discover, or all")
+
+    client = SupabaseHTTPClient(is_admin=True)
+    since_iso = (_now_utc() - timedelta(days=days)).isoformat()
+
+    session_filters: dict[str, Any] = {"started_at": f"gte.{since_iso}"}
+    feedback_filters: dict[str, Any] = {"submitted_at": f"gte.{since_iso}"}
+    event_filters: dict[str, Any] = {"created_at": f"gte.{since_iso}"}
+
+    if normalized_surface:
+        session_filters["surface"] = f"eq.{normalized_surface}"
+        feedback_filters["surface"] = f"eq.{normalized_surface}"
+        event_filters["surface"] = f"eq.{normalized_surface}"
+
+    if normalized_variant:
+        session_filters["experiment_variant"] = f"eq.{normalized_variant}"
+        feedback_filters["experiment_variant"] = f"eq.{normalized_variant}"
+
+    sessions = await _fetch_all_rows(
+        client,
+        "recommendation_sessions",
+        columns=(
+            "id,actor_user_id,surface,started_at,ended_at,recommendation_count_shown,"
+            "experiment_name,experiment_variant,algorithm_version,model_version,"
+            "prompt_presented_at,prompt_dismissed_at,feedback_submitted_at,"
+            "detail_opens_count,saves_count,likes_count,surface_dwell_ms,detail_dwell_ms"
+        ),
+        filters=session_filters,
+        order="started_at.desc",
+    )
+    session_ids = {row["id"] for row in sessions if row.get("id")}
+
+    feedback_rows = await _fetch_all_rows(
+        client,
+        "user_recommendation_feedback",
+        columns=(
+            "recommendation_session_id,feedback_label,reason_label,submitted_at,"
+            "surface,experiment_name,experiment_variant"
+        ),
+        filters=feedback_filters,
+        order="submitted_at.desc",
+    )
+    feedback_rows = [
+        row for row in feedback_rows
+        if row.get("recommendation_session_id") in session_ids
+    ]
+
+    event_rows = await _fetch_all_rows(
+        client,
+        "recommendation_engagement_events",
+        columns="recommendation_session_id,event_type,position_in_feed,dwell_ms,created_at",
+        filters=event_filters,
+        order="created_at.desc",
+    )
+    event_rows = [
+        row for row in event_rows
+        if row.get("recommendation_session_id") in session_ids
+    ]
+
+    feedback_by_session = {
+        row["recommendation_session_id"]: row
+        for row in feedback_rows
+        if row.get("recommendation_session_id")
+    }
+
+    usefulness_counts = Counter(row.get("feedback_label") for row in feedback_rows if row.get("feedback_label"))
+    reason_counts = Counter(row.get("reason_label") for row in feedback_rows if row.get("reason_label"))
+    event_counts = Counter(row.get("event_type") for row in event_rows if row.get("event_type"))
+    position_counts: dict[int, dict[str, int]] = defaultdict(lambda: {"detail_open": 0, "save": 0})
+    total_detail_view_dwell = 0
+    total_detail_view_events = 0
+
+    for event in event_rows:
+        event_type = event.get("event_type")
+        position = event.get("position_in_feed")
+        if event_type == "detail_view":
+            total_detail_view_events += 1
+            total_detail_view_dwell += _int(event.get("dwell_ms"))
+        if event_type in {"detail_open", "save"} and position is not None:
+            position_counts[_int(position)][event_type] += 1
+
+    total_sessions = len(sessions)
+    unique_users = len({row.get("actor_user_id") for row in sessions if row.get("actor_user_id")})
+    feedback_count = len(feedback_rows)
+    prompts_presented = sum(1 for row in sessions if row.get("prompt_presented_at"))
+    prompts_dismissed = sum(1 for row in sessions if row.get("prompt_dismissed_at"))
+    recommendation_total = sum(_int(row.get("recommendation_count_shown")) for row in sessions)
+    detail_open_total = sum(_int(row.get("detail_opens_count")) for row in sessions)
+    save_total = sum(_int(row.get("saves_count")) for row in sessions)
+
+    daily_rollup: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "date": "",
+            "total_sessions": 0,
+            "feedback_count": 0,
+            "very_useful_count": 0,
+            "not_useful_count": 0,
+            "somewhat_useful_count": 0,
+            "avg_surface_dwell_ms": 0.0,
+            "avg_saves": 0.0,
+            "_surface_dwell_values": [],
+            "_save_values": [],
+        }
+    )
+
+    for session in sessions:
+        day = _date_key(session.get("started_at"))
+        if not day:
+            continue
+        bucket = daily_rollup[day]
+        bucket["date"] = day
+        bucket["total_sessions"] += 1
+        bucket["_surface_dwell_values"].append(_int(session.get("surface_dwell_ms")))
+        bucket["_save_values"].append(_int(session.get("saves_count")))
+
+        feedback = feedback_by_session.get(session.get("id"))
+        if feedback:
+            bucket["feedback_count"] += 1
+            label = feedback.get("feedback_label")
+            if label == "very_useful":
+                bucket["very_useful_count"] += 1
+            elif label == "not_useful":
+                bucket["not_useful_count"] += 1
+            elif label == "somewhat_useful":
+                bucket["somewhat_useful_count"] += 1
+
+    daily_trends = []
+    for day in sorted(daily_rollup.keys()):
+        bucket = daily_rollup[day]
+        bucket["avg_surface_dwell_ms"] = _avg(bucket.pop("_surface_dwell_values"))
+        bucket["avg_saves"] = _avg(bucket.pop("_save_values"))
+        daily_trends.append(bucket)
+
+    variant_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for session in sessions:
+        variant_label = session.get("experiment_variant") or "unassigned"
+        variant_groups[variant_label].append(session)
+
+    variant_comparison = [
+        _build_group_summary(variant_label, grouped_sessions, feedback_by_session)
+        for variant_label, grouped_sessions in sorted(
+            variant_groups.items(),
+            key=lambda item: item[0],
+        )
+    ]
+
+    usefulness_distribution = [
+        {
+            "label": label,
+            "count": usefulness_counts.get(label, 0),
+            "pct": _pct(usefulness_counts.get(label, 0), feedback_count),
+        }
+        for label in ["not_useful", "somewhat_useful", "very_useful"]
+    ]
+
+    negative_reasons = [
+        {
+            "label": label,
+            "count": count,
+            "pct": _pct(count, reason_counts.total()),
+        }
+        for label, count in reason_counts.most_common()
+    ]
+
+    position_breakdown = [
+        {
+            "position": position,
+            "detail_open_count": counts["detail_open"],
+            "save_count": counts["save"],
+        }
+        for position, counts in sorted(position_counts.items(), key=lambda item: item[0])
+    ]
+
+    return {
+        "status": "success",
+        "data": {
+            "filters": {
+                "days": days,
+                "since": since_iso,
+                "surface": normalized_surface or "all",
+                "variant": normalized_variant or "all",
+            },
+            "overview": {
+                "total_sessions": total_sessions,
+                "unique_users": unique_users,
+                "feedback_count": feedback_count,
+                "feedback_rate": _pct(feedback_count, total_sessions),
+                "prompt_presented_count": prompts_presented,
+                "prompt_dismissed_count": prompts_dismissed,
+                "prompt_dismiss_rate": _pct(prompts_dismissed, prompts_presented),
+                "very_useful_rate": _pct(usefulness_counts.get("very_useful", 0), feedback_count),
+                "avg_recommendation_count": _avg([_int(row.get("recommendation_count_shown")) for row in sessions]),
+                "avg_detail_opens": _avg([_int(row.get("detail_opens_count")) for row in sessions]),
+                "avg_saves": _avg([_int(row.get("saves_count")) for row in sessions]),
+                "avg_surface_dwell_ms": _avg([_int(row.get("surface_dwell_ms")) for row in sessions]),
+                "avg_detail_dwell_ms": _avg([_int(row.get("detail_dwell_ms")) for row in sessions]),
+                "avg_detail_view_dwell_ms": _avg(
+                    [total_detail_view_dwell / total_detail_view_events] if total_detail_view_events else []
+                ),
+                "detail_open_rate": _pct(detail_open_total, recommendation_total),
+                "save_rate": _pct(save_total, recommendation_total),
+            },
+            "usefulness_distribution": usefulness_distribution,
+            "variant_comparison": variant_comparison,
+            "negative_reasons": negative_reasons,
+            "event_breakdown": {
+                "detail_open": event_counts.get("detail_open", 0),
+                "detail_view": event_counts.get("detail_view", 0),
+                "save": event_counts.get("save", 0),
+                "unsave": event_counts.get("unsave", 0),
+            },
+            "position_breakdown": position_breakdown,
+            "daily_trends": daily_trends,
+        },
     }

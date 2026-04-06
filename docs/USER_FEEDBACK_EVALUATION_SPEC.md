@@ -179,6 +179,12 @@ Collected automatically:
 
 These are useful because they do not require extra user effort.
 
+Implementation note:
+
+- the primary evaluation telemetry should stay tied to the recommendation session
+- session-linked passive metrics are the source of truth for model evaluation
+- broader analytics tables can support product analytics, funnel analysis, and later research slices, but should not replace the recommendation-session model when measuring recommendation quality
+
 ## 6.2 Explicit session-level feedback
 
 Collected from the 3-point usefulness prompt:
@@ -366,6 +372,20 @@ Minimum required stored entities:
 - explicit usefulness feedback
 - negative reason tag when provided
 - passive engagement metrics tied to the same session
+
+Current implementation direction:
+
+- evaluation-critical storage
+  - `recommendation_sessions`
+  - `user_recommendation_feedback`
+  - `recommendation_engagement_events`
+- broader supporting analytics
+  - page view tracking
+  - discover search query logging
+  - swipe-context logging
+  - generic listing-view logging
+
+The first group should remain the main evaluation source of truth because it keeps passive and explicit signals attached to the same recommendation session, ranker variant, and rank position context.
 
 ## 10.2 Aggregation requirements
 
@@ -739,10 +759,12 @@ Phase 1 exit criteria:
 ## Phase 3: Passive Metrics
 
 - add session-level passive engagement tracking
-- log detail opens from recommendation surfaces
+- log detail opens from recommendation surfaces with position context
 - log saves in a way that can be tied back to recommendation sessions
-- add dwell-time instrumentation where feasible
-- compute derived session metrics such as likes, saves, and detail opens
+- add dwell-time instrumentation on both the recommendation surface and the listing detail page
+- compute derived session metrics such as likes, saves, detail opens, and dwell
+- keep recommendation-session passive metrics as the evaluation source of truth
+- allow broader analytics logging to coexist as a supporting layer, not a replacement
 
 ## Phase 4: Admin Evaluation Page
 
@@ -750,7 +772,11 @@ Phase 1 exit criteria:
 - add top KPI cards
 - add usefulness distribution and variant comparison
 - add negative reason breakdown
-- add initial filtering by date range, variant, and market
+- add initial filtering by date range, surface, and variant
+- keep the backend admin aggregation endpoint as the dashboard source
+- proxy admin dashboard reads through a frontend server route so `ADMIN_SECRET` stays off the client
+- gate the page to signed-in users whose `users.role` is `admin`
+- treat recommendation-session tables as the evaluation source of truth, with broader analytics remaining supportive context
 
 ## Phase 5: Discover Expansion
 
