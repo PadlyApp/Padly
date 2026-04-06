@@ -1,23 +1,77 @@
 'use client';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid } from '@mantine/core';
-import { useParams } from 'next/navigation';
+import { useEffect, useMemo, useRef } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import Link from 'next/link';
+import { useAuth } from '../../contexts/AuthContext';
+import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 
 export default function ListingDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const { authState } = useAuth();
   const listingId = params.id;
+  const detailStartedAtRef = useRef(Date.now());
+  const recommendationSessionId = searchParams.get('recommendationSessionId');
+  const recommendationSource = searchParams.get('source');
+  const trackedPosition = searchParams.get('position');
+  const positionInFeed = useMemo(() => {
+    if (trackedPosition == null) return null;
+    const parsed = Number(trackedPosition);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }, [trackedPosition]);
 
   const { data: listingData, isLoading, error, refetch } = useQuery({
     queryKey: ['listing', listingId],
     queryFn: () => api.getListing(listingId),
     enabled: !!listingId,
   });
+
+  useEffect(() => {
+    detailStartedAtRef.current = Date.now();
+  }, [listingId]);
+
+  useEffect(() => {
+    const shouldTrackPassiveDwell =
+      recommendationSource === 'matches'
+      && !!recommendationSessionId
+      && !!authState?.accessToken
+      && !!listingId;
+
+    return () => {
+      if (!shouldTrackPassiveDwell) return;
+
+      const dwellMs = Math.max(0, Date.now() - detailStartedAtRef.current);
+      fetch(`${API_BASE}/api/interactions/recommendation-events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: recommendationSessionId,
+          client_event_id: createRecommendationEventId('detail-view'),
+          surface: 'matches',
+          event_type: 'detail_view',
+          listing_id: listingId,
+          position_in_feed: positionInFeed,
+          dwell_ms: dwellMs,
+          metadata: {
+            source: 'listing_detail_page',
+          },
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  }, [authState?.accessToken, listingId, positionInFeed, recommendationSessionId, recommendationSource]);
 
   const rawListing = listingData?.data || null;
   const parsedImages = (() => {

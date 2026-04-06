@@ -54,6 +54,8 @@ class RecommendationSessionUpdate(BaseModel):
     detail_opens_count: Optional[int] = Field(default=None, ge=0)
     saves_count: Optional[int] = Field(default=None, ge=0)
     likes_count: Optional[int] = Field(default=None, ge=0)
+    surface_dwell_ms: Optional[int] = Field(default=None, ge=0)
+    detail_dwell_ms: Optional[int] = Field(default=None, ge=0)
     prompt_presented: bool = False
     prompt_dismissed: bool = False
     mark_ended: bool = False
@@ -69,6 +71,17 @@ class RecommendationFeedbackCreate(BaseModel):
     reason_label: Optional[
         Literal["too_expensive", "wrong_location", "not_my_style", "too_few_good_options", "other"]
     ] = None
+
+
+class RecommendationEngagementEventCreate(BaseModel):
+    recommendation_session_id: str = Field(..., min_length=1, max_length=128)
+    client_event_id: str = Field(..., min_length=1, max_length=128)
+    surface: Literal["matches", "discover"] = "matches"
+    event_type: Literal["detail_open", "detail_view", "save", "unsave"]
+    listing_id: Optional[str] = Field(default=None, max_length=128)
+    position_in_feed: Optional[int] = Field(default=None, ge=0)
+    dwell_ms: Optional[int] = Field(default=None, ge=0)
+    metadata: dict = Field(default_factory=dict)
 
 
 def _resolve_current_user_id(token: str) -> str:
@@ -115,6 +128,8 @@ def _recommendation_storage_missing(exc: Exception) -> bool:
         "recommendation_sessions" in err and "does not exist" in err
     ) or (
         "user_recommendation_feedback" in err and "does not exist" in err
+    ) or (
+        "recommendation_engagement_events" in err and "does not exist" in err
     )
 
 
@@ -168,6 +183,61 @@ def _build_session_response(supabase, session_row: dict) -> dict:
             current_session_id=session_row["id"],
         ),
     }
+
+
+def _update_session_aggregate_max(update_data: dict, field: str, current_value: Optional[int], next_value: int) -> None:
+    update_data[field] = max(int(current_value or 0), int(next_value))
+
+
+def _summarize_recommendation_events(events: list[dict], session_row: dict) -> dict:
+    summary = {
+        "detail_open_events": 0,
+        "save_events": 0,
+        "unsave_events": 0,
+        "detail_view_events": 0,
+        "detail_view_dwell_ms": 0,
+        "avg_detail_view_dwell_ms": 0,
+        "surface_dwell_ms": int(session_row.get("surface_dwell_ms") or 0),
+        "detail_dwell_ms": int(session_row.get("detail_dwell_ms") or 0),
+        "detail_open_rate": 0.0,
+        "save_rate": 0.0,
+        "detail_opens_by_position": {},
+        "saves_by_position": {},
+    }
+
+    detail_view_count = 0
+    recommendation_count = max(int(session_row.get("recommendation_count_shown") or 0), 1)
+
+    for event in events:
+        event_type = event.get("event_type")
+        position = event.get("position_in_feed")
+        position_key = str(position) if position is not None else None
+
+        if event_type == "detail_open":
+            summary["detail_open_events"] += 1
+            if position_key is not None:
+                summary["detail_opens_by_position"][position_key] = (
+                    summary["detail_opens_by_position"].get(position_key, 0) + 1
+                )
+        elif event_type == "save":
+            summary["save_events"] += 1
+            if position_key is not None:
+                summary["saves_by_position"][position_key] = (
+                    summary["saves_by_position"].get(position_key, 0) + 1
+                )
+        elif event_type == "unsave":
+            summary["unsave_events"] += 1
+        elif event_type == "detail_view":
+            detail_view_count += 1
+            summary["detail_view_events"] += 1
+            summary["detail_view_dwell_ms"] += int(event.get("dwell_ms") or 0)
+
+    if detail_view_count > 0:
+        summary["avg_detail_view_dwell_ms"] = round(summary["detail_view_dwell_ms"] / detail_view_count, 2)
+
+    summary["detail_open_rate"] = round(summary["detail_open_events"] / recommendation_count, 4)
+    summary["save_rate"] = round(summary["save_events"] / recommendation_count, 4)
+    return summary
 
 
 def _require_group_membership(group_id: str, user_id: str) -> None:
@@ -390,6 +460,20 @@ async def update_recommendation_session(
                 int(session.get("likes_count") or 0),
                 payload.likes_count,
             )
+        if payload.surface_dwell_ms is not None:
+            _update_session_aggregate_max(
+                update_data,
+                "surface_dwell_ms",
+                session.get("surface_dwell_ms"),
+                payload.surface_dwell_ms,
+            )
+        if payload.detail_dwell_ms is not None:
+            _update_session_aggregate_max(
+                update_data,
+                "detail_dwell_ms",
+                session.get("detail_dwell_ms"),
+                payload.detail_dwell_ms,
+            )
         if payload.prompt_presented and not session.get("prompt_presented_at"):
             update_data["prompt_presented_at"] = now_iso
         if payload.prompt_dismissed and not session.get("prompt_dismissed_at"):
@@ -424,6 +508,136 @@ async def update_recommendation_session(
                 detail="Recommendation feedback storage not configured. Run migration 20260406010000_recommendation_feedback_phase2.sql.",
             )
         raise HTTPException(status_code=500, detail=f"Failed to update recommendation session: {e}")
+
+
+@router.post("/recommendation-events")
+async def create_recommendation_engagement_event(
+    payload: RecommendationEngagementEventCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist a passive engagement event tied to a recommendation session.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    now_iso = _now_utc().isoformat()
+
+    try:
+        session = _get_recommendation_session(
+            supabase,
+            session_id=payload.recommendation_session_id,
+            user_id=user_id,
+        )
+
+        existing = (
+            supabase.table("recommendation_engagement_events")
+            .select("event_id")
+            .eq("actor_user_id", user_id)
+            .eq("client_event_id", payload.client_event_id)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return {
+                "status": "success",
+                "duplicate_ignored": True,
+                "event_id": existing.data[0]["event_id"],
+            }
+
+        created = (
+            supabase.table("recommendation_engagement_events")
+            .insert(
+                {
+                    "actor_user_id": user_id,
+                    "recommendation_session_id": session["id"],
+                    "client_event_id": payload.client_event_id,
+                    "surface": payload.surface,
+                    "event_type": payload.event_type,
+                    "listing_id": payload.listing_id,
+                    "position_in_feed": payload.position_in_feed,
+                    "dwell_ms": payload.dwell_ms,
+                    "metadata": payload.metadata or {},
+                    "created_at": now_iso,
+                }
+            )
+            .execute()
+        )
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Recommendation engagement event was not persisted")
+
+        session_update: dict = {"updated_at": now_iso}
+        if payload.event_type == "detail_open":
+            session_update["detail_opens_count"] = int(session.get("detail_opens_count") or 0) + 1
+        elif payload.event_type == "save":
+            session_update["saves_count"] = int(session.get("saves_count") or 0) + 1
+        elif payload.event_type == "detail_view" and payload.dwell_ms is not None:
+            session_update["detail_dwell_ms"] = int(session.get("detail_dwell_ms") or 0) + int(payload.dwell_ms)
+
+        if len(session_update) > 1:
+            supabase.table("recommendation_sessions").update(session_update).eq(
+                "id", session["id"]
+            ).eq("actor_user_id", user_id).execute()
+
+        return {
+            "status": "success",
+            "duplicate_ignored": False,
+            "event_id": created.data[0]["event_id"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _recommendation_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Recommendation passive metrics storage not configured. Run migration 20260406020000_recommendation_passive_metrics_phase3.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store recommendation engagement event: {e}")
+
+
+@router.get("/recommendation-sessions/{session_id}/passive-summary")
+async def get_recommendation_passive_summary(
+    session_id: str,
+    token: str = Depends(require_user_token),
+):
+    """
+    Return passive engagement metrics for one recommendation session.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        session = _get_recommendation_session(supabase, session_id=session_id, user_id=user_id)
+        events_response = (
+            supabase.table("recommendation_engagement_events")
+            .select("event_type, position_in_feed, dwell_ms, listing_id, created_at")
+            .eq("recommendation_session_id", session["id"])
+            .eq("actor_user_id", user_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        events = events_response.data or []
+        summary = _summarize_recommendation_events(events, session)
+        return {
+            "status": "success",
+            "data": {
+                "session_id": session["id"],
+                "surface": session.get("surface"),
+                "recommendation_count_shown": int(session.get("recommendation_count_shown") or 0),
+                "detail_opens_count": int(session.get("detail_opens_count") or 0),
+                "saves_count": int(session.get("saves_count") or 0),
+                "likes_count": int(session.get("likes_count") or 0),
+                **summary,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _recommendation_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Recommendation passive metrics storage not configured. Run migration 20260406020000_recommendation_passive_metrics_phase3.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch recommendation passive summary: {e}")
 
 
 @router.post("/recommendation-feedback")

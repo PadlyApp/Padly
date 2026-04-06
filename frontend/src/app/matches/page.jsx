@@ -22,6 +22,7 @@ import {
   MATCHES_FEEDBACK_CHOICES,
   MATCHES_NEGATIVE_REASON_CHOICES,
   createRecommendationClientSessionId,
+  createRecommendationEventId,
 } from '../../../lib/recommendationFeedback';
 
 export default function MatchesPage() {
@@ -37,6 +38,7 @@ function MatchesPageContent() {
   const { user, authState } = useAuth();
   const userId = user?.profile?.id;
   const clientSessionIdRef = useRef(null);
+  const surfaceStartedAtRef = useRef(Date.now());
   const promptTimerRef = useRef(null);
   const sessionMetricsRef = useRef({ detailOpensCount: 0, savesCount: 0 });
   const latestSessionIdRef = useRef(null);
@@ -118,6 +120,53 @@ function MatchesPageContent() {
 
       const result = await response.json();
       return result?.data ?? null;
+    } catch {
+      return null;
+    }
+  }, [authState?.accessToken, feedbackSessionId]);
+
+  const findListingPosition = useCallback((listingId) => {
+    if (!listingId) return null;
+    const index = listings.findIndex((item) => item?.listing_id === listingId);
+    return index >= 0 ? index : null;
+  }, [listings]);
+
+  const persistRecommendationEvent = useCallback(async ({
+    eventType,
+    listingId = null,
+    positionInFeed = null,
+    dwellMs = null,
+    metadata = {},
+    keepalive = false,
+  }) => {
+    if (!authState?.accessToken || !feedbackSessionId) return null;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: feedbackSessionId,
+          client_event_id: createRecommendationEventId(eventType),
+          surface: 'matches',
+          event_type: eventType,
+          listing_id: listingId,
+          position_in_feed: positionInFeed,
+          dwell_ms: dwellMs,
+          metadata,
+        }),
+        keepalive,
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to persist recommendation engagement event');
+        return null;
+      }
+
+      return response.ok ? response.json() : null;
     } catch {
       return null;
     }
@@ -375,6 +424,7 @@ function MatchesPageContent() {
         },
         body: JSON.stringify({
           mark_ended: true,
+          surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
           detail_opens_count: sessionMetricsRef.current.detailOpensCount,
           saves_count: sessionMetricsRef.current.savesCount,
           recommendation_count_shown: recommendations.length,
@@ -450,16 +500,25 @@ function MatchesPageContent() {
   }, [pendingFeedbackLabel, submitFeedback]);
 
   const handleViewDetails = useCallback((listing) => {
+    const position = findListingPosition(listing?.listing_id);
     const nextDetailOpens = sessionMetricsRef.current.detailOpensCount + 1;
     sessionMetricsRef.current.detailOpensCount = nextDetailOpens;
-    void patchRecommendationSession(
-      {
-        detail_opens_count: nextDetailOpens,
+    void persistRecommendationEvent({
+      eventType: 'detail_open',
+      listingId: listing?.listing_id,
+      positionInFeed: position,
+      metadata: {
+        match_percent: listing?.match_percent ?? null,
       },
-      { keepalive: true }
-    );
-    router.push(`/listings/${listing.listing_id}`);
-  }, [patchRecommendationSession, router]);
+      keepalive: true,
+    });
+
+    const href = feedbackSessionId
+      ? `/listings/${listing.listing_id}?source=matches&recommendationSessionId=${encodeURIComponent(feedbackSessionId)}${position != null ? `&position=${position}` : ''}`
+      : `/listings/${listing.listing_id}?source=matches${position != null ? `&position=${position}` : ''}`;
+
+    router.push(href);
+  }, [feedbackSessionId, findListingPosition, persistRecommendationEvent, router]);
 
   const handleGroupSave = async (listing) => {
     if (!userGroup || !authState?.accessToken) {
@@ -487,10 +546,18 @@ function MatchesPageContent() {
       const result = await res.json();
       console.log('[matches] save response:', res.status, result);
       if (!res.ok) throw new Error(result.detail || 'Save failed');
+      const position = findListingPosition(lid);
+      void persistRecommendationEvent({
+        eventType: isSaved ? 'unsave' : 'save',
+        listingId: lid,
+        positionInFeed: position,
+        metadata: {
+          group_id: userGroup.id,
+        },
+      });
       if (!isSaved) {
         const nextSaves = sessionMetricsRef.current.savesCount + 1;
         sessionMetricsRef.current.savesCount = nextSaves;
-        void patchRecommendationSession({ saves_count: nextSaves });
       }
     } catch (e) {
       console.error('[matches] save error:', e);
