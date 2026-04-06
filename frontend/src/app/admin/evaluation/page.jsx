@@ -42,6 +42,11 @@ const SURFACE_OPTIONS = [
   { value: 'discover', label: 'Discover' },
 ];
 
+const USER_MODE_OPTIONS = [
+  { value: 'all_sessions', label: 'All sessions' },
+  { value: 'latest_per_user', label: 'Latest per user' },
+];
+
 const FEEDBACK_LABEL_COPY = {
   not_useful: 'Not useful',
   somewhat_useful: 'Somewhat useful',
@@ -221,6 +226,7 @@ function AdminEvaluationPageContent() {
   const [days, setDays] = useState('30');
   const [surface, setSurface] = useState('matches');
   const [variant, setVariant] = useState('all');
+  const [userMode, setUserMode] = useState('all_sessions');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -250,6 +256,7 @@ function AdminEvaluationPageContent() {
         days,
         surface,
         variant,
+        user_mode: userMode,
       });
 
       const response = await fetch(`/api/admin/evaluation?${params.toString()}`, {
@@ -270,7 +277,7 @@ function AdminEvaluationPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [days, surface, variant, getValidToken, isAdmin]);
+  }, [days, surface, userMode, variant, getValidToken, isAdmin]);
 
   useEffect(() => {
     if (!isLoading && isAdmin) {
@@ -303,6 +310,9 @@ function AdminEvaluationPageContent() {
               <Text c="dimmed" mt={6}>
                 Review session quality, explicit usefulness, passive engagement, and ranker performance.
               </Text>
+              <Text size="sm" c="dimmed" mt={4}>
+                Counting mode: {data?.filters?.user_mode === 'latest_per_user' ? 'latest session per user' : 'all eligible sessions'}
+              </Text>
             </div>
 
             <Group>
@@ -326,6 +336,13 @@ function AdminEvaluationPageContent() {
                 value={variant}
                 onChange={(value) => setVariant(value || 'all')}
                 w={170}
+              />
+              <Select
+                label="Counting"
+                data={USER_MODE_OPTIONS}
+                value={userMode}
+                onChange={(value) => setUserMode(value || 'all_sessions')}
+                w={180}
               />
               <Button
                 leftSection={<IconRefresh size={16} />}

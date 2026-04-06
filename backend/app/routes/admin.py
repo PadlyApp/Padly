@@ -186,6 +186,16 @@ def _date_key(value: Optional[str]) -> Optional[str]:
         return None
 
 
+def _parse_iso_datetime(value: Optional[str]) -> datetime:
+    if not value:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 async def _fetch_all_rows(
     client: SupabaseHTTPClient,
     table: str,
@@ -277,9 +287,12 @@ async def _evaluation_summary_payload(
     days: int = 30,
     surface: Optional[str] = None,
     variant: Optional[str] = None,
+    user_mode: str = "all_sessions",
 ) -> dict[str, Any]:
     if days < 1 or days > 365:
         raise HTTPException(status_code=422, detail="days must be between 1 and 365")
+    if user_mode not in {"all_sessions", "latest_per_user"}:
+        raise HTTPException(status_code=422, detail="user_mode must be all_sessions or latest_per_user")
 
     normalized_surface = None if not surface or surface == "all" else surface
     normalized_variant = None if not variant or variant == "all" else variant
@@ -314,6 +327,20 @@ async def _evaluation_summary_payload(
         filters=session_filters,
         order="started_at.desc",
     )
+
+    if user_mode == "latest_per_user":
+        latest_sessions_by_user: dict[str, dict[str, Any]] = {}
+        for session in sessions:
+            actor_user_id = session.get("actor_user_id")
+            if not actor_user_id:
+                continue
+
+            existing = latest_sessions_by_user.get(actor_user_id)
+            if not existing or _parse_iso_datetime(session.get("started_at")) > _parse_iso_datetime(existing.get("started_at")):
+                latest_sessions_by_user[actor_user_id] = session
+
+        sessions = list(latest_sessions_by_user.values())
+
     session_ids = {row["id"] for row in sessions if row.get("id")}
 
     feedback_rows = await _fetch_all_rows(
@@ -465,6 +492,7 @@ async def _evaluation_summary_payload(
                 "since": since_iso,
                 "surface": normalized_surface or "all",
                 "variant": normalized_variant or "all",
+                "user_mode": user_mode,
             },
             "overview": {
                 "total_sessions": total_sessions,
@@ -506,6 +534,7 @@ async def admin_evaluation_summary(
     days: int = 30,
     surface: Optional[str] = None,
     variant: Optional[str] = None,
+    user_mode: str = "all_sessions",
 ):
     """
     Admin: Recommendation evaluation summary for dashboarding.
@@ -513,7 +542,7 @@ async def admin_evaluation_summary(
     Aggregates Phase 2/3 recommendation sessions, explicit feedback, and
     passive engagement into one dashboard-friendly payload.
     """
-    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant)
+    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant, user_mode=user_mode)
 
 
 @authenticated_router.get("/evaluation/summary/authenticated")
@@ -521,6 +550,7 @@ async def authenticated_admin_evaluation_summary(
     days: int = 30,
     surface: Optional[str] = None,
     variant: Optional[str] = None,
+    user_mode: str = "all_sessions",
     token: str = Depends(require_user_token),
 ):
     """
@@ -530,4 +560,4 @@ async def authenticated_admin_evaluation_summary(
     the dashboard to authenticate via a signed-in user whose role is admin.
     """
     _require_admin_user(token)
-    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant)
+    return await _evaluation_summary_payload(days=days, surface=surface, variant=variant, user_mode=user_mode)
