@@ -81,7 +81,7 @@ export function Navigation() {
                   </Link>
                   <Link href="/matches" style={{ textDecoration: 'none' }} data-tour="nav-matches">
                     <UnstyledButton className={`nav-link ${pathname === '/matches' ? 'active' : ''}`}>
-                      Matches
+                      Recommendations
                     </UnstyledButton>
                   </Link>
                   <Link href="/account" style={{ textDecoration: 'none' }} data-tour="nav-account">
@@ -182,7 +182,7 @@ export function Navigation() {
                 <Link href="/matches" style={{ textDecoration: 'none' }} onClick={handleLinkClick}>
                   <UnstyledButton style={{ width: '100%' }}>
                     <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
-                      Matches
+                      Recommendations
                     </Text>
                   </UnstyledButton>
                 </Link>

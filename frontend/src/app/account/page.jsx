@@ -2,7 +2,8 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import {
   Container,
@@ -37,6 +38,7 @@ import {
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { PreferencesForm } from '../components/PreferencesForm';
+import { SkeletonAccountProfile } from '../components/Skeletons';
 import { useAuth } from '../contexts/AuthContext';
 
 function AccountTabs() {
@@ -101,14 +103,12 @@ function AccountPageContent() {
 
 function ProfilePanel() {
   const { authState, getValidToken } = useAuth();
+  const queryClient = useQueryClient();
+  const prevMeRef = useRef(null);
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [companyOptions, setCompanyOptions] = useState([]);
-  const [schoolOptions, setSchoolOptions] = useState([]);
-  const [roleTitleOptions, setRoleTitleOptions] = useState([]);
 
   const [userData, setUserData] = useState({
     id: '',
@@ -122,78 +122,69 @@ function ProfilePanel() {
     profile_picture_url: '',
   });
 
-  useEffect(() => {
-    const fetchUserData = async () => {
-      if (!authState?.accessToken) {
-        setLoading(false);
-        return;
-      }
+  // ── Cached profile fetch ──────────────────────────────────────────────────
 
-      try {
-        const token = await getValidToken();
-        const response = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        });
+  const { data: meData, isLoading: meLoading } = useQuery({
+    queryKey: ['me'],
+    queryFn: async () => {
+      const token = await getValidToken();
+      const res = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.json();
+    },
+    enabled: !!authState?.accessToken,
+    staleTime: 5 * 60 * 1000,
+    gcTime:    10 * 60 * 1000,
+  });
 
-        const data = await response.json();
+  // Sync query result → controlled form state once per new fetch
+  useLayoutEffect(() => {
+    if (!meData || meData === prevMeRef.current) return;
+    prevMeRef.current = meData;
+    if (meData.user) {
+      const profile = meData.user.profile || {};
+      setUserData({
+        id: profile.id ?? '',
+        email: meData.user.email ?? profile.email ?? '',
+        full_name: profile.full_name ?? '',
+        bio: profile.bio ?? '',
+        company_name: profile.company_name ?? '',
+        school_name: profile.school_name ?? '',
+        role_title: profile.role_title ?? '',
+        verification_status: profile.verification_status ?? 'unverified',
+        profile_picture_url: profile.profile_picture_url ?? '',
+      });
+    } else {
+      setError('Failed to load account data');
+    }
+  }, [meData]);
 
-        if (response.ok && data.user) {
-          const profile = data.user.profile || {};
-          setUserData({
-            id: profile.id ?? '',
-            email: data.user.email ?? profile.email ?? '',
-            full_name: profile.full_name ?? '',
-            bio: profile.bio ?? '',
-            company_name: profile.company_name ?? '',
-            school_name: profile.school_name ?? '',
-            role_title: profile.role_title ?? '',
-            verification_status: profile.verification_status ?? 'unverified',
-            profile_picture_url: profile.profile_picture_url ?? '',
-          });
-        } else {
-          setError('Failed to load account data');
-        }
-      } catch (err) {
-        console.error('Error fetching user data:', err);
-        setError('Failed to load account data');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loading = meLoading && !meData;
 
-    fetchUserData();
-  }, [authState, getValidToken]);
+  // ── Cached dropdown options (static data; 30-min stale time) ─────────────
 
-  useEffect(() => {
-    const loadOptions = async () => {
-      try {
-        const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch(`${API_BASE}/api/options/companies?limit=500`),
-          fetch(`${API_BASE}/api/options/schools?limit=500`),
-          fetch(`${API_BASE}/api/options/roles`),
-        ]);
+  const { data: options } = useQuery({
+    queryKey: ['profile-options'],
+    queryFn: async () => {
+      const [c, s, r] = await Promise.all([
+        fetch(`${API_BASE}/api/options/companies?limit=500`).then((res) => res.json()),
+        fetch(`${API_BASE}/api/options/schools?limit=500`).then((res) => res.json()),
+        fetch(`${API_BASE}/api/options/roles`).then((res) => res.json()),
+      ]);
+      return {
+        companies: c.data || [],
+        schools:   s.data || [],
+        roles:     r.data || [],
+      };
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime:    60 * 60 * 1000,
+  });
 
-        if (companiesRes.ok) {
-          const result = await companiesRes.json();
-          setCompanyOptions(result.data || []);
-        }
-        if (schoolsRes.ok) {
-          const result = await schoolsRes.json();
-          setSchoolOptions(result.data || []);
-        }
-        if (rolesRes.ok) {
-          const result = await rolesRes.json();
-          setRoleTitleOptions(result.data || []);
-        }
-      } catch {
-        // Keep account page usable if options API is temporarily unavailable.
-      }
-    };
-
-    loadOptions();
-  }, []);
+  const companyOptions    = options?.companies ?? [];
+  const schoolOptions     = options?.schools   ?? [];
+  const roleTitleOptions  = options?.roles     ?? [];
 
   const handleChange = (field, value) => {
     setUserData((prev) => ({
@@ -238,6 +229,7 @@ function ProfilePanel() {
 
       if (response.ok && data.status === 'success') {
         setSuccess('Profile updated successfully!');
+        queryClient.invalidateQueries({ queryKey: ['me'] });
         if (data.data) {
           const updated = data.data;
           setUserData((prev) => ({
@@ -272,12 +264,7 @@ function ProfilePanel() {
   };
 
   if (loading) {
-    return (
-      <Stack align="center" gap="md" py="xl" style={{ minHeight: '300px', justifyContent: 'center' }}>
-        <Loader size="lg" />
-        <Text>Loading your profile...</Text>
-      </Stack>
-    );
+    return <SkeletonAccountProfile />;
   }
 
   return (

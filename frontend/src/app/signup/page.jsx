@@ -65,7 +65,7 @@ export default function SignupPage() {
         color: 'green',
       });
       // Redirect to onboarding to complete profile
-      router.push('/onboarding');
+      router.push('/preferences-setup');
     } catch (err) {
       if (err?.code === 'EMAIL_CONFIRMATION_REQUIRED') {
         const message = getErrorMessage(

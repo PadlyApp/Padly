@@ -57,7 +57,8 @@ import {
   IconDog,
   IconFriends,
   IconInbox,
-  IconHeart
+  IconHeart,
+  IconBookmark
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
@@ -84,7 +85,7 @@ export default function GroupDetailPage() {
   const [joinRequests, setJoinRequests] = useState([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [processingRequestId, setProcessingRequestId] = useState(null);
-  const [memberLikedListings, setMemberLikedListings] = useState([]);
+  const [memberSavedListings, setMemberSavedListings] = useState([]);
   const [loadingLiked, setLoadingLiked] = useState(false);
 
   useEffect(() => {
@@ -147,17 +148,9 @@ export default function GroupDetailPage() {
         setMembers(groupData.data.members || []);
       }
 
-      // Fetch group->listing feed (Phase 3B neural primary, rule fallback).
+      // Fetch group->listing feed (rule-based ranking).
       let listingsFeed = [];
-      const neuralResponse = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/neural-ranked-listings?limit=50&force_enable=true`,
-        { headers }
-      );
-      const neuralData = await neuralResponse.json();
-
-      if (neuralResponse.ok && neuralData.status === 'success') {
-        listingsFeed = neuralData.ranked_listings || [];
-      } else {
+      try {
         const fallbackResponse = await fetch(
           `${API_BASE}/api/roommate-groups/${groupId}/ranked-listings?limit=50`,
           { headers }
@@ -166,6 +159,8 @@ export default function GroupDetailPage() {
         if (fallbackResponse.ok && fallbackData.status === 'success') {
           listingsFeed = fallbackData.ranked_listings || [];
         }
+      } catch {
+        // Listing feed is non-critical; group overview still loads.
       }
 
       setMatches(listingsFeed);
@@ -181,20 +176,20 @@ export default function GroupDetailPage() {
     }
   };
 
-  const fetchMemberLikedListings = async () => {
+  const fetchMemberSavedListings = async () => {
     setLoadingLiked(true);
     try {
       const validToken = await getValidToken();
       const response = await fetch(
-        `${API_BASE}/api/interactions/swipes/groups/${groupId}/liked`,
+        `${API_BASE}/api/interactions/swipes/groups/${groupId}/liked?action=group_save`,
         { headers: { Authorization: `Bearer ${validToken}` } }
       );
       const data = await response.json();
       if (response.ok && data.status === 'success') {
-        setMemberLikedListings(data.data || []);
+        setMemberSavedListings(data.data || []);
       }
     } catch (error) {
-      console.error('Error fetching member liked listings:', error);
+      console.error('Error fetching member saved listings:', error);
     } finally {
       setLoadingLiked(false);
     }
@@ -767,12 +762,17 @@ export default function GroupDetailPage() {
                 <Group gap="xs">
                   <IconUsers size={18} />
                   <div>
-                    <Text size="xs" c="dimmed">Group Size</Text>
+                    <Text size="xs" c="dimmed">Members</Text>
                     <Text fw={500}>
                       {group.target_group_size != null
-                        ? `${acceptedMemberCount}/${group.target_group_size}`
-                        : `${acceptedMemberCount} members`}
+                        ? `${acceptedMemberCount} of ${group.target_group_size}`
+                        : `${acceptedMemberCount}`}
                     </Text>
+                    {group.target_group_size != null && (
+                      <Text size="xs" c={isGroupFull ? 'red' : 'dimmed'}>
+                        {isGroupFull ? 'Group full' : `${group.target_group_size - acceptedMemberCount} spot${group.target_group_size - acceptedMemberCount === 1 ? '' : 's'} open`}
+                      </Text>
+                    )}
                   </div>
                 </Group>
               </Grid.Col>
@@ -788,10 +788,10 @@ export default function GroupDetailPage() {
             </Tabs.Tab>
             <Tabs.Tab
               value="interests"
-              leftSection={<IconHeart size={16} />}
-              onClick={() => { if (!loadingLiked) fetchMemberLikedListings(); }}
+              leftSection={<IconBookmark size={16} />}
+              onClick={() => { if (!loadingLiked) fetchMemberSavedListings(); }}
             >
-              Member Interests
+              Saved Listings
             </Tabs.Tab>
             {isCreator && (
               <Tabs.Tab 
@@ -1032,15 +1032,15 @@ export default function GroupDetailPage() {
             </Tabs.Panel>
           )}
 
-          {/* Member Interests Tab */}
+          {/* Saved Listings Tab */}
           <Tabs.Panel value="interests" pt="xl">
             <Stack gap="md">
               <Group justify="space-between">
                 <div>
-                  <Title order={3}>Member Interests</Title>
-                  <Text size="sm" c="dimmed">Listings your group members liked while browsing Discover</Text>
+                  <Title order={3}>Saved Listings</Title>
+                  <Text size="sm" c="dimmed">Listings your group members bookmarked for the group</Text>
                 </div>
-                <Button variant="light" size="sm" onClick={fetchMemberLikedListings} loading={loadingLiked}>
+                <Button variant="light" size="sm" onClick={fetchMemberSavedListings} loading={loadingLiked}>
                   Refresh
                 </Button>
               </Group>
@@ -1049,21 +1049,21 @@ export default function GroupDetailPage() {
                 <Stack gap="sm">
                   {[1, 2, 3].map(i => <Skeleton key={i} height={100} radius="md" />)}
                 </Stack>
-              ) : memberLikedListings.length === 0 ? (
+              ) : memberSavedListings.length === 0 ? (
                 <Card withBorder>
                   <Stack align="center" py="xl">
-                    <ThemeIcon size="xl" variant="light" color="pink">
-                      <IconHeart size={24} />
+                    <ThemeIcon size="xl" variant="light" color="teal">
+                      <IconBookmark size={24} />
                     </ThemeIcon>
-                    <Text c="dimmed" ta="center">No liked listings yet</Text>
+                    <Text c="dimmed" ta="center">No saved listings yet</Text>
                     <Text size="sm" c="dimmed" ta="center">
-                      When group members like listings in Discover, they'll appear here.
+                      When group members save listings from Recommendations, they'll appear here.
                     </Text>
                   </Stack>
                 </Card>
               ) : (
                 <Stack gap="md">
-                  {memberLikedListings.map((listing) => (
+                  {memberSavedListings.map((listing) => (
                     <Card
                       key={listing.id}
                       withBorder
@@ -1073,16 +1073,24 @@ export default function GroupDetailPage() {
                     >
                       <Group justify="space-between" align="flex-start">
                         <div style={{ flex: 1 }}>
-                          <Title order={4}>{listing.title || 'Listing'}</Title>
+                          <Title order={4}>
+                            {listing.title?.includes('|')
+                              ? listing.title.split('|')[0].trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+                              : (listing.title || 'Listing')}
+                          </Title>
                           <Group gap="xs" mt={4}>
                             <IconMapPin size={14} />
-                            <Text size="sm" c="dimmed">{listing.city || 'Location unavailable'}</Text>
+                            <Text size="sm" c="dimmed">
+                              {listing.title?.includes('|')
+                                ? listing.title.split('|')[1].trim()
+                                : (listing.city || 'Location unavailable')}
+                            </Text>
                           </Group>
                           <Group gap="xl" mt="sm">
                             {listing.price_per_month && (
                               <div>
                                 <Text size="xs" c="dimmed">Price</Text>
-                                <Text fw={600}>${listing.price_per_month}/mo</Text>
+                                <Text fw={600}>${Number(listing.price_per_month).toLocaleString()}/mo</Text>
                               </div>
                             )}
                             {listing.number_of_bedrooms != null && (
@@ -1091,12 +1099,18 @@ export default function GroupDetailPage() {
                                 <Text fw={600}>{listing.number_of_bedrooms === 0 ? 'Studio' : listing.number_of_bedrooms}</Text>
                               </div>
                             )}
+                            {listing.number_of_bathrooms != null && (
+                              <div>
+                                <Text size="xs" c="dimmed">Baths</Text>
+                                <Text fw={600}>{listing.number_of_bathrooms}</Text>
+                              </div>
+                            )}
                           </Group>
                         </div>
                         <Stack gap={4} align="flex-end">
-                          <Text size="xs" c="dimmed">Liked by</Text>
+                          <Text size="xs" c="dimmed">Saved by</Text>
                           {(listing.liked_by || []).map((name) => (
-                            <Badge key={name} size="sm" variant="light" color="pink">{name}</Badge>
+                            <Badge key={name} size="sm" variant="light" color="teal">{name}</Badge>
                           ))}
                         </Stack>
                       </Group>

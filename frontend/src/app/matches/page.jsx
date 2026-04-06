@@ -1,11 +1,13 @@
-﻿'use client';
+'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const MATCHES_PROMPT_DELAY_MS = 10000;
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Tooltip } from '@mantine/core';
-import { IconSparkles, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Group, Tooltip } from '@mantine/core';
+import { SkeletonListingCard } from '../components/Skeletons';
+import { IconSparkles, IconBookmark, IconBookmarkFilled, IconMapPin } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -13,6 +15,7 @@ import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageTracking } from '../hooks/usePageTracking';
 import { getLikedListings } from '../discover/likedListings';
+import { formatAmenityLabel } from '../../../lib/formatters';
 import {
   createAppError,
   hasCompleteCorePreferences,
@@ -34,9 +37,18 @@ export default function MatchesPage() {
   );
 }
 
+function parseListingTitle(title) {
+  if (!title) return { street: '', location: '' };
+  const parts = title.split('|');
+  if (parts.length >= 2) {
+    return { street: parts[0].trim(), location: parts.slice(1).join(' ').trim() };
+  }
+  return { street: title.trim(), location: '' };
+}
+
 function MatchesPageContent() {
   const router = useRouter();
-  const { user, authState } = useAuth();
+  const { user, getValidToken, authState } = useAuth();
   const userId = user?.profile?.id;
   const clientSessionIdRef = useRef(null);
   const surfaceStartedAtRef = useRef(Date.now());
@@ -50,8 +62,6 @@ function MatchesPageContent() {
   usePageTracking('matches', authState?.accessToken);
 
   const [listings, setListings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [missingCorePreferences, setMissingCorePreferences] = useState(false);
   const [userGroup, setUserGroup] = useState(null);
   const [savedListingIds, setSavedListingIds] = useState(new Set());
@@ -63,6 +73,8 @@ function MatchesPageContent() {
   const [pendingFeedbackLabel, setPendingFeedbackLabel] = useState(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
+  // Tracks the last feedData object seen so we only sync on a genuine new result
+  const prevFeedDataRef = useRef(null);
 
   if (!clientSessionIdRef.current && typeof window !== 'undefined') {
     clientSessionIdRef.current = createRecommendationClientSessionId('matches');
@@ -83,11 +95,14 @@ function MatchesPageContent() {
   }, []);
 
   const buildSessionPayload = useCallback((recommendations = listings, context = rankingContext) => {
+    if (!clientSessionIdRef.current) {
+      clientSessionIdRef.current = createRecommendationClientSessionId('matches');
+    }
+
     const topListingIds = recommendations
       .map((listing) => listing?.listing_id)
       .filter(Boolean)
       .slice(0, 20);
-
     const hasMlScores = recommendations.some((listing) => listing?.ml_score != null);
 
     return {
@@ -121,6 +136,7 @@ function MatchesPageContent() {
         return null;
       }
 
+      if (response.status === 503) return null;
       const result = await response.json();
       return result?.data ?? null;
     } catch {
@@ -166,154 +182,179 @@ function MatchesPageContent() {
 
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to persist recommendation engagement event');
-        return null;
       }
-
-      return response.ok ? response.json() : null;
     } catch {
-      return null;
+      // Best-effort only.
     }
   }, [authState?.accessToken, feedbackSessionId]);
 
-  const fetchMatches = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // ── cached recommendations (5-min stale time, shared QueryClient) ─────────
+
+  const fetchMatchesFeed = useCallback(async () => {
+    const token = await getValidToken();
+    if (!token) throw new Error('Not authenticated');
+
+    let prefs = {};
+    let hasCorePreferences = false;
+    let behaviorSampleSize;
+    const liked = getLikedListings();
+    const likedExtras = {};
+
+    const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (prefRes.ok) {
+      const prefData = await prefRes.json();
+      prefs = prefData.data || prefData || {};
+      hasCorePreferences = hasCompleteCorePreferences(prefs);
+    }
+
+    if (!hasCorePreferences) {
+      return { listings: [], missingCorePreferences: true };
+    }
 
     try {
-      let prefs = {};
-      let hasCorePreferences = false;
-      let behaviorSampleSize;
-      const liked = getLikedListings();
-      const likedExtras = {};
-
-      if (userId && authState?.accessToken) {
-        const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-          headers: { Authorization: `Bearer ${authState.accessToken}` },
-        });
-        if (prefRes.ok) {
-          const prefData = await prefRes.json();
-          prefs = prefData.data || prefData || {};
-          hasCorePreferences = hasCompleteCorePreferences(prefs);
-        }
-        setMissingCorePreferences(!hasCorePreferences);
-
-        if (!hasCorePreferences) {
-          setLoading(false);
-          setListings([]);
-          return;
-        }
-
-        try {
-          const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
-            headers: { Authorization: `Bearer ${authState.accessToken}` },
-          });
-          if (behaviorRes.ok) {
-            const behaviorPayload = await behaviorRes.json();
-            const behavior = behaviorPayload?.data || {};
-            if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
-            if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
-            if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
-            if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
-          }
-        } catch {
-          // Behavior vector is optional.
-        }
-      }
-
-      if (liked.length > 0) {
-        const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
-        if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
-        if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
-        if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
-      }
-
-      const body = {
-        budget_min: prefs.budget_min ?? undefined,
-        budget_max: prefs.budget_max ?? undefined,
-        target_country: prefs.target_country ?? undefined,
-        target_state_province: prefs.target_state_province ?? undefined,
-        target_city: prefs.target_city ?? undefined,
-        required_bedrooms: prefs.required_bedrooms ?? undefined,
-        target_bathrooms: prefs.target_bathrooms ?? undefined,
-        desired_beds: prefs.required_bedrooms ?? undefined,
-        desired_baths: prefs.target_bathrooms ?? undefined,
-        target_deposit_amount: prefs.target_deposit_amount ?? undefined,
-        furnished_preference: prefs.furnished_preference ?? undefined,
-        gender_policy: prefs.gender_policy ?? undefined,
-        target_lease_type: prefs.target_lease_type ?? undefined,
-        target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
-        move_in_date: prefs.move_in_date ?? undefined,
-        target_furnished: prefs.target_furnished ?? undefined,
-        wants_furnished:
-          prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
-            ? 1
-            : prefs.target_furnished === true
-              ? 1
-              : undefined,
-        pref_lat: prefs.target_latitude ?? undefined,
-        pref_lon: prefs.target_longitude ?? undefined,
-        top_n: 100,
-        offset: 0,
-        behavior_sample_size: behaviorSampleSize,
-        ...likedExtras,
-      };
-
-      const res = await fetch(`${API_BASE}/api/recommendations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (!res.ok) {
-        const apiError = await parseApiErrorResponse(res, 'Failed to fetch ranked matches');
-        throw createAppError(apiError.message, {
-          status: apiError.status,
-          payload: apiError.payload,
-          rawMessage: apiError.message,
-        });
+      if (behaviorRes.ok) {
+        const behaviorPayload = await behaviorRes.json();
+        const behavior = behaviorPayload?.data || {};
+        if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
+        if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
+        if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
+        if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
       }
-
-      const data = await res.json();
-      setListings(data.recommendations || []);
-      setRankingContext(deriveRankingContext(data));
-    } catch (err) {
-      setError(normalizeRecommendationsError(err));
-    } finally {
-      setLoading(false);
+    } catch {
+      // Behavior vector is optional.
     }
-  }, [userId, authState?.accessToken, deriveRankingContext]);
+
+    if (liked.length > 0) {
+      const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
+      if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
+      if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
+      if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
+    }
+
+    const body = {
+      budget_min: prefs.budget_min ?? undefined,
+      budget_max: prefs.budget_max ?? undefined,
+      target_country: prefs.target_country ?? undefined,
+      target_state_province: prefs.target_state_province ?? undefined,
+      target_city: prefs.target_city ?? undefined,
+      required_bedrooms: prefs.required_bedrooms ?? undefined,
+      target_bathrooms: prefs.target_bathrooms ?? undefined,
+      desired_beds: prefs.required_bedrooms ?? undefined,
+      desired_baths: prefs.target_bathrooms ?? undefined,
+      target_deposit_amount: prefs.target_deposit_amount ?? undefined,
+      furnished_preference: prefs.furnished_preference ?? undefined,
+      gender_policy: prefs.gender_policy ?? undefined,
+      target_lease_type: prefs.target_lease_type ?? undefined,
+      target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+      move_in_date: prefs.move_in_date ?? undefined,
+      target_furnished: prefs.target_furnished ?? undefined,
+      wants_furnished:
+        prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
+          ? 1
+          : prefs.target_furnished === true
+            ? 1
+            : undefined,
+      pref_lat: prefs.target_latitude ?? undefined,
+      pref_lon: prefs.target_longitude ?? undefined,
+      top_n: 100,
+      offset: 0,
+      behavior_sample_size: behaviorSampleSize,
+      ...likedExtras,
+    };
+
+    const res = await fetch(`${API_BASE}/api/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const apiError = await parseApiErrorResponse(res, 'Failed to fetch recommendations');
+      throw createAppError(apiError.message, {
+        status: apiError.status,
+        payload: apiError.payload,
+        rawMessage: apiError.message,
+      });
+    }
+
+    const data = await res.json();
+    return {
+      listings: data.recommendations || [],
+      missingCorePreferences: false,
+      rankingContext: deriveRankingContext(data),
+    };
+  }, [deriveRankingContext, getValidToken, userId]);
+
+  const {
+    data: feedData,
+    isLoading: feedLoading,
+    error: feedQueryError,
+    refetch: refetchFeed,
+  } = useQuery({
+    queryKey: ['matches-feed', userId],
+    queryFn: fetchMatchesFeed,
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
+    gcTime:    10 * 60 * 1000,
+    retry: false,
+  });
+
+  // Sync query data → state without a visible flash on cache-hit remounts
+  useLayoutEffect(() => {
+    if (!feedData || feedData === prevFeedDataRef.current) return;
+    prevFeedDataRef.current = feedData;
+    setListings(feedData.listings);
+    setMissingCorePreferences(feedData.missingCorePreferences);
+    setRankingContext(feedData.rankingContext ?? null);
+    setFeedbackSessionId(null);
+    setPromptAllowed(false);
+    setShowFeedbackPrompt(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    setFeedbackAcknowledged(false);
+    sessionMetricsRef.current = { detailOpensCount: 0, savesCount: 0 };
+    surfaceStartedAtRef.current = Date.now();
+    clientSessionIdRef.current = createRecommendationClientSessionId('matches');
+  }, [feedData]);
+
+  const loading = feedLoading && !feedData;
+  const error = feedQueryError ? normalizeRecommendationsError(feedQueryError) : null;
+
+  // ── group + saved listings (cheap; runs once per auth session) ────────────
 
   useEffect(() => {
-    fetchMatches();
-    window.addEventListener('focus', fetchMatches);
-    return () => window.removeEventListener('focus', fetchMatches);
-  }, [fetchMatches]);
-
-  useEffect(() => {
-    if (!authState?.accessToken) return;
+    if (!userId) return;
+    let cancelled = false;
     const fetchGroup = async () => {
       try {
+        const token = await getValidToken();
+        if (!token || cancelled) return;
         const res = await fetch(`${API_BASE}/api/roommate-groups?my_groups=true&limit=1`, {
-          headers: { Authorization: `Bearer ${authState.accessToken}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
-        console.log('[matches] groups response:', data);
         const group = data.data?.[0] || null;
-        if (!group) { console.log('[matches] no group found'); return; }
+        if (!group || cancelled) return;
         setUserGroup(group);
-        console.log('[matches] userGroup set:', group.id, group.group_name);
 
         const savedRes = await fetch(
           `${API_BASE}/api/interactions/swipes/groups/${group.id}/saved`,
-          { headers: { Authorization: `Bearer ${authState.accessToken}` } }
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         const savedData = await savedRes.json();
-        console.log('[matches] saved listings response:', savedData);
-        setSavedListingIds(new Set(savedData.saved_listing_ids || []));
-      } catch (e) { console.error('[matches] fetchGroup error:', e); }
+        if (!cancelled) setSavedListingIds(new Set(savedData.saved_listing_ids || []));
+      } catch (e) {
+        console.error('[recommendations] fetchGroup error:', e);
+      }
     };
     fetchGroup();
-  }, [authState?.accessToken]);
+    return () => { cancelled = true; };
+  }, [userId, getValidToken]);
 
   useEffect(() => {
     latestTokenRef.current = authState?.accessToken ?? null;
@@ -409,7 +450,6 @@ function MatchesPageContent() {
     return () => {
       const token = latestTokenRef.current;
       const sessionId = latestSessionIdRef.current;
-
       if (!token || !sessionId) return;
 
       const recommendations = latestListingsRef.current || [];
@@ -504,8 +544,7 @@ function MatchesPageContent() {
 
   const handleViewDetails = useCallback((listing) => {
     const position = findListingPosition(listing?.listing_id);
-    const nextDetailOpens = sessionMetricsRef.current.detailOpensCount + 1;
-    sessionMetricsRef.current.detailOpensCount = nextDetailOpens;
+    sessionMetricsRef.current.detailOpensCount += 1;
     void persistRecommendationEvent({
       eventType: 'detail_open',
       listingId: listing?.listing_id,
@@ -523,14 +562,13 @@ function MatchesPageContent() {
     router.push(href);
   }, [feedbackSessionId, findListingPosition, persistRecommendationEvent, router]);
 
-  const handleGroupSave = async (listing) => {
-    if (!userGroup || !authState?.accessToken) {
-      console.warn('[matches] handleGroupSave blocked — userGroup:', userGroup, 'token:', !!authState?.accessToken);
-      return;
-    }
+  const handleGroupSave = async (e, listing) => {
+    e.stopPropagation();
+    if (!userGroup) return;
+    const token = await getValidToken();
+    if (!token) return;
     const lid = listing.listing_id || listing.id;
     const isSaved = savedListingIds.has(lid);
-    console.log('[matches] saving listing', lid, 'to group', userGroup.id, '— currently saved:', isSaved);
 
     setSavedListingIds(prev => {
       const next = new Set(prev);
@@ -543,11 +581,10 @@ function MatchesPageContent() {
         `${API_BASE}/api/interactions/swipes/groups/${userGroup.id}/save/${lid}`,
         {
           method: isSaved ? 'DELETE' : 'POST',
-          headers: { Authorization: `Bearer ${authState.accessToken}` },
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
       const result = await res.json();
-      console.log('[matches] save response:', res.status, result);
       if (!res.ok) throw new Error(result.detail || 'Save failed');
       const position = findListingPosition(lid);
       void persistRecommendationEvent({
@@ -559,11 +596,10 @@ function MatchesPageContent() {
         },
       });
       if (!isSaved) {
-        const nextSaves = sessionMetricsRef.current.savesCount + 1;
-        sessionMetricsRef.current.savesCount = nextSaves;
+        sessionMetricsRef.current.savesCount += 1;
       }
     } catch (e) {
-      console.error('[matches] save error:', e);
+      console.error('[recommendations] save error:', e);
       setSavedListingIds(prev => {
         const next = new Set(prev);
         isSaved ? next.add(lid) : next.delete(lid);
@@ -573,37 +609,46 @@ function MatchesPageContent() {
   };
 
   return (
-    <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
+    <Box style={{ minHeight: '100vh', backgroundColor: '#f8f9fa' }}>
       <Navigation />
 
       <Container size="xl" style={{ padding: '4rem 3rem' }} data-tour="matches-content">
-        <Stack align="center" gap="lg" mb={64}>
+        <Stack align="center" gap="sm" mb={48}>
           <Title
             order={1}
-            style={{ fontSize: '2.5rem', fontWeight: 500, color: '#111', textAlign: 'center' }}
+            style={{ fontSize: '2.5rem', fontWeight: 600, color: '#111', textAlign: 'center' }}
           >
-            Your Top Matches
+            Recommendations
           </Title>
-          <Text size="lg" c="dimmed" style={{ maxWidth: '42rem', textAlign: 'center', color: '#666' }}>
-            Top 100 listings ranked from your preferences and recent swipe history
+          <Text size="lg" c="dimmed" style={{ maxWidth: '42rem', textAlign: 'center' }}>
+            Your top listings, ranked by preferences and activity
           </Text>
           {feedbackAcknowledged && (
             <Text size="sm" c="teal.7">
               Thanks. Your feedback was saved for recommendation evaluation.
             </Text>
           )}
+          {!loading && !error && listings.length > 0 && (
+            <Text size="sm" c="dimmed">
+              {listings.length} listings found
+            </Text>
+          )}
         </Stack>
 
         {loading && (
-          <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
-            <Text size="md" c="dimmed">Loading your ranked matches…</Text>
-          </Stack>
+          <Grid gutter="lg">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Grid.Col key={i} span={{ base: 12, sm: 6, lg: 4 }}>
+                <SkeletonListingCard />
+              </Grid.Col>
+            ))}
+          </Grid>
         )}
 
         {!loading && error && (
           <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
             <Text size="md" c="red">{error}</Text>
-            <Button size="md" color="teal" onClick={fetchMatches}>
+            <Button size="md" color="teal" onClick={refetchFeed}>
               Retry
             </Button>
           </Stack>
@@ -616,12 +661,12 @@ function MatchesPageContent() {
             </ThemeIcon>
             <Stack align="center" gap="xs">
               <Title order={3} style={{ color: '#212529' }}>
-                {missingCorePreferences ? 'Complete your preferences to get matches' : 'No ranked matches yet'}
+                {missingCorePreferences ? 'Complete your preferences to get recommendations' : 'No recommendations yet'}
               </Title>
               <Text size="md" c="dimmed" ta="center" maw={420}>
                 {missingCorePreferences
-                  ? 'Set your country, state/province, and city to start receiving location-aware listings.'
-                  : 'Update your preferences or broaden a hard constraint to surface more listings.'}
+                  ? 'Set your country, state/province, and city to start receiving personalised listings.'
+                  : 'Update your preferences or broaden a constraint to surface more listings.'}
               </Text>
             </Stack>
             <Stack gap="sm" align="center">
@@ -634,7 +679,7 @@ function MatchesPageContent() {
                 Open Preferences
               </Button>
               <Button size="md" color="teal" onClick={() => router.push('/discover')}>
-                Go To Discover
+                Go to Discover
               </Button>
             </Stack>
           </Stack>
@@ -728,11 +773,19 @@ function MatchesPageContent() {
               </Card>
             )}
 
-            <Grid gutter="xl">
+            <Grid gutter="lg">
               {listings.map((listing) => {
                 const image =
                   listing.images?.[0] ||
                   'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+
+                const { street, location } = parseListingTitle(listing.title);
+                const amenityBadges = listing.amenities && typeof listing.amenities === 'object'
+                  ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 2).map(([key]) => key)
+                  : [];
+
+                const lid = listing.listing_id || listing.id;
+                const saved = savedListingIds.has(lid);
 
                 return (
                   <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
@@ -742,12 +795,17 @@ function MatchesPageContent() {
                       radius="lg"
                       style={{
                         overflow: 'hidden',
-                        border: '1px solid #f1f3f5',
+                        border: '1px solid #e9ecef',
                         cursor: 'pointer',
+                        backgroundColor: '#fff',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
                       }}
+                      onClick={() => handleViewDetails(listing)}
                     >
                       <Card.Section style={{ position: 'relative' }}>
-                        <Box style={{ position: 'relative', paddingBottom: '75%', overflow: 'hidden', backgroundColor: '#f5f5f5' }}>
+                        <Box style={{ position: 'relative', paddingBottom: '66%', overflow: 'hidden', backgroundColor: '#f0f0f0' }}>
                           <ImageWithFallback
                             src={image}
                             alt={listing.title}
@@ -761,76 +819,93 @@ function MatchesPageContent() {
                           <Badge
                             variant="filled"
                             color="teal"
-                            style={{ position: 'absolute', top: 12, right: 12 }}
+                            size="md"
+                            style={{ position: 'absolute', top: 12, right: 12, fontWeight: 700 }}
                           >
                             {listing.match_percent} match
                           </Badge>
                         )}
                       </Card.Section>
 
-                      <Stack gap="md" style={{ padding: '1.5rem', minHeight: '220px', display: 'flex', flexDirection: 'column' }}>
-                        <Text
-                          fw={500}
-                          size="lg"
-                          style={{
-                            color: '#111', lineHeight: 1.4,
-                            minHeight: '56px', maxHeight: '56px', overflow: 'hidden',
-                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                          }}
-                          title={listing.title}
-                        >
-                          {listing.title}
-                        </Text>
+                      <Stack gap="xs" style={{ padding: '1.25rem', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <Box>
+                          <Text
+                            fw={600}
+                            size="md"
+                            lineClamp={1}
+                            style={{ color: '#111', lineHeight: 1.4 }}
+                            title={street}
+                          >
+                            {street || listing.title}
+                          </Text>
+                          {location && (
+                            <Group gap={4} mt={2}>
+                              <IconMapPin size={12} color="#868e96" style={{ flexShrink: 0 }} />
+                              <Text size="xs" c="dimmed" lineClamp={1} style={{ flex: 1 }}>
+                                {location}
+                              </Text>
+                            </Group>
+                          )}
+                        </Box>
 
-                        <Text size="md" c="dimmed" style={{ color: '#666', minHeight: '24px' }}>
+                        <Text size="sm" c="dimmed">
                           {[
                             listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
                             listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
-                            listing.area_sqft && `${listing.area_sqft} sq ft`,
-                          ].filter(Boolean).join(' • ')}
+                            listing.area_sqft && `${Number(listing.area_sqft).toLocaleString()} sq ft`,
+                          ].filter(Boolean).join(' · ')}
                         </Text>
 
+                        {(listing.furnished || amenityBadges.length > 0) && (
+                          <Group gap="xs">
+                            {listing.furnished && (
+                              <Badge variant="light" color="teal" size="sm">Furnished</Badge>
+                            )}
+                            {amenityBadges.map((key) => (
+                              <Badge key={key} variant="light" color="gray" size="sm">
+                                {formatAmenityLabel(key)}
+                              </Badge>
+                            ))}
+                          </Group>
+                        )}
+
                         {listing.price_per_month && (
-                          <Text fw={600} size="xl" c="teal.6" style={{ minHeight: '32px' }}>
+                          <Text fw={700} size="xl" c="teal.6" style={{ marginTop: 'auto', paddingTop: '0.5rem' }}>
                             ${Number(listing.price_per_month).toLocaleString()}/mo
                           </Text>
                         )}
 
-                        <Box style={{ flex: 1 }} />
-
-                        <Stack gap="xs">
+                        <Stack gap="xs" mt="xs">
                           <Button
                             fullWidth
                             radius="md"
-                            size="md"
+                            size="sm"
                             color="teal"
-                            onClick={() => handleViewDetails(listing)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewDetails(listing);
+                            }}
                           >
                             View Details
                           </Button>
-                          {userGroup && (() => {
-                            const lid = listing.listing_id || listing.id;
-                            const saved = savedListingIds.has(lid);
-                            return (
-                              <Tooltip label={saved ? 'Remove from group' : `Save to ${userGroup.group_name}`} withArrow>
-                                <Button
-                                  fullWidth
-                                  radius="md"
-                                  size="md"
-                                  variant={saved ? 'filled' : 'light'}
-                                  onClick={() => handleGroupSave(listing)}
-                                  leftSection={saved ? <IconStarFilled size={16} /> : <IconStar size={16} />}
-                                  style={{
-                                    backgroundColor: saved ? '#f59f00' : undefined,
-                                    borderColor: '#ffe066',
-                                    color: saved ? '#fff' : '#f59f00',
-                                  }}
-                                >
-                                  {saved ? 'Saved to Group' : 'Save to Group'}
-                                </Button>
-                              </Tooltip>
-                            );
-                          })()}
+                          {userGroup && (
+                            <Tooltip
+                              label={saved ? `Remove from ${userGroup.group_name}` : `Save to ${userGroup.group_name}`}
+                              withArrow
+                            >
+                              <Button
+                                fullWidth
+                                radius="md"
+                                size="sm"
+                                variant={saved ? 'filled' : 'light'}
+                                color="teal"
+                                onClick={(e) => handleGroupSave(e, listing)}
+                                leftSection={saved ? <IconBookmarkFilled size={15} /> : <IconBookmark size={15} />}
+                              >
+                                {saved ? 'Saved for Group' : 'Save for Group'}
+                              </Button>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </Stack>
                     </Card>

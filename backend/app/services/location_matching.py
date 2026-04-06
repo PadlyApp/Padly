@@ -89,6 +89,74 @@ _METRO_ALIASES = {
         "south san francisco",
         "emeryville",
         "alameda",
+        # East Bay
+        "hayward",
+        "richmond",
+        "san leandro",
+        "castro valley",
+        "union city",
+        "newark",
+        "san lorenzo",
+        "san pablo",
+        "el cerrito",
+        "albany",
+        "pinole",
+        "hercules",
+        "rodeo",
+        "concord",
+        "walnut creek",
+        "pleasant hill",
+        "martinez",
+        "antioch",
+        "pittsburg",
+        "brentwood",
+        "oakley",
+        "danville",
+        "san ramon",
+        "dublin",
+        "pleasanton",
+        "livermore",
+        # Peninsula / South Bay
+        "milpitas",
+        "cupertino",
+        "campbell",
+        "los gatos",
+        "saratoga",
+        "los altos",
+        "los altos hills",
+        "monte sereno",
+        "morgan hill",
+        "gilroy",
+        "menlo park",
+        "atherton",
+        "portola valley",
+        "woodside",
+        "foster city",
+        "san carlos",
+        "belmont",
+        "burlingame",
+        "millbrae",
+        "san bruno",
+        "pacifica",
+        "half moon bay",
+        # North Bay
+        "marin",
+        "san rafael",
+        "novato",
+        "san anselmo",
+        "fairfax",
+        "corte madera",
+        "mill valley",
+        "tiburon",
+        "sausalito",
+        "petaluma",
+        "santa rosa",
+        "rohnert park",
+        "napa",
+        "vallejo",
+        "benicia",
+        "fairfield",
+        "vacaville",
     },
 }
 
@@ -159,8 +227,13 @@ def normalize_city_name(value: Any) -> str:
     city = normalize_text(value)
     if not city:
         return ""
+    # Strip " (..." parenthetical suffix — e.g. "San Francisco (CA)" → "San Francisco"
     if " (" in city:
         city = city.split(" (", 1)[0].strip()
+    # Strip everything after the first comma — handles ", CA", ", ON", ", California", etc.
+    # e.g. "San Francisco, CA" → "San Francisco", "San Jose, California" → "San Jose"
+    if "," in city:
+        city = city.split(",", 1)[0].strip()
     city = _CITY_CANONICAL_ALIASES.get(city, city)
     return city
 
