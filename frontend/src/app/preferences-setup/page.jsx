@@ -289,12 +289,6 @@ export default function PreferencesSetupPage() {
     }
   }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, getValidToken, router]);
 
-  const handleSkip = () => {
-    localStorage.setItem('padly_preferences_complete', 'true');
-    localStorage.setItem('padly_onboarding_complete', 'true');
-    router.push('/discover');
-  };
-
   const maxBinCount = histogram.bins.length > 0
     ? Math.max(...histogram.bins.map((b) => b.count))
     : 0;
@@ -558,9 +552,6 @@ export default function PreferencesSetupPage() {
           <Stack gap="sm" mt="md">
             <Button size="lg" color="teal" radius="md" fullWidth loading={saving} onClick={handleSave}>
               Continue to Discover
-            </Button>
-            <Button variant="subtle" color="gray" size="sm" fullWidth onClick={handleSkip}>
-              Skip for now
             </Button>
           </Stack>
         </Stack>
