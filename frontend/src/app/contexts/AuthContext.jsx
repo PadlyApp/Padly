@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AuthService } from '../../../lib/authService';
 
 /**
@@ -198,17 +198,19 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!(authState?.accessToken && user);
 
+  const contextValue = useMemo(() => ({
+    user,
+    authState,
+    isLoading,
+    signup,
+    signin,
+    signout,
+    isAuthenticated,
+    getValidToken,
+  }), [user, authState, isLoading, isAuthenticated, getValidToken]); // eslint-disable-line react-hooks/exhaustive-deps -- signup/signin/signout are stable non-memoized helpers
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      authState,
-      isLoading,
-      signup,
-      signin,
-      signout,
-      isAuthenticated,
-      getValidToken,
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

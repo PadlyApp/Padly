@@ -8,6 +8,7 @@ from typing import Optional
 from app.db import (
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_KEY,
     supabase_admin
 )
 
@@ -72,4 +73,9 @@ def get_admin_client() -> Client:
         # Can access any data regardless of RLS
         response = client.table('users').select('*').execute()
     """
+    # Always reset the PostgREST Authorization header to the service role key.
+    # supabase-py 2.x can mutate the singleton's auth headers when auth.get_user()
+    # is called with a user JWT, which would cause subsequent PostgREST calls to
+    # run as the user (subject to RLS) instead of as the service role (bypasses RLS).
+    supabase_admin.postgrest.auth(SUPABASE_SERVICE_KEY)
     return supabase_admin

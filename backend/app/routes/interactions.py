@@ -254,11 +254,15 @@ async def get_group_behavior(
 async def get_group_liked_listings(
     group_id: str,
     limit: int = Query(100, ge=1, le=500),
+    action: Optional[str] = Query(None, description="Filter by action: 'like', 'group_save', or omit for both"),
     token: str = Depends(require_user_token),
 ):
     """
-    Return listings liked by any accepted member of the group.
-    Each item includes the listing data plus a list of member names who liked it.
+    Return listings interacted with by any accepted member of the group.
+    Pass ?action=group_save to see only group-saved listings.
+    Pass ?action=like to see only individually liked listings.
+    Omit action to see both.
+    Each item includes listing data plus a list of member names who saved/liked it.
     """
     supabase = get_admin_client()
     user_id = _resolve_current_user_id(token)
@@ -291,18 +295,25 @@ async def get_group_liked_listings(
             for u in (users_resp.data or [])
         }
 
-        # Get liked + group_save swipes for all members
+        # Determine which actions to fetch based on the optional filter param.
+        if action == "group_save":
+            actions_to_fetch = ["group_save"]
+        elif action == "like":
+            actions_to_fetch = ["like"]
+        else:
+            actions_to_fetch = ["like", "group_save"]
+
         swipes_resp = (
             supabase.table("swipe_interactions")
             .select("listing_id, actor_user_id, action, group_id_at_time")
             .in_("actor_user_id", member_ids)
-            .in_("action", ["like", "group_save"])
+            .in_("action", actions_to_fetch)
             .order("created_at", desc=True)
             .limit(limit)
             .execute()
         )
         raw_swipes = swipes_resp.data or []
-        # Filter group_save to only include saves for this specific group
+        # group_save rows must belong to this specific group; likes are group-agnostic.
         swipes = []
         for s in raw_swipes:
             if s.get("action") == "like":

@@ -1,25 +1,63 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid } from '@mantine/core';
+import { useState, useEffect, useRef } from 'react';
+import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, Tooltip, ActionIcon } from '@mantine/core';
+import { SkeletonListingDetail } from '../../components/Skeletons';
+import { IconBookmark, IconBookmarkFilled, IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
+import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
-import { useAuth } from '../../contexts/AuthContext';
+import { formatAmenityLabel } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
 import Link from 'next/link';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+/** Title-case a string while preserving numbers and hyphens. */
+function toTitleCase(str) {
+  if (!str) return '';
+  const LOWER_WORDS = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'at', 'by', 'in', 'of', 'on', 'to', 'up']);
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map((word, i) => {
+      if (!word) return word;
+      if (i > 0 && LOWER_WORDS.has(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+}
+
+/**
+ * Parse a raw listing title like:
+ *   "UPPER - 12 PERSICA STREET|Richmond Hill (Oak Ridges), Ontario L4E1L3"
+ * into { street, location }.
+ */
+function parseTitle(raw) {
+  if (!raw) return { street: '', location: '' };
+  const pipeIdx = raw.indexOf('|');
+  if (pipeIdx === -1) return { street: toTitleCase(raw.trim()), location: '' };
+  const street = toTitleCase(raw.slice(0, pipeIdx).trim());
+  const location = raw.slice(pipeIdx + 1).trim();
+  return { street, location };
+}
 
 export default function ListingDetailPage() {
   const params = useParams();
   const listingId = params.id;
-  const { authState } = useAuth();
+  const { getValidToken, authState } = useAuth();
 
   usePageTracking('listing_detail', authState?.accessToken);
 
-  // Track view duration for this listing detail page.
+  const [userGroup, setUserGroup] = useState(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
+
   const viewStartRef = useRef(Date.now());
   useEffect(() => {
     if (!authState?.accessToken) return;
@@ -71,6 +109,61 @@ export default function ListingDetailPage() {
   })();
   const listing = rawListing ? { ...rawListing, images: parsedImages } : null;
 
+  // Fetch user's group and whether this listing is saved to it.
+  useEffect(() => {
+    if (!listingId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getValidToken();
+        if (!token || cancelled) return;
+
+        const res = await fetch(`${API_BASE}/api/roommate-groups?my_groups=true&limit=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const group = data.data?.[0] || null;
+        if (!group || cancelled) return;
+        setUserGroup(group);
+
+        const savedRes = await fetch(
+          `${API_BASE}/api/interactions/swipes/groups/${group.id}/saved`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const savedData = await savedRes.json();
+        if (!cancelled) setIsSaved((savedData.saved_listing_ids || []).includes(listingId));
+      } catch {
+        // Group/saved state is non-critical.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [listingId, getValidToken]);
+
+  const handleGroupSave = async () => {
+    if (!userGroup || saveLoading) return;
+    setSaveLoading(true);
+    const wasSaved = isSaved;
+    setIsSaved(!wasSaved);
+    try {
+      const token = await getValidToken();
+      if (!token) { setIsSaved(wasSaved); return; }
+      const res = await fetch(
+        `${API_BASE}/api/interactions/swipes/groups/${userGroup.id}/save/${listingId}`,
+        {
+          method: wasSaved ? 'DELETE' : 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!res.ok) {
+        setIsSaved(wasSaved);
+      }
+    } catch {
+      setIsSaved(wasSaved);
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   const isNotFound = error?.status === 404;
   const errorMessage = getErrorMessage(
     error,
@@ -82,9 +175,7 @@ export default function ListingDetailPage() {
       <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
         <Navigation />
         <Container size="xl" style={{ padding: '4rem 2rem' }}>
-          <Text ta="center" size="lg" c="dimmed">
-            Loading listing details...
-          </Text>
+          <SkeletonListingDetail />
         </Container>
       </Box>
     );
@@ -120,6 +211,8 @@ export default function ListingDetailPage() {
     );
   }
 
+  const { street, location } = parseTitle(listing.title);
+
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
@@ -127,56 +220,150 @@ export default function ListingDetailPage() {
       <Container size="xl" style={{ padding: '4rem 2rem' }}>
         <Link href="/matches" style={{ textDecoration: 'none' }}>
           <Button variant="subtle" color="gray" mb="xl">
-            {'<'}- Back to Matches
+            ← Back to Recommendations
           </Button>
         </Link>
 
         <Grid gutter="xl">
           <Grid.Col span={{ base: 12, md: 7 }}>
-            <Box style={{ borderRadius: '1rem', overflow: 'hidden', border: '1px solid #f1f1f1' }}>
-              <ImageWithFallback
-                src={
-                  listing.images?.[0] ||
-                  'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'
-                }
-                alt={listing.title}
-                style={{ width: '100%', height: '500px', objectFit: 'cover' }}
-              />
-            </Box>
+            <Stack gap="sm">
+              {/* Hero image with prev/next controls */}
+              <Box style={{ position: 'relative', borderRadius: '1rem', overflow: 'hidden', border: '1px solid #f1f1f1' }}>
+                <ImageWithFallback
+                  src={
+                    listing.images?.[imageIndex] ||
+                    'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080'
+                  }
+                  alt={`${street || listing.title} — photo ${imageIndex + 1}`}
+                  style={{ width: '100%', height: '500px', objectFit: 'cover', display: 'block' }}
+                />
+
+                {listing.images?.length > 1 && (
+                  <>
+                    <Box style={{ position: 'absolute', top: '50%', left: 12, transform: 'translateY(-50%)' }}>
+                      <ActionIcon
+                        variant="filled"
+                        color="dark"
+                        radius="xl"
+                        size="lg"
+                        onClick={() => setImageIndex((prev) => (prev - 1 + listing.images.length) % listing.images.length)}
+                        style={{ opacity: 0.85 }}
+                        aria-label="Previous photo"
+                      >
+                        <IconChevronLeft size={18} />
+                      </ActionIcon>
+                    </Box>
+                    <Box style={{ position: 'absolute', top: '50%', right: 12, transform: 'translateY(-50%)' }}>
+                      <ActionIcon
+                        variant="filled"
+                        color="dark"
+                        radius="xl"
+                        size="lg"
+                        onClick={() => setImageIndex((prev) => (prev + 1) % listing.images.length)}
+                        style={{ opacity: 0.85 }}
+                        aria-label="Next photo"
+                      >
+                        <IconChevronRight size={18} />
+                      </ActionIcon>
+                    </Box>
+                    <Badge
+                      variant="filled"
+                      color="dark"
+                      size="sm"
+                      radius="sm"
+                      style={{ position: 'absolute', bottom: 14, right: 14, fontWeight: 700 }}
+                    >
+                      {imageIndex + 1} / {listing.images.length}
+                    </Badge>
+                  </>
+                )}
+              </Box>
+
+              {/* Thumbnail strip */}
+              {listing.images?.length > 1 && (
+                <Group
+                  gap="xs"
+                  wrap="nowrap"
+                  style={{ overflowX: 'auto', padding: '0 2px 4px' }}
+                >
+                  {listing.images.map((img, idx) => (
+                    <Box
+                      key={idx}
+                      onClick={() => setImageIndex(idx)}
+                      style={{
+                        minWidth: 80,
+                        width: 80,
+                        height: 60,
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        border: idx === imageIndex ? '2px solid #12b886' : '2px solid transparent',
+                        boxShadow: idx === imageIndex ? '0 0 0 1px rgba(18,184,134,0.2)' : 'none',
+                        backgroundColor: '#f3f4f6',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ImageWithFallback
+                        src={img}
+                        alt={`${street || listing.title} — thumbnail ${idx + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    </Box>
+                  ))}
+                </Group>
+              )}
+            </Stack>
           </Grid.Col>
 
           <Grid.Col span={{ base: 12, md: 5 }}>
             <Stack gap="lg">
-              <Title order={1} style={{ color: '#111', fontSize: '2rem' }}>
-                {listing.title}
-              </Title>
+              {/* Title block */}
+              <Stack gap={4}>
+                <Title order={1} style={{ color: '#111', fontSize: '1.75rem', lineHeight: 1.3 }}>
+                  {street || listing.title}
+                </Title>
+                {location && (
+                  <Group gap={6} align="center">
+                    <IconMapPin size={15} color="#868e96" style={{ flexShrink: 0 }} />
+                    <Text size="sm" c="dimmed">{location}</Text>
+                  </Group>
+                )}
+              </Stack>
 
-              <Text size="xl" fw={600} c="teal.6">
+              <Text size="xl" fw={700} c="teal.6">
                 ${Number(listing.price_per_month || 0).toLocaleString()}/month
               </Text>
 
               <Group gap="md">
-                <Badge size="lg" color="teal" variant="light">
-                  {listing.number_of_bedrooms} Bed
-                </Badge>
-                <Badge size="lg" color="teal" variant="light">
-                  {listing.number_of_bathrooms} Bath
-                </Badge>
-                <Badge size="lg" color="teal" variant="light">
-                  {listing.area_sqft} sq ft
-                </Badge>
+                {listing.number_of_bedrooms != null && (
+                  <Badge size="lg" color="teal" variant="light">
+                    {listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`}
+                  </Badge>
+                )}
+                {listing.number_of_bathrooms != null && (
+                  <Badge size="lg" color="teal" variant="light">
+                    {listing.number_of_bathrooms} Bath
+                  </Badge>
+                )}
+                {listing.area_sqft && (
+                  <Badge size="lg" color="teal" variant="light">
+                    {Number(listing.area_sqft).toLocaleString()} sq ft
+                  </Badge>
+                )}
               </Group>
 
-              <Stack gap="sm">
-                <Title order={3} size="h4" style={{ color: '#111' }}>
-                  Description
-                </Title>
-                <Text c="dimmed" style={{ color: '#666', lineHeight: 1.6 }}>
-                  {listing.description}
-                </Text>
-              </Stack>
+              {listing.description && (
+                <Stack gap="xs">
+                  <Title order={3} size="h4" style={{ color: '#111' }}>
+                    Description
+                  </Title>
+                  <Text c="dimmed" style={{ lineHeight: 1.6 }}>
+                    {listing.description}
+                  </Text>
+                </Stack>
+              )}
 
-              <Stack gap="sm">
+              <Stack gap="xs">
                 <Title order={3} size="h4" style={{ color: '#111' }}>
                   Details
                 </Title>
@@ -204,25 +391,47 @@ export default function ListingDetailPage() {
                 </Stack>
               </Stack>
 
-              <Stack gap="sm">
-                <Title order={3} size="h4" style={{ color: '#111' }}>
-                  Amenities
-                </Title>
-                <Group gap="sm">
-                  {listing.amenities &&
-                    Object.entries(listing.amenities).map(([key, value]) =>
+              {listing.amenities && Object.values(listing.amenities).some(Boolean) && (
+                <Stack gap="xs">
+                  <Title order={3} size="h4" style={{ color: '#111' }}>
+                    Amenities
+                  </Title>
+                  <Group gap="sm">
+                    {Object.entries(listing.amenities).map(([key, value]) =>
                       value ? (
                         <Badge key={key} size="md" variant="outline" color="gray">
-                          {key}
+                          {formatAmenityLabel(key)}
                         </Badge>
                       ) : null
                     )}
-                </Group>
-              </Stack>
+                  </Group>
+                </Stack>
+              )}
 
-              <Button fullWidth size="lg" radius="md" color="teal" mt="md">
-                Contact Host
-              </Button>
+              <Stack gap="sm" mt="md">
+                {userGroup && (
+                  <Tooltip
+                    label={isSaved ? `Remove from ${userGroup.group_name}` : `Save to ${userGroup.group_name}`}
+                    withArrow
+                  >
+                    <Button
+                      fullWidth
+                      size="lg"
+                      radius="md"
+                      variant={isSaved ? 'filled' : 'light'}
+                      color="teal"
+                      loading={saveLoading}
+                      onClick={handleGroupSave}
+                      leftSection={isSaved ? <IconBookmarkFilled size={18} /> : <IconBookmark size={18} />}
+                    >
+                      {isSaved ? 'Saved for Group' : 'Save for Group'}
+                    </Button>
+                  </Tooltip>
+                )}
+                <Button fullWidth size="lg" radius="md" color="teal" variant="outline">
+                  Contact Host
+                </Button>
+              </Stack>
             </Stack>
           </Grid.Col>
         </Grid>

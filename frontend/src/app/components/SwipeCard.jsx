@@ -1,18 +1,28 @@
 'use client';
 
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, memo } from 'react';
 import { Text, Badge, Box, Group, Button, ActionIcon } from '@mantine/core';
 import { IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from './ImageWithFallback';
+import { formatAmenityLabel } from '../../../lib/formatters';
 
 const SWIPE_THRESHOLD = 100;
 
-export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPhotoChange }) {
+function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhotoChange }) {
   const [dragging, setDragging] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [leaving, setLeaving] = useState(null); // 'left' | 'right' | null
   const [imageIndex, setImageIndex] = useState(0);
+  const [sweeping, setSweeping] = useState(false);
   const startXRef = useRef(0);
+  // Tracks the latest offsetX without being a useEffect dependency, so global
+  // drag listeners are only added/removed when `dragging` actually changes state.
+  const offsetXRef = useRef(0);
+
+  const updateOffsetX = (val) => {
+    offsetXRef.current = val;
+    setOffsetX(val);
+  };
 
   useEffect(() => {
     if (!dragging) return;
@@ -20,21 +30,22 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPh
     const onMove = (e) => {
       const clientX = e.clientX ?? e.touches?.[0]?.clientX;
       if (clientX == null) return;
-      setOffsetX(clientX - startXRef.current);
+      updateOffsetX(clientX - startXRef.current);
     };
 
     const onUp = () => {
       setDragging(false);
-      if (offsetX > SWIPE_THRESHOLD) {
+      const current = offsetXRef.current;
+      if (current > SWIPE_THRESHOLD) {
         triggerLeave('right');
-      } else if (offsetX < -SWIPE_THRESHOLD) {
+      } else if (current < -SWIPE_THRESHOLD) {
         triggerLeave('left');
-      } else if (Math.abs(offsetX) < 8) {
+      } else if (Math.abs(current) < 8) {
         // Tap with no drag — open detail view
         onExpand && onExpand(listing);
-        setOffsetX(0);
+        updateOffsetX(0);
       } else {
-        setOffsetX(0);
+        updateOffsetX(0);
       }
     };
 
@@ -48,7 +59,9 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPh
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
     };
-  }, [dragging, offsetX]);
+  // offsetX removed from deps — we read it via offsetXRef so listeners are
+  // only re-registered when dragging transitions true ↔ false.
+  }, [dragging]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const triggerLeave = (direction) => {
     setLeaving(direction);
@@ -88,7 +101,6 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPh
     return [];
   })();
   const safeIndex = Math.min(imageIndex, Math.max(0, images.length - 1));
-  const [sweeping, setSweeping] = useState(false);
 
   // Auto-advance images every 3s when card is on top and not being dragged
   useEffect(() => {
@@ -270,7 +282,7 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPh
               .filter(([, v]) => v)
               .slice(0, 2)
               .map(([key]) => (
-                <Badge key={key} variant="light" size="xs">{key}</Badge>
+                <Badge key={key} variant="light" size="xs">{formatAmenityLabel(key)}</Badge>
               ))}
           </Group>
         )}
@@ -298,3 +310,5 @@ export function SwipeCard({ listing, onSwipe, isTop, stackOffset, onExpand, onPh
     </Box>
   );
 }
+
+export const SwipeCard = memo(SwipeCardBase);
