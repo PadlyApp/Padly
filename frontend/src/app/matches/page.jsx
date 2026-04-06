@@ -621,7 +621,7 @@ function MatchesPageContent() {
         }
       );
       const result = await res.json();
-      if (!res.ok) throw new Error(result.detail || 'Save failed');
+      if (!res.ok) throw new Error(result.detail || 'Interest update failed');
       const position = findListingPosition(lid);
       void persistRecommendationEvent({
         eventType: isSaved ? 'unsave' : 'save',
@@ -635,7 +635,7 @@ function MatchesPageContent() {
         sessionMetricsRef.current.savesCount += 1;
       }
     } catch (e) {
-      console.error('[recommendations] save error:', e);
+      console.error('[recommendations] interest error:', e);
       setSavedListingIds(prev => {
         const next = new Set(prev);
         isSaved ? next.add(lid) : next.delete(lid);
@@ -926,7 +926,7 @@ function MatchesPageContent() {
                           </Button>
                           {userGroup && (
                             <Tooltip
-                              label={saved ? `Remove from ${userGroup.group_name}` : `Save to ${userGroup.group_name}`}
+                              label={saved ? `Remove interest from ${userGroup.group_name}` : `Mark interested for ${userGroup.group_name}`}
                               withArrow
                             >
                               <Button
@@ -938,7 +938,7 @@ function MatchesPageContent() {
                                 onClick={(e) => handleGroupSave(e, listing)}
                                 leftSection={saved ? <IconBookmarkFilled size={15} /> : <IconBookmark size={15} />}
                               >
-                                {saved ? 'Saved for Group' : 'Save for Group'}
+                                {saved ? 'Interested for Group' : 'Mark Interested for Group'}
                               </Button>
                             </Tooltip>
                           )}

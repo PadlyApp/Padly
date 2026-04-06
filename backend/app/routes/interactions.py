@@ -1127,16 +1127,26 @@ async def mark_listing_interested(
         if not existing_listing.data:
             raise HTTPException(status_code=404, detail="Listing not found")
 
-        supabase.table("user_interested_listings").upsert(
+        existing_interested = (
+            supabase.table("user_interested_listings")
+            .select("id")
+            .eq("actor_user_id", user_id)
+            .eq("listing_id", listing_id)
+            .limit(1)
+            .execute()
+        )
+        if existing_interested.data:
+            return {"status": "success", "listing_id": listing_id, "already_interested": True}
+
+        supabase.table("user_interested_listings").insert(
             {
                 "actor_user_id": user_id,
                 "listing_id": listing_id,
                 "source": payload.source,
-            },
-            on_conflict="actor_user_id,listing_id",
+            }
         ).execute()
 
-        return {"status": "success", "listing_id": listing_id}
+        return {"status": "success", "listing_id": listing_id, "already_interested": False}
     except HTTPException:
         raise
     except Exception as e:

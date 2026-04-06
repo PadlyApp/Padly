@@ -492,7 +492,7 @@ export default function ListingDetailPage() {
               <Stack gap="sm" mt="md">
                 {userGroup && (
                   <Tooltip
-                    label={isSaved ? `Remove from ${userGroup.group_name}` : `Save to ${userGroup.group_name}`}
+                    label={isSaved ? `Remove interest from ${userGroup.group_name}` : `Mark interested for ${userGroup.group_name}`}
                     withArrow
                   >
                     <Button
@@ -505,7 +505,7 @@ export default function ListingDetailPage() {
                       onClick={handleGroupSave}
                       leftSection={isSaved ? <IconBookmarkFilled size={18} /> : <IconBookmark size={18} />}
                     >
-                      {isSaved ? 'Saved for Group' : 'Save for Group'}
+                      {isSaved ? 'Interested for Group' : 'Mark Interested for Group'}
                     </Button>
                   </Tooltip>
                 )}

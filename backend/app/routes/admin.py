@@ -262,10 +262,12 @@ def _build_group_summary(
         "avg_recommendation_count": _avg([_int(row.get("recommendation_count_shown")) for row in session_rows]),
         "avg_detail_opens": _avg([_int(row.get("detail_opens_count")) for row in session_rows]),
         "avg_saves": _avg([_int(row.get("saves_count")) for row in session_rows]),
+        "avg_interested": _avg([_int(row.get("saves_count")) for row in session_rows]),
         "avg_surface_dwell_ms": _avg([_int(row.get("surface_dwell_ms")) for row in session_rows]),
         "avg_detail_dwell_ms": _avg([_int(row.get("detail_dwell_ms")) for row in session_rows]),
         "detail_open_rate": _pct(detail_open_total, recommendation_total),
         "save_rate": _pct(save_total, recommendation_total),
+        "interested_rate": _pct(save_total, recommendation_total),
     }
 
 
@@ -308,7 +310,7 @@ def _build_summary_export_csv(summary: dict[str, Any]) -> str:
     for row in summary.get("position_breakdown") or []:
         label = row.get("position")
         lines.append(f"position_breakdown,{_csv_escape(label)},detail_open_count,{_csv_escape(row.get('detail_open_count'))}")
-        lines.append(f"position_breakdown,{_csv_escape(label)},save_count,{_csv_escape(row.get('save_count'))}")
+        lines.append(f"position_breakdown,{_csv_escape(label)},interested_count,{_csv_escape(row.get('interested_count'))}")
 
     for row in summary.get("daily_trends") or []:
         label = row.get("date")
@@ -519,6 +521,7 @@ async def _evaluation_summary_payload(
         bucket = daily_rollup[day]
         bucket["avg_surface_dwell_ms"] = _avg(bucket.pop("_surface_dwell_values"))
         bucket["avg_saves"] = _avg(bucket.pop("_save_values"))
+        bucket["avg_interested"] = bucket["avg_saves"]
         daily_trends.append(bucket)
 
     variant_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -580,6 +583,7 @@ async def _evaluation_summary_payload(
             "position": position,
             "detail_open_count": counts["detail_open"],
             "save_count": counts["save"],
+            "interested_count": counts["save"],
         }
         for position, counts in sorted(position_counts.items(), key=lambda item: item[0])
     ]
@@ -606,6 +610,7 @@ async def _evaluation_summary_payload(
                 "avg_recommendation_count": _avg([_int(row.get("recommendation_count_shown")) for row in sessions]),
                 "avg_detail_opens": _avg([_int(row.get("detail_opens_count")) for row in sessions]),
                 "avg_saves": _avg([_int(row.get("saves_count")) for row in sessions]),
+                "avg_interested": _avg([_int(row.get("saves_count")) for row in sessions]),
                 "avg_surface_dwell_ms": _avg([_int(row.get("surface_dwell_ms")) for row in sessions]),
                 "avg_detail_dwell_ms": _avg([_int(row.get("detail_dwell_ms")) for row in sessions]),
                 "avg_detail_view_dwell_ms": _avg(
@@ -613,6 +618,7 @@ async def _evaluation_summary_payload(
                 ),
                 "detail_open_rate": _pct(detail_open_total, recommendation_total),
                 "save_rate": _pct(save_total, recommendation_total),
+                "interested_rate": _pct(save_total, recommendation_total),
             },
             "usefulness_distribution": usefulness_distribution,
             "variant_comparison": variant_comparison,
@@ -624,6 +630,8 @@ async def _evaluation_summary_payload(
                 "detail_view": event_counts.get("detail_view", 0),
                 "save": event_counts.get("save", 0),
                 "unsave": event_counts.get("unsave", 0),
+                "interested": event_counts.get("save", 0),
+                "not_interested": event_counts.get("unsave", 0),
             },
             "position_breakdown": position_breakdown,
             "daily_trends": daily_trends,

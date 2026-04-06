@@ -127,7 +127,7 @@ function TrendRows({ rows }) {
           <Table.Th>Very useful</Table.Th>
           <Table.Th>Not useful</Table.Th>
           <Table.Th>Avg dwell</Table.Th>
-          <Table.Th>Avg saves</Table.Th>
+          <Table.Th>Avg interested</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -139,7 +139,7 @@ function TrendRows({ rows }) {
             <Table.Td>{formatNumber(row.very_useful_count)}</Table.Td>
             <Table.Td>{formatNumber(row.not_useful_count)}</Table.Td>
             <Table.Td>{formatDuration(row.avg_surface_dwell_ms)}</Table.Td>
-            <Table.Td>{Number(row.avg_saves || 0).toFixed(2)}</Table.Td>
+            <Table.Td>{Number(row.avg_interested || row.avg_saves || 0).toFixed(2)}</Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>
@@ -161,8 +161,8 @@ function ComparisonTable({ rows, labelKey, labelTitle }) {
           <Table.Th>Feedback rate</Table.Th>
           <Table.Th>Very useful rate</Table.Th>
           <Table.Th>Avg opens</Table.Th>
-          <Table.Th>Avg saves</Table.Th>
-          <Table.Th>Save rate</Table.Th>
+          <Table.Th>Avg interested</Table.Th>
+          <Table.Th>Interested rate</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -177,8 +177,8 @@ function ComparisonTable({ rows, labelKey, labelTitle }) {
             <Table.Td>{formatPercent(row.feedback_rate)}</Table.Td>
             <Table.Td>{formatPercent(row.very_useful_rate)}</Table.Td>
             <Table.Td>{Number(row.avg_detail_opens || 0).toFixed(2)}</Table.Td>
-            <Table.Td>{Number(row.avg_saves || 0).toFixed(2)}</Table.Td>
-            <Table.Td>{formatPercent(row.save_rate)}</Table.Td>
+            <Table.Td>{Number(row.avg_interested || row.avg_saves || 0).toFixed(2)}</Table.Td>
+            <Table.Td>{formatPercent(row.interested_rate || row.save_rate)}</Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>
@@ -197,7 +197,7 @@ function PositionTable({ rows }) {
         <Table.Tr>
           <Table.Th>Rank position</Table.Th>
           <Table.Th>Detail opens</Table.Th>
-          <Table.Th>Saves</Table.Th>
+          <Table.Th>Interested</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -205,7 +205,7 @@ function PositionTable({ rows }) {
           <Table.Tr key={row.position}>
             <Table.Td>#{row.position + 1}</Table.Td>
             <Table.Td>{formatNumber(row.detail_open_count)}</Table.Td>
-            <Table.Td>{formatNumber(row.save_count)}</Table.Td>
+            <Table.Td>{formatNumber(row.interested_count || row.save_count)}</Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>
@@ -458,9 +458,9 @@ function AdminEvaluationPageContent() {
                   hint="Share of explicit responses marked very useful"
                 />
                 <MetricCard
-                  label="Save rate"
-                  value={formatPercent(overview?.save_rate)}
-                  hint={`${Number(overview?.avg_saves || 0).toFixed(2)} saves per session`}
+                  label="Interested rate"
+                  value={formatPercent(overview?.interested_rate || overview?.save_rate)}
+                  hint={`${Number(overview?.avg_interested || overview?.avg_saves || 0).toFixed(2)} interested per session`}
                 />
               </SimpleGrid>
 
@@ -552,8 +552,8 @@ function AdminEvaluationPageContent() {
                   <SimpleGrid cols={2}>
                     <MetricCard label="Detail opens" value={formatNumber(data?.event_breakdown?.detail_open)} />
                     <MetricCard label="Detail views" value={formatNumber(data?.event_breakdown?.detail_view)} />
-                    <MetricCard label="Saves" value={formatNumber(data?.event_breakdown?.save)} />
-                    <MetricCard label="Unsaves" value={formatNumber(data?.event_breakdown?.unsave)} />
+                    <MetricCard label="Interested" value={formatNumber(data?.event_breakdown?.interested || data?.event_breakdown?.save)} />
+                    <MetricCard label="Uninterested" value={formatNumber(data?.event_breakdown?.not_interested || data?.event_breakdown?.unsave)} />
                   </SimpleGrid>
                 </Card>
 
