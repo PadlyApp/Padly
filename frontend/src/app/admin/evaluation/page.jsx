@@ -22,6 +22,7 @@ import {
 import {
   IconAlertCircle,
   IconChartBar,
+  IconDownload,
   IconRefresh,
   IconShieldLock,
 } from '@tabler/icons-react';
@@ -146,16 +147,16 @@ function TrendRows({ rows }) {
   );
 }
 
-function VariantTable({ rows }) {
+function ComparisonTable({ rows, labelKey, labelTitle }) {
   if (!rows?.length) {
-    return <Text c="dimmed">No variant comparison data yet.</Text>;
+    return <Text c="dimmed">No comparison data yet.</Text>;
   }
 
   return (
     <Table striped highlightOnHover withTableBorder>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>Variant</Table.Th>
+          <Table.Th>{labelTitle}</Table.Th>
           <Table.Th>Sessions</Table.Th>
           <Table.Th>Feedback rate</Table.Th>
           <Table.Th>Very useful rate</Table.Th>
@@ -166,10 +167,10 @@ function VariantTable({ rows }) {
       </Table.Thead>
       <Table.Tbody>
         {rows.map((row) => (
-          <Table.Tr key={row.variant}>
+          <Table.Tr key={row[labelKey]}>
             <Table.Td>
-              <Badge variant="light" color={row.variant === 'two_tower' ? 'teal' : 'gray'}>
-                {row.variant}
+              <Badge variant="light" color={row[labelKey] === 'two_tower' ? 'teal' : 'gray'}>
+                {row[labelKey]}
               </Badge>
             </Table.Td>
             <Table.Td>{formatNumber(row.total_sessions)}</Table.Td>
@@ -229,6 +230,7 @@ function AdminEvaluationPageContent() {
   const [userMode, setUserMode] = useState('all_sessions');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(null);
   const [error, setError] = useState(null);
 
   const variantOptions = useMemo(() => {
@@ -295,6 +297,52 @@ function AdminEvaluationPageContent() {
     label: REASON_LABEL_COPY[row.label] || row.label,
   }));
 
+  const exportSummary = useCallback(async (format) => {
+    if (!isAdmin) return;
+
+    setExporting(format);
+    try {
+      const token = await getValidToken();
+      if (!token) {
+        throw new Error('Authentication required');
+      }
+
+      const params = new URLSearchParams({
+        days,
+        surface,
+        variant,
+        user_mode: userMode,
+        format,
+      });
+
+      const response = await fetch(`/api/admin/evaluation/export?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.detail || 'Failed to export evaluation summary');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = format === 'csv' ? 'evaluation-summary.csv' : 'evaluation-summary.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : 'Failed to export evaluation summary');
+    } finally {
+      setExporting(null);
+    }
+  }, [days, getValidToken, isAdmin, surface, userMode, variant]);
+
   return (
     <>
       <Navigation />
@@ -351,6 +399,24 @@ function AdminEvaluationPageContent() {
                 mt={24}
               >
                 Refresh
+              </Button>
+              <Button
+                leftSection={<IconDownload size={16} />}
+                variant="light"
+                onClick={() => exportSummary('csv')}
+                loading={exporting === 'csv'}
+                mt={24}
+              >
+                Export CSV
+              </Button>
+              <Button
+                leftSection={<IconDownload size={16} />}
+                variant="subtle"
+                onClick={() => exportSummary('json')}
+                loading={exporting === 'json'}
+                mt={24}
+              >
+                Export JSON
               </Button>
             </Group>
           </Group>
@@ -452,8 +518,30 @@ function AdminEvaluationPageContent() {
                     Compare the two-tower ranker against fallback or baseline variants.
                   </Text>
                 </Group>
-                <VariantTable rows={data?.variant_comparison || []} />
+                <ComparisonTable rows={data?.variant_comparison || []} labelKey="variant" labelTitle="Variant" />
               </Card>
+
+              <SimpleGrid cols={{ base: 1, lg: 2 }}>
+                <Card withBorder radius="lg" padding="lg">
+                  <Group justify="space-between" mb="md">
+                    <Title order={3}>Model Versions</Title>
+                    <Text c="dimmed" size="sm">
+                      Compare performance by deployed model version.
+                    </Text>
+                  </Group>
+                  <ComparisonTable rows={data?.model_version_comparison || []} labelKey="model_version" labelTitle="Model version" />
+                </Card>
+
+                <Card withBorder radius="lg" padding="lg">
+                  <Group justify="space-between" mb="md">
+                    <Title order={3}>User History Buckets</Title>
+                    <Text c="dimmed" size="sm">
+                      Separate first-time users from returning and experienced users.
+                    </Text>
+                  </Group>
+                  <ComparisonTable rows={data?.user_history_buckets || []} labelKey="bucket" labelTitle="Bucket" />
+                </Card>
+              </SimpleGrid>
 
               <SimpleGrid cols={{ base: 1, lg: 2 }}>
                 <Card withBorder radius="lg" padding="lg">
@@ -486,6 +574,27 @@ function AdminEvaluationPageContent() {
                   </Text>
                 </Group>
                 <TrendRows rows={data?.daily_trends || []} />
+              </Card>
+
+              <Card withBorder radius="lg" padding="lg">
+                <Group justify="space-between" mb="md">
+                  <Title order={3}>Research Notes</Title>
+                  <Badge variant="light" color="gray">Phase 6</Badge>
+                </Group>
+                <Stack gap="xs">
+                  <Text size="sm" c="dimmed">
+                    Sample size: {formatNumber(data?.research_notes?.sample_size_sessions)} sessions, {formatNumber(data?.research_notes?.sample_size_feedback)} feedback submissions.
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    Counting mode: {data?.research_notes?.counting_mode || 'all_sessions'}.
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    Exposure bias: {data?.research_notes?.exposure_bias_note}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    Repeat users: {data?.research_notes?.repeat_user_note}
+                  </Text>
+                </Stack>
               </Card>
             </>
           ) : null}

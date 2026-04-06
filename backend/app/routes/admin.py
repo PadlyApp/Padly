@@ -9,6 +9,7 @@ environment variable. Never expose these endpoints to the frontend.
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from typing import Any, Optional
 from app.dependencies.auth import require_admin_key, require_user_token
 from app.dependencies.supabase import get_admin_client
@@ -196,6 +197,13 @@ def _parse_iso_datetime(value: Optional[str]) -> datetime:
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
+def _csv_escape(value: Any) -> str:
+    text = "" if value is None else str(value)
+    if any(ch in text for ch in [",", "\"", "\n"]):
+        return f"\"{text.replace('\"', '\"\"')}\""
+    return text
+
+
 async def _fetch_all_rows(
     client: SupabaseHTTPClient,
     table: str,
@@ -229,6 +237,7 @@ def _build_group_summary(
     group_label: str,
     session_rows: list[dict[str, Any]],
     feedback_by_session: dict[str, dict[str, Any]],
+    label_key: str = "variant",
 ) -> dict[str, Any]:
     total_sessions = len(session_rows)
     feedback_rows = [
@@ -244,7 +253,7 @@ def _build_group_summary(
     save_total = sum(_int(row.get("saves_count")) for row in session_rows)
 
     return {
-        "variant": group_label,
+        label_key: group_label,
         "total_sessions": total_sessions,
         "feedback_count": feedback_count,
         "feedback_rate": _pct(feedback_count, total_sessions),
@@ -258,6 +267,57 @@ def _build_group_summary(
         "detail_open_rate": _pct(detail_open_total, recommendation_total),
         "save_rate": _pct(save_total, recommendation_total),
     }
+
+
+def _user_history_bucket(prior_sessions: int) -> str:
+    if prior_sessions <= 0:
+        return "new_user"
+    if prior_sessions < 5:
+        return "returning_user"
+    return "experienced_user"
+
+
+def _build_summary_export_csv(summary: dict[str, Any]) -> str:
+    lines = ["section,label,metric,value"]
+
+    for key, value in (summary.get("overview") or {}).items():
+        lines.append(f"overview,overall,{_csv_escape(key)},{_csv_escape(value)}")
+
+    for row in summary.get("usefulness_distribution") or []:
+        label = row.get("label")
+        lines.append(f"usefulness,{_csv_escape(label)},count,{_csv_escape(row.get('count'))}")
+        lines.append(f"usefulness,{_csv_escape(label)},pct,{_csv_escape(row.get('pct'))}")
+
+    for row in summary.get("negative_reasons") or []:
+        label = row.get("label")
+        lines.append(f"negative_reasons,{_csv_escape(label)},count,{_csv_escape(row.get('count'))}")
+        lines.append(f"negative_reasons,{_csv_escape(label)},pct,{_csv_escape(row.get('pct'))}")
+
+    for section_name, label_key in [
+        ("variant_comparison", "variant"),
+        ("model_version_comparison", "model_version"),
+        ("user_history_buckets", "bucket"),
+    ]:
+        for row in summary.get(section_name) or []:
+            label = row.get(label_key)
+            for metric, value in row.items():
+                if metric == label_key:
+                    continue
+                lines.append(f"{section_name},{_csv_escape(label)},{_csv_escape(metric)},{_csv_escape(value)}")
+
+    for row in summary.get("position_breakdown") or []:
+        label = row.get("position")
+        lines.append(f"position_breakdown,{_csv_escape(label)},detail_open_count,{_csv_escape(row.get('detail_open_count'))}")
+        lines.append(f"position_breakdown,{_csv_escape(label)},save_count,{_csv_escape(row.get('save_count'))}")
+
+    for row in summary.get("daily_trends") or []:
+        label = row.get("date")
+        for metric, value in row.items():
+            if metric == "date":
+                continue
+            lines.append(f"daily_trends,{_csv_escape(label)},{_csv_escape(metric)},{_csv_escape(value)}")
+
+    return "\n".join(lines)
 
 
 def _require_admin_user(token: str) -> dict[str, Any]:
@@ -328,6 +388,13 @@ async def _evaluation_summary_payload(
         order="started_at.desc",
     )
 
+    all_sessions_for_history = await _fetch_all_rows(
+        client,
+        "recommendation_sessions",
+        columns="id,actor_user_id,started_at,model_version",
+        order="started_at.asc",
+    )
+
     if user_mode == "latest_per_user":
         latest_sessions_by_user: dict[str, dict[str, Any]] = {}
         for session in sessions:
@@ -357,6 +424,16 @@ async def _evaluation_summary_payload(
         row for row in feedback_rows
         if row.get("recommendation_session_id") in session_ids
     ]
+
+    prior_session_counts_by_id: dict[str, int] = {}
+    running_session_counts_by_user: dict[str, int] = defaultdict(int)
+    for session in all_sessions_for_history:
+        session_id = session.get("id")
+        actor_user_id = session.get("actor_user_id")
+        if not session_id or not actor_user_id:
+            continue
+        prior_session_counts_by_id[session_id] = running_session_counts_by_user[actor_user_id]
+        running_session_counts_by_user[actor_user_id] += 1
 
     event_rows = await _fetch_all_rows(
         client,
@@ -450,10 +527,33 @@ async def _evaluation_summary_payload(
         variant_groups[variant_label].append(session)
 
     variant_comparison = [
-        _build_group_summary(variant_label, grouped_sessions, feedback_by_session)
+        _build_group_summary(variant_label, grouped_sessions, feedback_by_session, label_key="variant")
         for variant_label, grouped_sessions in sorted(
             variant_groups.items(),
             key=lambda item: item[0],
+        )
+    ]
+
+    model_version_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    user_history_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for session in sessions:
+        model_version_label = session.get("model_version") or "unassigned"
+        model_version_groups[model_version_label].append(session)
+
+        bucket = _user_history_bucket(prior_session_counts_by_id.get(session.get("id"), 0))
+        user_history_groups[bucket].append(session)
+
+    model_version_comparison = [
+        _build_group_summary(label, grouped_sessions, feedback_by_session, label_key="model_version")
+        for label, grouped_sessions in sorted(model_version_groups.items(), key=lambda item: item[0])
+    ]
+
+    bucket_order = {"new_user": 0, "returning_user": 1, "experienced_user": 2}
+    user_history_buckets = [
+        _build_group_summary(label, grouped_sessions, feedback_by_session, label_key="bucket")
+        for label, grouped_sessions in sorted(
+            user_history_groups.items(),
+            key=lambda item: bucket_order.get(item[0], 99),
         )
     ]
 
@@ -516,6 +616,8 @@ async def _evaluation_summary_payload(
             },
             "usefulness_distribution": usefulness_distribution,
             "variant_comparison": variant_comparison,
+            "model_version_comparison": model_version_comparison,
+            "user_history_buckets": user_history_buckets,
             "negative_reasons": negative_reasons,
             "event_breakdown": {
                 "detail_open": event_counts.get("detail_open", 0),
@@ -525,6 +627,16 @@ async def _evaluation_summary_payload(
             },
             "position_breakdown": position_breakdown,
             "daily_trends": daily_trends,
+            "research_notes": {
+                "sample_size_sessions": total_sessions,
+                "sample_size_feedback": feedback_count,
+                "counting_mode": user_mode,
+                "exposure_bias_note": "Observed behavior is influenced by what the ranker chose to show.",
+                "repeat_user_note": (
+                    "Use latest_per_user when you want one contribution per participant; "
+                    "use all_sessions when you want every recommendation session."
+                ),
+            },
         },
     }
 
@@ -561,3 +673,34 @@ async def authenticated_admin_evaluation_summary(
     """
     _require_admin_user(token)
     return await _evaluation_summary_payload(days=days, surface=surface, variant=variant, user_mode=user_mode)
+
+
+@authenticated_router.get("/evaluation/export/authenticated")
+async def authenticated_admin_evaluation_export(
+    days: int = 30,
+    surface: Optional[str] = None,
+    variant: Optional[str] = None,
+    user_mode: str = "all_sessions",
+    format: str = "json",
+    token: str = Depends(require_user_token),
+):
+    """
+    Export the aggregated evaluation summary for research reporting.
+    """
+    _require_admin_user(token)
+    payload = await _evaluation_summary_payload(days=days, surface=surface, variant=variant, user_mode=user_mode)
+    summary = payload["data"]
+
+    if format == "json":
+        return payload
+    if format == "csv":
+        csv_text = _build_summary_export_csv(summary)
+        return PlainTextResponse(
+            csv_text,
+            headers={
+                "Content-Disposition": "attachment; filename=evaluation-summary.csv",
+                "Content-Type": "text/csv; charset=utf-8",
+            },
+        )
+
+    raise HTTPException(status_code=422, detail="format must be json or csv")

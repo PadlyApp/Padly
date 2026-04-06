@@ -794,6 +794,7 @@ Phase 1 exit criteria:
 - add trend analysis and model-version comparisons
 - export aggregated results for course presentation / paper write-up
 - document limitations, sample size, and exposure-bias caveats
+- support both `all_sessions` and `latest_per_user` counting modes in reporting
 
 ---
 
