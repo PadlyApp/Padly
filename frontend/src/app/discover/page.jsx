@@ -156,6 +156,25 @@ function DiscoverContent() {
   const { tourPhase } = usePadlyTour();
   const userId = user?.profile?.id;
   const router = useRouter();
+
+  // Lightweight prefs fetch — only used to key the feed query on city so
+  // changing location always triggers a fresh fetch.
+  const { data: prefsData } = useQuery({
+    queryKey: ['user-prefs', userId],
+    queryFn: async () => {
+      const token = await getValidToken();
+      if (!token) return null;
+      const res = await fetch(`${API_BASE}/api/preferences/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const d = await res.json();
+      return d.data || d || null;
+    },
+    enabled: !!userId,
+    staleTime: 0,
+  });
+  const prefCity = prefsData?.target_city ?? null;
   usePageTracking('discover', authState?.accessToken);
 
   const [listings, setListings] = useState([]);
@@ -481,10 +500,10 @@ function DiscoverContent() {
     error: feedQueryError,
     refetch: refetchFeed,
   } = useQuery({
-    queryKey: ['discover-feed', userId],
+    queryKey: ['discover-feed', userId, prefCity],
     queryFn: () => fetchFeedPage({ offset: 0 }),
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000,
+    enabled: !!userId && prefCity !== null,
+    staleTime: 0,
     gcTime:    10 * 60 * 1000,
     retry: false,
   });
@@ -494,6 +513,12 @@ function DiscoverContent() {
 
     const restored = loadDiscoverProgress(userId);
     if (!restored) return;
+
+    // If the user changed their city since this progress was saved, discard it.
+    if (prefCity && restored.targetCity && restored.targetCity !== prefCity) {
+      clearDiscoverProgress(userId);
+      return;
+    }
 
     restoredProgressRef.current = true;
     setListings(Array.isArray(restored.listings) ? restored.listings : []);
@@ -597,6 +622,7 @@ function DiscoverContent() {
       missingCorePreferences,
       emptyResultReason,
       rankingContext,
+      targetCity: prefCity,
     });
   }, [
     currentIndex,
