@@ -1,7 +1,8 @@
 'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const MATCHES_PROMPT_DELAY_MS = 10000;
+const MATCHES_SCROLL_TRIGGER_PX = 900;
+const MATCHES_TOP_RETURN_PX = 120;
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -52,7 +53,8 @@ function MatchesPageContent() {
   const userId = user?.profile?.id;
   const clientSessionIdRef = useRef(null);
   const surfaceStartedAtRef = useRef(Date.now());
-  const promptTimerRef = useRef(null);
+  const promptShownRef = useRef(false);
+  const hasScrolledDeepRef = useRef(false);
   const sessionMetricsRef = useRef({ detailOpensCount: 0, savesCount: 0 });
   const latestSessionIdRef = useRef(null);
   const latestTokenRef = useRef(null);
@@ -320,6 +322,8 @@ function MatchesPageContent() {
     sessionMetricsRef.current = { detailOpensCount: 0, savesCount: 0 };
     surfaceStartedAtRef.current = Date.now();
     clientSessionIdRef.current = createRecommendationClientSessionId('matches');
+    promptShownRef.current = false;
+    hasScrolledDeepRef.current = false;
   }, [feedData]);
 
   const loading = feedLoading && !feedData;
@@ -413,12 +417,9 @@ function MatchesPageContent() {
   }, [authState?.accessToken, buildSessionPayload, error, listings, loading, rankingContext, userId]);
 
   useEffect(() => {
-    window.clearTimeout(promptTimerRef.current);
-
     if (
       !feedbackSessionId ||
       !promptAllowed ||
-      showFeedbackPrompt ||
       feedbackSubmitting ||
       loading ||
       error ||
@@ -427,22 +428,51 @@ function MatchesPageContent() {
       return undefined;
     }
 
-    promptTimerRef.current = window.setTimeout(() => {
-      setShowFeedbackPrompt(true);
-      void patchRecommendationSession({ prompt_presented: true });
-    }, MATCHES_PROMPT_DELAY_MS);
+    const handleScroll = () => {
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+
+      if (scrollY >= MATCHES_SCROLL_TRIGGER_PX) {
+        hasScrolledDeepRef.current = true;
+      }
+
+      if (
+        hasScrolledDeepRef.current &&
+        scrollY <= MATCHES_TOP_RETURN_PX &&
+        !promptShownRef.current &&
+        !showFeedbackPrompt
+      ) {
+        promptShownRef.current = true;
+        setShowFeedbackPrompt(true);
+        void patchRecommendationSession({
+          prompt_presented: true,
+          detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+          saves_count: sessionMetricsRef.current.savesCount,
+          recommendation_count_shown: listings.length,
+          top_listing_ids_shown: listings.map((listing) => listing?.listing_id).filter(Boolean).slice(0, 20),
+          surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+          algorithm_version: rankingContext?.algorithm_version ?? listings[0]?.algorithm_version ?? null,
+          model_version: rankingContext?.model_version ?? (listings.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
+          experiment_name: rankingContext?.experiment_name ?? (listings.length > 0 ? 'matches_ranker_v1' : null),
+          experiment_variant: rankingContext?.experiment_variant ?? (listings.length > 0 ? (listings.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
+        });
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
 
     return () => {
-      window.clearTimeout(promptTimerRef.current);
+      window.removeEventListener('scroll', handleScroll);
     };
   }, [
     error,
     feedbackSessionId,
     feedbackSubmitting,
-    listings.length,
+    listings,
     loading,
     patchRecommendationSession,
     promptAllowed,
+    rankingContext,
     showFeedbackPrompt,
   ]);
 
@@ -518,11 +548,17 @@ function MatchesPageContent() {
   }, [authState?.accessToken, feedbackSessionId, feedbackSubmitting]);
 
   const dismissFeedbackPrompt = useCallback(async () => {
+    await patchRecommendationSession({
+      prompt_dismissed: true,
+      detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+      saves_count: sessionMetricsRef.current.savesCount,
+      surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+    });
     setShowFeedbackPrompt(false);
     setPromptAllowed(false);
     setFeedbackStep('question');
     setPendingFeedbackLabel(null);
-    await patchRecommendationSession({ prompt_dismissed: true });
+    setFeedbackAcknowledged(false);
   }, [patchRecommendationSession]);
 
   const handleFeedbackChoice = useCallback(async (value) => {

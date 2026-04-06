@@ -13,6 +13,7 @@ import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
+import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -62,6 +63,8 @@ export default function ListingDetailPage() {
   const [userGroup, setUserGroup] = useState(null);
   const [isSaved, setIsSaved] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [isInterested, setIsInterested] = useState(false);
+  const [interestLoading, setInterestLoading] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
 
   const viewStartRef = useRef(Date.now());
@@ -169,6 +172,28 @@ export default function ListingDetailPage() {
     return () => { cancelled = true; };
   }, [listingId, getValidToken]);
 
+  useEffect(() => {
+    if (!listingId || !authState?.accessToken) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = await getValidToken();
+        if (!token || cancelled) return;
+        const response = await api.getInterestedListingIds(token);
+        if (!cancelled) {
+          setIsInterested((response.interested_listing_ids || []).includes(listingId));
+        }
+      } catch {
+        // Interest state is non-critical.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState?.accessToken, getValidToken, listingId]);
+
   const handleGroupSave = async () => {
     if (!userGroup || saveLoading) return;
     setSaveLoading(true);
@@ -191,6 +216,32 @@ export default function ListingDetailPage() {
       setIsSaved(wasSaved);
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  const handleInterestedToggle = async () => {
+    if (interestLoading) return;
+
+    setInterestLoading(true);
+    const nextInterested = !isInterested;
+    setIsInterested(nextInterested);
+
+    try {
+      const token = await getValidToken();
+      if (!token) {
+        setIsInterested(!nextInterested);
+        return;
+      }
+
+      if (nextInterested) {
+        await api.markInterestedListing(token, listingId, recommendationSource || 'listing_detail');
+      } else {
+        await api.unmarkInterestedListing(token, listingId);
+      }
+    } catch {
+      setIsInterested(!nextInterested);
+    } finally {
+      setInterestLoading(false);
     }
   };
 
@@ -458,8 +509,16 @@ export default function ListingDetailPage() {
                     </Button>
                   </Tooltip>
                 )}
-                <Button fullWidth size="lg" radius="md" color="teal" variant="outline">
-                  Contact Host
+                <Button
+                  fullWidth
+                  size="lg"
+                  radius="md"
+                  color="teal"
+                  variant={isInterested ? 'filled' : 'outline'}
+                  loading={interestLoading}
+                  onClick={handleInterestedToggle}
+                >
+                  {isInterested ? 'Interested' : "I'm interested"}
                 </Button>
               </Stack>
             </Stack>

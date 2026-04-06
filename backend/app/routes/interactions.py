@@ -84,6 +84,10 @@ class RecommendationEngagementEventCreate(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class InterestedListingCreate(BaseModel):
+    source: Optional[str] = Field(default=None, max_length=100)
+
+
 def _resolve_current_user_id(token: str) -> str:
     """
     Resolve authenticated user to internal users.id UUID.
@@ -133,6 +137,11 @@ def _recommendation_storage_missing(exc: Exception) -> bool:
     )
 
 
+def _interested_storage_missing(exc: Exception) -> bool:
+    err = str(exc).lower()
+    return "user_interested_listings" in err and "does not exist" in err
+
+
 def _get_recommendation_session(supabase, session_id: str, user_id: str) -> dict:
     session_response = (
         supabase.table("recommendation_sessions")
@@ -153,7 +162,7 @@ def _recommendation_prompt_allowed(
     current_session_id: Optional[str] = None,
     surface: Optional[str] = None,
 ) -> bool:
-    if surface == "discover":
+    if surface in {"discover", "matches"}:
         return True
 
     cooldown_since = (_now_utc() - timedelta(days=7)).isoformat()
@@ -1014,6 +1023,152 @@ async def get_my_saved_listings_for_group(
         return {"status": "success", "saved_listing_ids": ids}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch saved listings: {e}")
+
+
+@router.get("/interested-listings")
+async def get_my_interested_listings(token: str = Depends(require_user_token)):
+    """Return the current user's interested listings with listing payloads."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        rows_resp = (
+            supabase.table("user_interested_listings")
+            .select("listing_id, source, created_at")
+            .eq("actor_user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        rows = rows_resp.data or []
+        if not rows:
+            return {"status": "success", "data": []}
+
+        listing_ids = []
+        seen = set()
+        for row in rows:
+            listing_id = str(row.get("listing_id") or "").strip()
+            if listing_id and listing_id not in seen:
+                seen.add(listing_id)
+                listing_ids.append(listing_id)
+
+        listings_resp = (
+            supabase.table("listings")
+            .select("*")
+            .in_("id", listing_ids)
+            .execute()
+        )
+        listing_map = {str(item["id"]): item for item in (listings_resp.data or [])}
+
+        data = []
+        for row in rows:
+            listing_id = str(row.get("listing_id") or "")
+            listing = listing_map.get(listing_id)
+            if listing:
+                data.append(
+                    {
+                        "interested_at": row.get("created_at"),
+                        "interest_source": row.get("source"),
+                        **listing,
+                    }
+                )
+
+        return {"status": "success", "data": data}
+    except Exception as e:
+        if _interested_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Interested listing storage not configured. Run migration 20260406030000_user_interested_listings.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch interested listings: {e}")
+
+
+@router.get("/interested-listings/ids")
+async def get_my_interested_listing_ids(token: str = Depends(require_user_token)):
+    """Return listing IDs the current user marked as interested."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        rows_resp = (
+            supabase.table("user_interested_listings")
+            .select("listing_id")
+            .eq("actor_user_id", user_id)
+            .execute()
+        )
+        ids = [row["listing_id"] for row in (rows_resp.data or []) if row.get("listing_id")]
+        return {"status": "success", "interested_listing_ids": ids}
+    except Exception as e:
+        if _interested_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Interested listing storage not configured. Run migration 20260406030000_user_interested_listings.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch interested listing ids: {e}")
+
+
+@router.post("/interested-listings/{listing_id}")
+async def mark_listing_interested(
+    listing_id: str,
+    payload: InterestedListingCreate,
+    token: str = Depends(require_user_token),
+):
+    """Mark a listing as personally interesting for the current user."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        existing_listing = (
+            supabase.table("listings")
+            .select("id")
+            .eq("id", listing_id)
+            .limit(1)
+            .execute()
+        )
+        if not existing_listing.data:
+            raise HTTPException(status_code=404, detail="Listing not found")
+
+        supabase.table("user_interested_listings").upsert(
+            {
+                "actor_user_id": user_id,
+                "listing_id": listing_id,
+                "source": payload.source,
+            },
+            on_conflict="actor_user_id,listing_id",
+        ).execute()
+
+        return {"status": "success", "listing_id": listing_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _interested_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Interested listing storage not configured. Run migration 20260406030000_user_interested_listings.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to mark listing interested: {e}")
+
+
+@router.delete("/interested-listings/{listing_id}")
+async def unmark_listing_interested(
+    listing_id: str,
+    token: str = Depends(require_user_token),
+):
+    """Remove a listing from the current user's interested list."""
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        supabase.table("user_interested_listings").delete().eq(
+            "actor_user_id", user_id
+        ).eq("listing_id", listing_id).execute()
+        return {"status": "success", "listing_id": listing_id}
+    except Exception as e:
+        if _interested_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Interested listing storage not configured. Run migration 20260406030000_user_interested_listings.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to unmark listing interested: {e}")
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const DISCOVER_FEEDBACK_SWIPE_THRESHOLD = 10;
+const DISCOVER_PROGRESS_TTL_MS = 30 * 60 * 1000;
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -39,6 +40,63 @@ const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
 
 /** Stable client label for swipe telemetry (backend requires algorithm_version). */
 const DISCOVER_ALGORITHM_VERSION = 'discover-v1';
+
+function getDiscoverProgressKey(userId) {
+  return `padly_discover_progress:${userId}`;
+}
+
+function clearDiscoverProgress(userId) {
+  if (typeof window === 'undefined' || !userId) return;
+
+  try {
+    sessionStorage.removeItem(getDiscoverProgressKey(userId));
+  } catch {
+    // Best-effort only.
+  }
+}
+
+function loadDiscoverProgress(userId) {
+  if (typeof window === 'undefined' || !userId) return null;
+
+  try {
+    const raw = sessionStorage.getItem(getDiscoverProgressKey(userId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > DISCOVER_PROGRESS_TTL_MS) {
+      sessionStorage.removeItem(getDiscoverProgressKey(userId));
+      return null;
+    }
+
+    const hasListings = Array.isArray(parsed.listings) && parsed.listings.length > 0;
+    const hasProgress = hasListings && Number.isFinite(parsed.currentIndex) && parsed.currentIndex > 0;
+    const isCompletedStack = hasListings && Number.isFinite(parsed.currentIndex) && parsed.currentIndex >= parsed.listings.length;
+    if (!hasProgress && !isCompletedStack) {
+      sessionStorage.removeItem(getDiscoverProgressKey(userId));
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDiscoverProgress(userId, payload) {
+  if (typeof window === 'undefined' || !userId) return;
+
+  try {
+    sessionStorage.setItem(
+      getDiscoverProgressKey(userId),
+      JSON.stringify({
+        ...payload,
+        savedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Best-effort only.
+  }
+}
 
 function getOrCreateSwipeSessionId() {
   if (typeof window === 'undefined') return 'server-session';
@@ -114,6 +172,7 @@ function DiscoverContent() {
   const nextOffsetRef = useRef(0);
   // Tracks the last feedData object seen so we only sync on a genuine new result
   const prevFeedDataRef = useRef(null);
+  const restoredProgressRef = useRef(false);
   // Stable refs for currentIndex and listings so handleSwipe doesn't need them as deps
   const currentIndexRef = useRef(currentIndex);
   const listingsRef = useRef(listings);
@@ -429,12 +488,36 @@ function DiscoverContent() {
     retry: false,
   });
 
+  useLayoutEffect(() => {
+    if (!userId) return;
+
+    const restored = loadDiscoverProgress(userId);
+    if (!restored) return;
+
+    restoredProgressRef.current = true;
+    setListings(Array.isArray(restored.listings) ? restored.listings : []);
+    setCurrentIndex(
+      Number.isFinite(restored.currentIndex)
+        ? Math.max(0, Math.min(restored.currentIndex, restored.listings?.length || 0))
+        : 0
+    );
+    setHasMore(Boolean(restored.hasMore));
+    setMissingCorePreferences(Boolean(restored.missingCorePreferences));
+    setEmptyResultReason(restored.emptyResultReason ?? null);
+    setRankingContext(restored.rankingContext ?? null);
+    nextOffsetRef.current = Number.isFinite(restored.nextOffset) ? restored.nextOffset : 0;
+  }, [userId]);
+
   // Sync query data → swipe-stack state.
   // useLayoutEffect runs before paint so there is no visible flash of empty state on
   // remounts that have a cache hit (feedData is available immediately).
   useLayoutEffect(() => {
     if (!feedData || feedData === prevFeedDataRef.current) return;
     prevFeedDataRef.current = feedData;
+    if (restoredProgressRef.current) {
+      restoredProgressRef.current = false;
+      return;
+    }
     setListings(feedData.listings);
     setCurrentIndex(0);
     setHasMore(feedData.hasMore);
@@ -496,6 +579,33 @@ function DiscoverContent() {
   useEffect(() => {
     latestRankingContextRef.current = rankingContext;
   }, [rankingContext]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    if (listings.length === 0 && currentIndex === 0) {
+      clearDiscoverProgress(userId);
+      return;
+    }
+
+    saveDiscoverProgress(userId, {
+      listings,
+      currentIndex,
+      hasMore,
+      nextOffset: nextOffsetRef.current,
+      missingCorePreferences,
+      emptyResultReason,
+      rankingContext,
+    });
+  }, [
+    currentIndex,
+    emptyResultReason,
+    hasMore,
+    listings,
+    missingCorePreferences,
+    rankingContext,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!authState?.accessToken || !userId || loading || error || listings.length === 0) return;

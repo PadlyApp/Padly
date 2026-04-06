@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from app.ai.recommender import score_listings
 from app.services.listing_payloads import hydrate_listing_image_collection
+from app.services.location_matching import filter_listings_for_location
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
 
@@ -179,6 +180,14 @@ async def get_recommendations(preferences: UserPreferences):
     user = preferences.model_dump(exclude={"top_n", "offset"})
     top_n = min(preferences.top_n or 20, 100)
     offset = max(preferences.offset or 0, 0)
+
+    if user.get("target_city") or user.get("target_state_province") or user.get("target_country"):
+        listings = filter_listings_for_location(
+            listings,
+            target_city=user.get("target_city"),
+            target_state=user.get("target_state_province"),
+            target_country=user.get("target_country"),
+        )
 
     try:
         scored = score_listings(user, listings, top_n=len(listings))

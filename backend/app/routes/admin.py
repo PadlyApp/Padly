@@ -200,7 +200,7 @@ def _parse_iso_datetime(value: Optional[str]) -> datetime:
 def _csv_escape(value: Any) -> str:
     text = "" if value is None else str(value)
     if any(ch in text for ch in [",", "\"", "\n"]):
-        return f"\"{text.replace('\"', '\"\"')}\""
+        return '"' + text.replace('"', '""') + '"'
     return text
 
 

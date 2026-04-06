@@ -45,6 +45,52 @@ export const api = {
     return data;
   },
 
+  async getInterestedListings(token) {
+    const response = await fetch(`${API_BASE_URL}/api/interactions/interested-listings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      await throwApiError(response, 'Failed to fetch interested listings');
+    }
+    return response.json();
+  },
+
+  async getInterestedListingIds(token) {
+    const response = await fetch(`${API_BASE_URL}/api/interactions/interested-listings/ids`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      await throwApiError(response, 'Failed to fetch interested listing ids');
+    }
+    return response.json();
+  },
+
+  async markInterestedListing(token, listingId, source = null) {
+    const response = await fetch(`${API_BASE_URL}/api/interactions/interested-listings/${listingId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ source }),
+    });
+    if (!response.ok) {
+      await throwApiError(response, 'Failed to mark listing interested');
+    }
+    return response.json();
+  },
+
+  async unmarkInterestedListing(token, listingId) {
+    const response = await fetch(`${API_BASE_URL}/api/interactions/interested-listings/${listingId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      await throwApiError(response, 'Failed to remove interested listing');
+    }
+    return response.json();
+  },
+
   async createListing(listingData, token) {
     const response = await fetch(`${API_BASE_URL}/api/listings`, {
       method: 'POST',
