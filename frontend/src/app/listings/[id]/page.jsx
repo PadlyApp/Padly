@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid } from '@mantine/core';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -7,11 +8,47 @@ import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
+import { useAuth } from '../../contexts/AuthContext';
+import { usePageTracking } from '../../hooks/usePageTracking';
 import Link from 'next/link';
 
 export default function ListingDetailPage() {
   const params = useParams();
   const listingId = params.id;
+  const { authState } = useAuth();
+
+  usePageTracking('listing_detail', authState?.accessToken);
+
+  // Track view duration for this listing detail page.
+  const viewStartRef = useRef(Date.now());
+  useEffect(() => {
+    if (!authState?.accessToken) return;
+    viewStartRef.current = Date.now();
+    const sessionId =
+      (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('padly_swipe_session_id')) ||
+      `listing-detail-${Date.now()}`;
+
+    return () => {
+      const duration_ms = Math.max(0, Date.now() - viewStartRef.current);
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/interactions/listing-views`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          listing_id: listingId,
+          surface: 'listing_detail',
+          session_id: sessionId,
+          view_duration_ms: duration_ms,
+          expanded: false,
+          photos_viewed_count: 0,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listingId, authState?.accessToken]);
 
   const { data: listingData, isLoading, error, refetch } = useQuery({
     queryKey: ['listing', listingId],
