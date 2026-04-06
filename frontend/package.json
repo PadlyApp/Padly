@@ -21,6 +21,7 @@
     "@tanstack/react-query-devtools": "^5.90.2",
     "@vercel/analytics": "^2.0.1",
     "dayjs": "^1.11.18",
+    "i": "^0.3.7",
     "next": "15.5.9",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",

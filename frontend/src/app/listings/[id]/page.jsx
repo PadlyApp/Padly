@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, Tooltip, ActionIcon } from '@mantine/core';
 import { SkeletonListingDetail } from '../../components/Skeletons';
 import { IconBookmark, IconBookmarkFilled, IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel } from '../../../../lib/formatters';
+import { usePageTracking } from '../../hooks/usePageTracking';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -48,12 +49,44 @@ function parseTitle(raw) {
 export default function ListingDetailPage() {
   const params = useParams();
   const listingId = params.id;
-  const { getValidToken } = useAuth();
+  const { getValidToken, authState } = useAuth();
+
+  usePageTracking('listing_detail', authState?.accessToken);
 
   const [userGroup, setUserGroup] = useState(null);
   const [isSaved, setIsSaved] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
+
+  const viewStartRef = useRef(Date.now());
+  useEffect(() => {
+    if (!authState?.accessToken) return;
+    viewStartRef.current = Date.now();
+    const sessionId =
+      (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('padly_swipe_session_id')) ||
+      `listing-detail-${Date.now()}`;
+
+    return () => {
+      const duration_ms = Math.max(0, Date.now() - viewStartRef.current);
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/interactions/listing-views`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          listing_id: listingId,
+          surface: 'listing_detail',
+          session_id: sessionId,
+          view_duration_ms: duration_ms,
+          expanded: false,
+          photos_viewed_count: 0,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listingId, authState?.accessToken]);
 
   const { data: listingData, isLoading, error, refetch } = useQuery({
     queryKey: ['listing', listingId],

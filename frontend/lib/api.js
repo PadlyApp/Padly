@@ -238,4 +238,57 @@ export const api = {
     const data = await response.json();
     return data;
   },
+
+  // ---------------------------------------------------------------------------
+  // Data logging — all four are best-effort. Callers should not await or handle
+  // errors from these; tracking failures must never disrupt UX.
+  // ---------------------------------------------------------------------------
+
+  async postSwipeContext(token, payload) {
+    try {
+      await fetch(`${API_BASE_URL}/api/interactions/swipe-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  },
+
+  async postListingView(token, payload) {
+    try {
+      await fetch(`${API_BASE_URL}/api/interactions/listing-views`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  },
+
+  async postPageView(token, payload) {
+    try {
+      await fetch(`${API_BASE_URL}/api/interactions/page-views`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  },
+
+  async postSearchQuery(token, payload) {
+    try {
+      await fetch(`${API_BASE_URL}/api/interactions/search-queries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  },
 };

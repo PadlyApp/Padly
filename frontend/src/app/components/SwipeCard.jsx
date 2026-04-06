@@ -8,7 +8,7 @@ import { formatAmenityLabel } from '../../../lib/formatters';
 
 const SWIPE_THRESHOLD = 100;
 
-function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand }) {
+function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhotoChange }) {
   const [dragging, setDragging] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [leaving, setLeaving] = useState(null); // 'left' | 'right' | null
@@ -108,7 +108,10 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand }) {
     const timer = setInterval(() => {
       setSweeping(true);
       setTimeout(() => {
-        setImageIndex(i => (i + 1) % images.length);
+        setImageIndex(i => {
+          onPhotoChange && onPhotoChange();
+          return (i + 1) % images.length;
+        });
         setSweeping(false);
       }, 300);
     }, 3000);
@@ -206,7 +209,7 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand }) {
                 zIndex: 30,
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setImageIndex(i => Math.max(0, i - 1)); }}
+              onClick={(e) => { e.stopPropagation(); setImageIndex(i => { onPhotoChange && onPhotoChange(); return Math.max(0, i - 1); }); }}
             >
               <IconChevronLeft size={14} />
             </ActionIcon>
@@ -222,7 +225,7 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand }) {
                 zIndex: 30,
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setImageIndex(i => Math.min(images.length - 1, i + 1)); }}
+              onClick={(e) => { e.stopPropagation(); setImageIndex(i => { onPhotoChange && onPhotoChange(); return Math.min(images.length - 1, i + 1); }); }}
             >
               <IconChevronRight size={14} />
             </ActionIcon>
