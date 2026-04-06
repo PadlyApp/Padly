@@ -1,9 +1,10 @@
 ﻿'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const MATCHES_PROMPT_DELAY_MS = 10000;
 
-import { useState, useEffect, useCallback } from 'react';
-import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, ActionIcon, Tooltip } from '@mantine/core';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Tooltip } from '@mantine/core';
 import { IconSparkles, IconStar, IconStarFilled } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
@@ -17,6 +18,11 @@ import {
   normalizeRecommendationsError,
   parseApiErrorResponse,
 } from '../../../lib/errorHandling';
+import {
+  MATCHES_FEEDBACK_CHOICES,
+  MATCHES_NEGATIVE_REASON_CHOICES,
+  createRecommendationClientSessionId,
+} from '../../../lib/recommendationFeedback';
 
 export default function MatchesPage() {
   return (
@@ -30,6 +36,13 @@ function MatchesPageContent() {
   const router = useRouter();
   const { user, authState } = useAuth();
   const userId = user?.profile?.id;
+  const clientSessionIdRef = useRef(null);
+  const promptTimerRef = useRef(null);
+  const sessionMetricsRef = useRef({ detailOpensCount: 0, savesCount: 0 });
+  const latestSessionIdRef = useRef(null);
+  const latestTokenRef = useRef(null);
+  const latestListingsRef = useRef([]);
+  const latestRankingContextRef = useRef(null);
 
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +50,78 @@ function MatchesPageContent() {
   const [missingCorePreferences, setMissingCorePreferences] = useState(false);
   const [userGroup, setUserGroup] = useState(null);
   const [savedListingIds, setSavedListingIds] = useState(new Set());
+  const [rankingContext, setRankingContext] = useState(null);
+  const [feedbackSessionId, setFeedbackSessionId] = useState(null);
+  const [promptAllowed, setPromptAllowed] = useState(false);
+  const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
+  const [feedbackStep, setFeedbackStep] = useState('question');
+  const [pendingFeedbackLabel, setPendingFeedbackLabel] = useState(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
+
+  if (!clientSessionIdRef.current && typeof window !== 'undefined') {
+    clientSessionIdRef.current = createRecommendationClientSessionId('matches');
+  }
+
+  const deriveRankingContext = useCallback((payload) => {
+    const responseContext = payload?.ranking_context;
+    if (responseContext) return responseContext;
+
+    const recommendations = payload?.recommendations || [];
+    const hasMlScores = recommendations.some((listing) => listing?.ml_score != null);
+    return {
+      algorithm_version: recommendations[0]?.algorithm_version ?? null,
+      model_version: hasMlScores ? 'recommender-v1' : null,
+      experiment_name: recommendations.length > 0 ? 'matches_ranker_v1' : null,
+      experiment_variant: recommendations.length > 0 ? (hasMlScores ? 'two_tower' : 'baseline') : null,
+    };
+  }, []);
+
+  const buildSessionPayload = useCallback((recommendations = listings, context = rankingContext) => {
+    const topListingIds = recommendations
+      .map((listing) => listing?.listing_id)
+      .filter(Boolean)
+      .slice(0, 20);
+
+    const hasMlScores = recommendations.some((listing) => listing?.ml_score != null);
+
+    return {
+      client_session_id: clientSessionIdRef.current,
+      surface: 'matches',
+      recommendation_count_shown: recommendations.length,
+      top_listing_ids_shown: topListingIds,
+      algorithm_version: context?.algorithm_version ?? recommendations[0]?.algorithm_version ?? null,
+      model_version: context?.model_version ?? (hasMlScores ? 'recommender-v1' : null),
+      experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'matches_ranker_v1' : null),
+      experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (hasMlScores ? 'two_tower' : 'baseline') : null),
+    };
+  }, [listings, rankingContext]);
+
+  const patchRecommendationSession = useCallback(async (payload, { keepalive = false } = {}) => {
+    if (!authState?.accessToken || !feedbackSessionId) return null;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions/${feedbackSessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify(payload),
+        keepalive,
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to update recommendation session');
+        return null;
+      }
+
+      const result = await response.json();
+      return result?.data ?? null;
+    } catch {
+      return null;
+    }
+  }, [authState?.accessToken, feedbackSessionId]);
 
   const fetchMatches = useCallback(async () => {
     setLoading(true);
@@ -138,12 +223,13 @@ function MatchesPageContent() {
 
       const data = await res.json();
       setListings(data.recommendations || []);
+      setRankingContext(deriveRankingContext(data));
     } catch (err) {
       setError(normalizeRecommendationsError(err));
     } finally {
       setLoading(false);
     }
-  }, [userId, authState?.accessToken]);
+  }, [userId, authState?.accessToken, deriveRankingContext]);
 
   useEffect(() => {
     fetchMatches();
@@ -177,6 +263,204 @@ function MatchesPageContent() {
     fetchGroup();
   }, [authState?.accessToken]);
 
+  useEffect(() => {
+    latestTokenRef.current = authState?.accessToken ?? null;
+  }, [authState?.accessToken]);
+
+  useEffect(() => {
+    latestSessionIdRef.current = feedbackSessionId;
+  }, [feedbackSessionId]);
+
+  useEffect(() => {
+    latestListingsRef.current = listings;
+  }, [listings]);
+
+  useEffect(() => {
+    latestRankingContextRef.current = rankingContext;
+  }, [rankingContext]);
+
+  useEffect(() => {
+    if (!authState?.accessToken || !userId || loading || error || listings.length === 0) return;
+
+    let cancelled = false;
+
+    const ensureRecommendationSession = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authState.accessToken}`,
+          },
+          body: JSON.stringify(buildSessionPayload(listings, rankingContext)),
+        });
+
+        if (!response.ok && response.status !== 503) {
+          console.warn('Failed to create recommendation session');
+          return;
+        }
+
+        if (response.status === 503) return;
+
+        const result = await response.json();
+        if (cancelled) return;
+
+        setFeedbackSessionId(result?.data?.id ?? null);
+        setPromptAllowed(Boolean(result?.prompt_allowed));
+      } catch {
+        // Best-effort only.
+      }
+    };
+
+    void ensureRecommendationSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState?.accessToken, buildSessionPayload, error, listings, loading, rankingContext, userId]);
+
+  useEffect(() => {
+    window.clearTimeout(promptTimerRef.current);
+
+    if (
+      !feedbackSessionId ||
+      !promptAllowed ||
+      showFeedbackPrompt ||
+      feedbackSubmitting ||
+      loading ||
+      error ||
+      listings.length === 0
+    ) {
+      return undefined;
+    }
+
+    promptTimerRef.current = window.setTimeout(() => {
+      setShowFeedbackPrompt(true);
+      void patchRecommendationSession({ prompt_presented: true });
+    }, MATCHES_PROMPT_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(promptTimerRef.current);
+    };
+  }, [
+    error,
+    feedbackSessionId,
+    feedbackSubmitting,
+    listings.length,
+    loading,
+    patchRecommendationSession,
+    promptAllowed,
+    showFeedbackPrompt,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      const token = latestTokenRef.current;
+      const sessionId = latestSessionIdRef.current;
+
+      if (!token || !sessionId) return;
+
+      const recommendations = latestListingsRef.current || [];
+      const context = latestRankingContextRef.current;
+      const topListingIds = recommendations
+        .map((listing) => listing?.listing_id)
+        .filter(Boolean)
+        .slice(0, 20);
+
+      fetch(`${API_BASE}/api/interactions/recommendation-sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mark_ended: true,
+          detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+          saves_count: sessionMetricsRef.current.savesCount,
+          recommendation_count_shown: recommendations.length,
+          top_listing_ids_shown: topListingIds,
+          algorithm_version: context?.algorithm_version ?? recommendations[0]?.algorithm_version ?? null,
+          model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
+          experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'matches_ranker_v1' : null),
+          experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  }, []);
+
+  const submitFeedback = useCallback(async ({ feedbackLabel, reasonLabel = null }) => {
+    if (!authState?.accessToken || !feedbackSessionId || feedbackSubmitting) return;
+
+    setFeedbackSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: feedbackSessionId,
+          feedback_label: feedbackLabel,
+          reason_label: reasonLabel,
+        }),
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to submit recommendation feedback');
+        return;
+      }
+
+      setShowFeedbackPrompt(false);
+      setPromptAllowed(false);
+      setFeedbackStep('question');
+      setPendingFeedbackLabel(null);
+      setFeedbackAcknowledged(true);
+    } catch {
+      // Best-effort only.
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }, [authState?.accessToken, feedbackSessionId, feedbackSubmitting]);
+
+  const dismissFeedbackPrompt = useCallback(async () => {
+    setShowFeedbackPrompt(false);
+    setPromptAllowed(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    await patchRecommendationSession({ prompt_dismissed: true });
+  }, [patchRecommendationSession]);
+
+  const handleFeedbackChoice = useCallback(async (value) => {
+    if (value === 'not_useful') {
+      setPendingFeedbackLabel(value);
+      setFeedbackStep('reason');
+      return;
+    }
+
+    await submitFeedback({ feedbackLabel: value });
+  }, [submitFeedback]);
+
+  const handleNegativeReason = useCallback(async (reasonLabel) => {
+    await submitFeedback({
+      feedbackLabel: pendingFeedbackLabel || 'not_useful',
+      reasonLabel,
+    });
+  }, [pendingFeedbackLabel, submitFeedback]);
+
+  const handleViewDetails = useCallback((listing) => {
+    const nextDetailOpens = sessionMetricsRef.current.detailOpensCount + 1;
+    sessionMetricsRef.current.detailOpensCount = nextDetailOpens;
+    void patchRecommendationSession(
+      {
+        detail_opens_count: nextDetailOpens,
+      },
+      { keepalive: true }
+    );
+    router.push(`/listings/${listing.listing_id}`);
+  }, [patchRecommendationSession, router]);
+
   const handleGroupSave = async (listing) => {
     if (!userGroup || !authState?.accessToken) {
       console.warn('[matches] handleGroupSave blocked — userGroup:', userGroup, 'token:', !!authState?.accessToken);
@@ -203,6 +487,11 @@ function MatchesPageContent() {
       const result = await res.json();
       console.log('[matches] save response:', res.status, result);
       if (!res.ok) throw new Error(result.detail || 'Save failed');
+      if (!isSaved) {
+        const nextSaves = sessionMetricsRef.current.savesCount + 1;
+        sessionMetricsRef.current.savesCount = nextSaves;
+        void patchRecommendationSession({ saves_count: nextSaves });
+      }
     } catch (e) {
       console.error('[matches] save error:', e);
       setSavedListingIds(prev => {
@@ -228,6 +517,11 @@ function MatchesPageContent() {
           <Text size="lg" c="dimmed" style={{ maxWidth: '42rem', textAlign: 'center', color: '#666' }}>
             Top 100 listings ranked from your preferences and recent swipe history
           </Text>
+          {feedbackAcknowledged && (
+            <Text size="sm" c="teal.7">
+              Thanks. Your feedback was saved for recommendation evaluation.
+            </Text>
+          )}
         </Stack>
 
         {loading && (
@@ -277,116 +571,204 @@ function MatchesPageContent() {
         )}
 
         {!loading && !error && listings.length > 0 && (
-          <Grid gutter="xl">
-            {listings.map((listing) => {
-              const image =
-                listing.images?.[0] ||
-                'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
-
-              return (
-                <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
-                  <Card
-                    className="card-lift"
-                    shadow="sm"
-                    radius="lg"
-                    style={{
-                      overflow: 'hidden',
-                      border: '1px solid #f1f3f5',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Card.Section style={{ position: 'relative' }}>
-                      <Box style={{ position: 'relative', paddingBottom: '75%', overflow: 'hidden', backgroundColor: '#f5f5f5' }}>
-                        <ImageWithFallback
-                          src={image}
-                          alt={listing.title}
-                          style={{
-                            position: 'absolute', top: 0, left: 0,
-                            width: '100%', height: '100%', objectFit: 'cover',
-                          }}
-                        />
-                      </Box>
-                      {listing.match_percent && (
-                        <Badge
-                          variant="filled"
-                          color="teal"
-                          style={{ position: 'absolute', top: 12, right: 12 }}
-                        >
-                          {listing.match_percent} match
-                        </Badge>
-                      )}
-                    </Card.Section>
-
-                    <Stack gap="md" style={{ padding: '1.5rem', minHeight: '220px', display: 'flex', flexDirection: 'column' }}>
-                      <Text
-                        fw={500}
-                        size="lg"
-                        style={{
-                          color: '#111', lineHeight: 1.4,
-                          minHeight: '56px', maxHeight: '56px', overflow: 'hidden',
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                        }}
-                        title={listing.title}
-                      >
-                        {listing.title}
-                      </Text>
-
-                      <Text size="md" c="dimmed" style={{ color: '#666', minHeight: '24px' }}>
-                        {[
-                          listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
-                          listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
-                          listing.area_sqft && `${listing.area_sqft} sq ft`,
-                        ].filter(Boolean).join(' • ')}
-                      </Text>
-
-                      {listing.price_per_month && (
-                        <Text fw={600} size="xl" c="teal.6" style={{ minHeight: '32px' }}>
-                          ${Number(listing.price_per_month).toLocaleString()}/mo
+          <Stack gap="xl">
+            {showFeedbackPrompt && (
+              <Card
+                shadow="sm"
+                radius="lg"
+                style={{
+                  position: 'sticky',
+                  top: '5.5rem',
+                  zIndex: 10,
+                  border: '1px solid #d3f9d8',
+                  backgroundColor: '#f8fff9',
+                }}
+              >
+                <Stack gap="md">
+                  {feedbackStep === 'question' ? (
+                    <>
+                      <Stack gap={4}>
+                        <Title order={4} style={{ color: '#111' }}>
+                          How useful were these recommendations?
+                        </Title>
+                        <Text size="sm" c="dimmed">
+                          Your feedback helps us improve how listings are ranked.
                         </Text>
-                      )}
-
-                      <Box style={{ flex: 1 }} />
-
-                      <Stack gap="xs">
-                        <Button
-                          fullWidth
-                          radius="md"
-                          size="md"
-                          color="teal"
-                          onClick={() => router.push(`/listings/${listing.listing_id}`)}
-                        >
-                          View Details
-                        </Button>
-                        {userGroup && (() => {
-                          const lid = listing.listing_id || listing.id;
-                          const saved = savedListingIds.has(lid);
-                          return (
-                            <Tooltip label={saved ? 'Remove from group' : `Save to ${userGroup.group_name}`} withArrow>
-                              <Button
-                                fullWidth
-                                radius="md"
-                                size="md"
-                                variant={saved ? 'filled' : 'light'}
-                                onClick={() => handleGroupSave(listing)}
-                                leftSection={saved ? <IconStarFilled size={16} /> : <IconStar size={16} />}
-                                style={{
-                                  backgroundColor: saved ? '#f59f00' : undefined,
-                                  borderColor: '#ffe066',
-                                  color: saved ? '#fff' : '#f59f00',
-                                }}
-                              >
-                                {saved ? 'Saved to Group' : 'Save to Group'}
-                              </Button>
-                            </Tooltip>
-                          );
-                        })()}
                       </Stack>
-                    </Stack>
-                  </Card>
-                </Grid.Col>
-              );
-            })}
-          </Grid>
+                      <Stack gap="sm">
+                        {MATCHES_FEEDBACK_CHOICES.map((choice) => (
+                          <Button
+                            key={choice.value}
+                            size="md"
+                            variant={choice.value === 'very_useful' ? 'filled' : 'light'}
+                            color="teal"
+                            disabled={feedbackSubmitting}
+                            onClick={() => handleFeedbackChoice(choice.value)}
+                          >
+                            {choice.label}
+                          </Button>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          color="gray"
+                          disabled={feedbackSubmitting}
+                          onClick={dismissFeedbackPrompt}
+                        >
+                          Not now
+                        </Button>
+                      </Stack>
+                    </>
+                  ) : (
+                    <>
+                      <Stack gap={4}>
+                        <Title order={4} style={{ color: '#111' }}>
+                          What felt off?
+                        </Title>
+                        <Text size="sm" c="dimmed">
+                          Optional
+                        </Text>
+                      </Stack>
+                      <Stack gap="sm">
+                        {MATCHES_NEGATIVE_REASON_CHOICES.map((choice) => (
+                          <Button
+                            key={choice.value}
+                            size="md"
+                            variant="light"
+                            color="teal"
+                            disabled={feedbackSubmitting}
+                            onClick={() => handleNegativeReason(choice.value)}
+                          >
+                            {choice.label}
+                          </Button>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          color="gray"
+                          disabled={feedbackSubmitting}
+                          onClick={() => submitFeedback({ feedbackLabel: pendingFeedbackLabel || 'not_useful' })}
+                        >
+                          Skip
+                        </Button>
+                      </Stack>
+                    </>
+                  )}
+                </Stack>
+              </Card>
+            )}
+
+            <Grid gutter="xl">
+              {listings.map((listing) => {
+                const image =
+                  listing.images?.[0] ||
+                  'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+
+                return (
+                  <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
+                    <Card
+                      className="card-lift"
+                      shadow="sm"
+                      radius="lg"
+                      style={{
+                        overflow: 'hidden',
+                        border: '1px solid #f1f3f5',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Card.Section style={{ position: 'relative' }}>
+                        <Box style={{ position: 'relative', paddingBottom: '75%', overflow: 'hidden', backgroundColor: '#f5f5f5' }}>
+                          <ImageWithFallback
+                            src={image}
+                            alt={listing.title}
+                            style={{
+                              position: 'absolute', top: 0, left: 0,
+                              width: '100%', height: '100%', objectFit: 'cover',
+                            }}
+                          />
+                        </Box>
+                        {listing.match_percent && (
+                          <Badge
+                            variant="filled"
+                            color="teal"
+                            style={{ position: 'absolute', top: 12, right: 12 }}
+                          >
+                            {listing.match_percent} match
+                          </Badge>
+                        )}
+                      </Card.Section>
+
+                      <Stack gap="md" style={{ padding: '1.5rem', minHeight: '220px', display: 'flex', flexDirection: 'column' }}>
+                        <Text
+                          fw={500}
+                          size="lg"
+                          style={{
+                            color: '#111', lineHeight: 1.4,
+                            minHeight: '56px', maxHeight: '56px', overflow: 'hidden',
+                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                          }}
+                          title={listing.title}
+                        >
+                          {listing.title}
+                        </Text>
+
+                        <Text size="md" c="dimmed" style={{ color: '#666', minHeight: '24px' }}>
+                          {[
+                            listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
+                            listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
+                            listing.area_sqft && `${listing.area_sqft} sq ft`,
+                          ].filter(Boolean).join(' • ')}
+                        </Text>
+
+                        {listing.price_per_month && (
+                          <Text fw={600} size="xl" c="teal.6" style={{ minHeight: '32px' }}>
+                            ${Number(listing.price_per_month).toLocaleString()}/mo
+                          </Text>
+                        )}
+
+                        <Box style={{ flex: 1 }} />
+
+                        <Stack gap="xs">
+                          <Button
+                            fullWidth
+                            radius="md"
+                            size="md"
+                            color="teal"
+                            onClick={() => handleViewDetails(listing)}
+                          >
+                            View Details
+                          </Button>
+                          {userGroup && (() => {
+                            const lid = listing.listing_id || listing.id;
+                            const saved = savedListingIds.has(lid);
+                            return (
+                              <Tooltip label={saved ? 'Remove from group' : `Save to ${userGroup.group_name}`} withArrow>
+                                <Button
+                                  fullWidth
+                                  radius="md"
+                                  size="md"
+                                  variant={saved ? 'filled' : 'light'}
+                                  onClick={() => handleGroupSave(listing)}
+                                  leftSection={saved ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                                  style={{
+                                    backgroundColor: saved ? '#f59f00' : undefined,
+                                    borderColor: '#ffe066',
+                                    color: saved ? '#fff' : '#f59f00',
+                                  }}
+                                >
+                                  {saved ? 'Saved to Group' : 'Save to Group'}
+                                </Button>
+                              </Tooltip>
+                            );
+                          })()}
+                        </Stack>
+                      </Stack>
+                    </Card>
+                  </Grid.Col>
+                );
+              })}
+            </Grid>
+          </Stack>
         )}
       </Container>
     </Box>

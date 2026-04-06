@@ -624,28 +624,149 @@ These targets can be revised after pilot usage.
 
 ## 14. Rollout Plan
 
-## Phase 1: MVP
+## Phase 1: Feedback Contract
 
-- Add session-level feedback prompt on `Matches`
-- Use 3-point usefulness scale
-- Add optional negative reason tag
-- Store session metadata and experiment variant
-- Build a simple admin evaluation page with core metrics
+Goal:
 
-## Phase 2: Expand coverage
+- lock the exact v1 feedback contract before any UI or backend implementation starts
 
-- Add prompt to `Discover`
-- add better session modeling
-- add dwell-time instrumentation
+Phase 1 decisions to lock:
+
+- launch surface: `Matches` only
+- prompt format: lightweight bottom sheet or inline card, not a blocking full-screen modal
+- core question:
+  - `How useful were these recommendations?`
+- helper copy:
+  - `Your feedback helps us improve how listings are ranked.`
+- explicit feedback choices:
+  - user-facing labels:
+    - `Not useful`
+    - `Somewhat useful`
+    - `Very useful`
+  - stored enum values:
+    - `not_useful`
+    - `somewhat_useful`
+    - `very_useful`
+- negative follow-up behavior:
+  - show only after `Not useful`
+  - make it optional
+  - allow one-tap dismissal
+- negative follow-up question:
+  - `What felt off?`
+- negative reason choices:
+  - user-facing labels:
+    - `Too expensive`
+    - `Wrong location`
+    - `Not my style`
+    - `Too few good options`
+    - `Other`
+  - stored enum values:
+    - `too_expensive`
+    - `wrong_location`
+    - `not_my_style`
+    - `too_few_good_options`
+    - `other`
+- text input:
+  - do not include required text input
+  - do not include optional free text in v1
+- eligibility rules:
+  - prompt only after meaningful exposure
+  - initial `Matches` rule: user has viewed the ranked list for at least `10` seconds
+  - allow prompt if the user opened at least `3` listing details from the ranked results
+- frequency rules:
+  - at most once per recommendation session
+  - at most once every `7` days per user
+  - never show again after feedback has already been submitted for the same session
+- dismissal rules:
+  - if dismissed, mark the prompt as dismissed
+  - do not re-show in the same session
+  - allow re-eligibility in a future session after the cooldown window
+- recommendation session definition for v1:
+  - one `Matches` page visit counts as one recommendation session
+  - session begins when the user lands on `Matches`
+  - session ends when the user leaves the page or becomes inactive long enough for timeout handling
+- required session metadata:
+  - `session_id`
+  - `user_id`
+  - `surface`
+  - `started_at`
+  - `ended_at`
+  - `recommendation_count_shown`
+  - `top_listing_ids_shown`
+  - `algorithm_version`
+  - `model_version`
+  - `experiment_name`
+  - `experiment_variant`
+- required feedback metadata:
+  - `feedback_label`
+  - `reason_label`
+  - `submitted_at`
+  - `prompt_presented_at`
+  - `prompt_dismissed_at`
+- experiment contract for v1:
+  - every recommendation session must carry a ranker identity
+  - initial supported variants:
+    - `two_tower`
+    - `baseline`
+  - if no experiment is active, still store the effective ranker in metadata
+
+Out of scope for Phase 1:
+
+- `Discover` prompt
+- per-listing explicit ratings
+- free-text comments
+- admin dashboard implementation
+- aggregation jobs
+- experiment analysis
+
+Phase 1 exit criteria:
+
+- product copy is final
+- stored enum values are final
+- prompt timing rules are final
+- session boundaries are final
+- required metadata fields are final
+- downstream implementation can begin without re-deciding UX or schema basics
+
+## Phase 2: Data Capture
+
+- add session-level feedback prompt on `Matches`
+- store explicit usefulness feedback
+- store optional negative reason tag
+- store session metadata and ranking metadata
+- connect feedback rows to the current user and recommendation session
+
+## Phase 3: Passive Metrics
+
+- add session-level passive engagement tracking
+- log detail opens from recommendation surfaces
+- log saves in a way that can be tied back to recommendation sessions
+- add dwell-time instrumentation where feasible
+- compute derived session metrics such as likes, saves, and detail opens
+
+## Phase 4: Admin Evaluation Page
+
+- build an admin-only evaluation page
+- add top KPI cards
+- add usefulness distribution and variant comparison
+- add negative reason breakdown
+- add initial filtering by date range, variant, and market
+
+## Phase 5: Discover Expansion
+
+- add the feedback prompt to `Discover`
 - add prompt suppression and cooldown tuning
+- improve session modeling across surfaces
 - add dashboard filters and exports
+- validate that prompt timing does not hurt user experience
 
-## Phase 3: Research hardening
+## Phase 6: Research Validation
 
 - run explicit A/B test between `two_tower` and `baseline`
 - analyze results by user history bucket
 - add trend analysis and model-version comparisons
 - export aggregated results for course presentation / paper write-up
+- document limitations, sample size, and exposure-bias caveats
 
 ---
 

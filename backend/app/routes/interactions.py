@@ -6,6 +6,7 @@ Phase 1 endpoint(s) for swipe event capture from Discover.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +37,40 @@ class SwipeEventCreate(BaseModel):
     latency_ms: Optional[int] = Field(default=None, ge=0)
 
 
+class RecommendationSessionCreate(BaseModel):
+    client_session_id: str = Field(..., min_length=1, max_length=128)
+    surface: Literal["matches", "discover"] = "matches"
+    recommendation_count_shown: int = Field(default=0, ge=0)
+    top_listing_ids_shown: list[str] = Field(default_factory=list)
+    algorithm_version: Optional[str] = Field(default=None, max_length=100)
+    model_version: Optional[str] = Field(default=None, max_length=100)
+    experiment_name: Optional[str] = Field(default=None, max_length=100)
+    experiment_variant: Optional[str] = Field(default=None, max_length=100)
+
+
+class RecommendationSessionUpdate(BaseModel):
+    recommendation_count_shown: Optional[int] = Field(default=None, ge=0)
+    top_listing_ids_shown: Optional[list[str]] = None
+    detail_opens_count: Optional[int] = Field(default=None, ge=0)
+    saves_count: Optional[int] = Field(default=None, ge=0)
+    likes_count: Optional[int] = Field(default=None, ge=0)
+    prompt_presented: bool = False
+    prompt_dismissed: bool = False
+    mark_ended: bool = False
+    algorithm_version: Optional[str] = Field(default=None, max_length=100)
+    model_version: Optional[str] = Field(default=None, max_length=100)
+    experiment_name: Optional[str] = Field(default=None, max_length=100)
+    experiment_variant: Optional[str] = Field(default=None, max_length=100)
+
+
+class RecommendationFeedbackCreate(BaseModel):
+    recommendation_session_id: str = Field(..., min_length=1, max_length=128)
+    feedback_label: Literal["not_useful", "somewhat_useful", "very_useful"]
+    reason_label: Optional[
+        Literal["too_expensive", "wrong_location", "not_my_style", "too_few_good_options", "other"]
+    ] = None
+
+
 def _resolve_current_user_id(token: str) -> str:
     """
     Resolve authenticated user to internal users.id UUID.
@@ -59,6 +94,80 @@ def _resolve_current_user_id(token: str) -> str:
         return fallback_record.data[0]["id"]
 
     raise HTTPException(status_code=404, detail="User profile not found")
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_listing_ids(listing_ids: Optional[list[str]]) -> list[str]:
+    cleaned: list[str] = []
+    for listing_id in listing_ids or []:
+        value = str(listing_id).strip()
+        if value:
+            cleaned.append(value)
+    return cleaned[:100]
+
+
+def _recommendation_storage_missing(exc: Exception) -> bool:
+    err = str(exc).lower()
+    return (
+        "recommendation_sessions" in err and "does not exist" in err
+    ) or (
+        "user_recommendation_feedback" in err and "does not exist" in err
+    )
+
+
+def _get_recommendation_session(supabase, session_id: str, user_id: str) -> dict:
+    session_response = (
+        supabase.table("recommendation_sessions")
+        .select("*")
+        .eq("id", session_id)
+        .eq("actor_user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not session_response.data:
+        raise HTTPException(status_code=404, detail="Recommendation session not found")
+    return session_response.data[0]
+
+
+def _recommendation_prompt_allowed(supabase, user_id: str, current_session_id: Optional[str] = None) -> bool:
+    cooldown_since = (_now_utc() - timedelta(days=7)).isoformat()
+    recent = (
+        supabase.table("recommendation_sessions")
+        .select("id, prompt_presented_at, prompt_dismissed_at, feedback_submitted_at")
+        .eq("actor_user_id", user_id)
+        .gte("started_at", cooldown_since)
+        .order("started_at", desc=True)
+        .limit(50)
+        .execute()
+    )
+
+    for row in recent.data or []:
+        if current_session_id and row.get("id") == current_session_id:
+            continue
+        if row.get("prompt_presented_at") or row.get("prompt_dismissed_at") or row.get("feedback_submitted_at"):
+            return False
+    return True
+
+
+def _build_session_response(supabase, session_row: dict) -> dict:
+    session_completed = bool(
+        session_row.get("feedback_submitted_at")
+        or session_row.get("prompt_dismissed_at")
+        or session_row.get("prompt_presented_at")
+    )
+    return {
+        "status": "success",
+        "data": session_row,
+        "prompt_allowed": (not session_completed)
+        and _recommendation_prompt_allowed(
+            supabase,
+            user_id=session_row["actor_user_id"],
+            current_session_id=session_row["id"],
+        ),
+    }
 
 
 def _require_group_membership(group_id: str, user_id: str) -> None:
@@ -163,6 +272,236 @@ async def create_swipe_event(
                 "event_id": existing.data[0]["event_id"] if existing.data else None,
             }
         raise HTTPException(status_code=500, detail=f"Failed to store swipe event: {e}")
+
+
+@router.post("/recommendation-sessions")
+async def create_recommendation_session(
+    payload: RecommendationSessionCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Create or refresh a recommendation session for the current user.
+
+    Sessions are idempotent per actor_user_id + client_session_id so refetches on the
+    same page visit update the same row instead of creating duplicates.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    now_iso = _now_utc().isoformat()
+    top_listing_ids = _normalize_listing_ids(payload.top_listing_ids_shown)
+
+    try:
+        existing = (
+            supabase.table("recommendation_sessions")
+            .select("*")
+            .eq("actor_user_id", user_id)
+            .eq("client_session_id", payload.client_session_id)
+            .limit(1)
+            .execute()
+        )
+
+        if existing.data:
+            session = existing.data[0]
+            update_data = {
+                "updated_at": now_iso,
+                "surface": payload.surface,
+                "recommendation_count_shown": payload.recommendation_count_shown,
+                "top_listing_ids_shown": top_listing_ids,
+                "algorithm_version": payload.algorithm_version,
+                "model_version": payload.model_version,
+                "experiment_name": payload.experiment_name,
+                "experiment_variant": payload.experiment_variant,
+            }
+            updated = (
+                supabase.table("recommendation_sessions")
+                .update(update_data)
+                .eq("id", session["id"])
+                .execute()
+            )
+            session = updated.data[0] if updated.data else {**session, **update_data}
+            return _build_session_response(supabase, session)
+
+        created = (
+            supabase.table("recommendation_sessions")
+            .insert(
+                {
+                    "actor_user_id": user_id,
+                    "client_session_id": payload.client_session_id,
+                    "surface": payload.surface,
+                    "started_at": now_iso,
+                    "recommendation_count_shown": payload.recommendation_count_shown,
+                    "top_listing_ids_shown": top_listing_ids,
+                    "algorithm_version": payload.algorithm_version,
+                    "model_version": payload.model_version,
+                    "experiment_name": payload.experiment_name,
+                    "experiment_variant": payload.experiment_variant,
+                    "updated_at": now_iso,
+                }
+            )
+            .execute()
+        )
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Recommendation session was not persisted")
+        return _build_session_response(supabase, created.data[0])
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _recommendation_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Recommendation feedback storage not configured. Run migration 20260406010000_recommendation_feedback_phase2.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to create recommendation session: {e}")
+
+
+@router.patch("/recommendation-sessions/{session_id}")
+async def update_recommendation_session(
+    session_id: str,
+    payload: RecommendationSessionUpdate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Update counters and prompt lifecycle fields for an existing recommendation session.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    now_iso = _now_utc().isoformat()
+
+    try:
+        session = _get_recommendation_session(supabase, session_id=session_id, user_id=user_id)
+        update_data = {"updated_at": now_iso}
+
+        if payload.recommendation_count_shown is not None:
+            update_data["recommendation_count_shown"] = payload.recommendation_count_shown
+        if payload.top_listing_ids_shown is not None:
+            update_data["top_listing_ids_shown"] = _normalize_listing_ids(payload.top_listing_ids_shown)
+        if payload.detail_opens_count is not None:
+            update_data["detail_opens_count"] = max(
+                int(session.get("detail_opens_count") or 0),
+                payload.detail_opens_count,
+            )
+        if payload.saves_count is not None:
+            update_data["saves_count"] = max(
+                int(session.get("saves_count") or 0),
+                payload.saves_count,
+            )
+        if payload.likes_count is not None:
+            update_data["likes_count"] = max(
+                int(session.get("likes_count") or 0),
+                payload.likes_count,
+            )
+        if payload.prompt_presented and not session.get("prompt_presented_at"):
+            update_data["prompt_presented_at"] = now_iso
+        if payload.prompt_dismissed and not session.get("prompt_dismissed_at"):
+            update_data["prompt_dismissed_at"] = now_iso
+        if payload.mark_ended:
+            update_data["ended_at"] = now_iso
+        if payload.algorithm_version is not None:
+            update_data["algorithm_version"] = payload.algorithm_version
+        if payload.model_version is not None:
+            update_data["model_version"] = payload.model_version
+        if payload.experiment_name is not None:
+            update_data["experiment_name"] = payload.experiment_name
+        if payload.experiment_variant is not None:
+            update_data["experiment_variant"] = payload.experiment_variant
+
+        updated = (
+            supabase.table("recommendation_sessions")
+            .update(update_data)
+            .eq("id", session_id)
+            .eq("actor_user_id", user_id)
+            .execute()
+        )
+        if not updated.data:
+            raise HTTPException(status_code=500, detail="Recommendation session update failed")
+        return {"status": "success", "data": updated.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _recommendation_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Recommendation feedback storage not configured. Run migration 20260406010000_recommendation_feedback_phase2.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to update recommendation session: {e}")
+
+
+@router.post("/recommendation-feedback")
+async def create_recommendation_feedback(
+    payload: RecommendationFeedbackCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist a single session-level usefulness response for the current user.
+    """
+    if payload.reason_label and payload.feedback_label != "not_useful":
+        raise HTTPException(status_code=422, detail="A negative reason can only be attached to 'not_useful' feedback")
+
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+    now_iso = _now_utc().isoformat()
+
+    try:
+        session = _get_recommendation_session(
+            supabase,
+            session_id=payload.recommendation_session_id,
+            user_id=user_id,
+        )
+        existing = (
+            supabase.table("user_recommendation_feedback")
+            .select("*")
+            .eq("recommendation_session_id", session["id"])
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return {"status": "success", "duplicate_ignored": True, "data": existing.data[0]}
+
+        created = (
+            supabase.table("user_recommendation_feedback")
+            .insert(
+                {
+                    "actor_user_id": user_id,
+                    "recommendation_session_id": session["id"],
+                    "surface": session["surface"],
+                    "feedback_label": payload.feedback_label,
+                    "reason_label": payload.reason_label,
+                    "submitted_at": now_iso,
+                    "algorithm_version": session.get("algorithm_version"),
+                    "model_version": session.get("model_version"),
+                    "experiment_name": session.get("experiment_name"),
+                    "experiment_variant": session.get("experiment_variant"),
+                    "swipes_in_session": None,
+                    "likes_in_session": int(session.get("likes_count") or 0),
+                    "saves_in_session": int(session.get("saves_count") or 0),
+                    "detail_opens_in_session": int(session.get("detail_opens_count") or 0),
+                    "recommendation_count_shown": int(session.get("recommendation_count_shown") or 0),
+                    "top_listing_ids_shown": session.get("top_listing_ids_shown") or [],
+                }
+            )
+            .execute()
+        )
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Recommendation feedback was not persisted")
+
+        supabase.table("recommendation_sessions").update(
+            {
+                "feedback_submitted_at": now_iso,
+                "ended_at": session.get("ended_at") or now_iso,
+                "updated_at": now_iso,
+            }
+        ).eq("id", session["id"]).eq("actor_user_id", user_id).execute()
+
+        return {"status": "success", "duplicate_ignored": False, "data": created.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if _recommendation_storage_missing(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Recommendation feedback storage not configured. Run migration 20260406010000_recommendation_feedback_phase2.sql.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store recommendation feedback: {e}")
 
 
 @router.get("/swipes/me")

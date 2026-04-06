@@ -101,12 +101,20 @@ class RecommendedListing(BaseModel):
     images: Optional[List[str]] = None
 
 
+class RecommendationRankingContext(BaseModel):
+    algorithm_version: Optional[str] = None
+    model_version: Optional[str] = None
+    experiment_name: Optional[str] = None
+    experiment_variant: Optional[str] = None
+
+
 class RecommendationsResponse(BaseModel):
     status: str
     count: int
     offset: int
     total_available: int
     has_more: bool
+    ranking_context: Optional[RecommendationRankingContext] = None
     recommendations: List[RecommendedListing]
 
 
@@ -207,11 +215,20 @@ async def get_recommendations(preferences: UserPreferences):
             images=item.get("images"),
         ))
 
+    has_ml_scores = any(item.get("ml_score") is not None for item in paged)
+    ranking_context = RecommendationRankingContext(
+        algorithm_version=paged[0].get("algorithm_version") if paged else None,
+        model_version="recommender-v1" if has_ml_scores else None,
+        experiment_name="matches_ranker_v1" if paged else None,
+        experiment_variant="two_tower" if has_ml_scores else "baseline" if paged else None,
+    )
+
     return RecommendationsResponse(
         status="success",
         count=len(recommendations),
         offset=offset,
         total_available=len(scored),
         has_more=(offset + len(recommendations)) < len(scored),
+        ranking_context=ranking_context,
         recommendations=recommendations,
     )
