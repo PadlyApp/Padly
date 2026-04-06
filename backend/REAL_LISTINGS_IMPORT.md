@@ -51,7 +51,6 @@ PYTHONPATH=. ./venv/bin/python -m app.scripts.import_apify_listings \
 
 `--wipe-existing` deletes:
 
-- `stable_matches`
 - `listing_photos`
 - `listings`
 

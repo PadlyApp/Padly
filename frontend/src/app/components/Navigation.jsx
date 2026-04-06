@@ -14,6 +14,7 @@ export function Navigation() {
   const { isTourPaused, resumeTour } = usePadlyTour();
   const [opened, { open, close }] = useDisclosure(false);
   const pathname = usePathname();
+  const isAdmin = user?.profile?.role === 'admin';
 
   const handleSignout = async () => {
     await signout();
@@ -88,6 +89,13 @@ export function Navigation() {
                       Account
                     </UnstyledButton>
                   </Link>
+                  {isAdmin && (
+                    <Link href="/admin/evaluation" style={{ textDecoration: 'none' }}>
+                      <UnstyledButton className={`nav-link ${pathname.startsWith('/admin') ? 'active' : ''}`}>
+                        Admin
+                      </UnstyledButton>
+                    </Link>
+                  )}
                   {isTourPaused && (
                     <Button
                       variant="light"
@@ -185,6 +193,15 @@ export function Navigation() {
                     </Text>
                   </UnstyledButton>
                 </Link>
+                {isAdmin && (
+                  <Link href="/admin/evaluation" style={{ textDecoration: 'none' }} onClick={handleLinkClick}>
+                    <UnstyledButton style={{ width: '100%' }}>
+                      <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
+                        Admin
+                      </Text>
+                    </UnstyledButton>
+                  </Link>
+                )}
 
                 <Divider />
 

@@ -1,6 +1,8 @@
 'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const DISCOVER_FEEDBACK_SWIPE_THRESHOLD = 10;
+const DISCOVER_PROGRESS_TTL_MS = 30 * 60 * 1000;
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -14,6 +16,7 @@ import { SkeletonSwipeCard } from '../components/Skeletons';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
+import { usePageTracking } from '../hooks/usePageTracking';
 import { SwipeCard } from '../components/SwipeCard';
 import {
   createAppError,
@@ -22,6 +25,12 @@ import {
   parseApiErrorResponse,
 } from '../../../lib/errorHandling';
 import { formatAmenityLabel, parseListingTitle } from '../../../lib/formatters';
+import {
+  MATCHES_FEEDBACK_CHOICES,
+  MATCHES_NEGATIVE_REASON_CHOICES,
+  createRecommendationClientSessionId,
+  createRecommendationEventId,
+} from '../../../lib/recommendationFeedback';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
@@ -31,6 +40,63 @@ const SWIPE_SESSION_KEY = 'padly_swipe_session_id';
 
 /** Stable client label for swipe telemetry (backend requires algorithm_version). */
 const DISCOVER_ALGORITHM_VERSION = 'discover-v1';
+
+function getDiscoverProgressKey(userId) {
+  return `padly_discover_progress:${userId}`;
+}
+
+function clearDiscoverProgress(userId) {
+  if (typeof window === 'undefined' || !userId) return;
+
+  try {
+    sessionStorage.removeItem(getDiscoverProgressKey(userId));
+  } catch {
+    // Best-effort only.
+  }
+}
+
+function loadDiscoverProgress(userId) {
+  if (typeof window === 'undefined' || !userId) return null;
+
+  try {
+    const raw = sessionStorage.getItem(getDiscoverProgressKey(userId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > DISCOVER_PROGRESS_TTL_MS) {
+      sessionStorage.removeItem(getDiscoverProgressKey(userId));
+      return null;
+    }
+
+    const hasListings = Array.isArray(parsed.listings) && parsed.listings.length > 0;
+    const hasProgress = hasListings && Number.isFinite(parsed.currentIndex) && parsed.currentIndex > 0;
+    const isCompletedStack = hasListings && Number.isFinite(parsed.currentIndex) && parsed.currentIndex >= parsed.listings.length;
+    if (!hasProgress && !isCompletedStack) {
+      sessionStorage.removeItem(getDiscoverProgressKey(userId));
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDiscoverProgress(userId, payload) {
+  if (typeof window === 'undefined' || !userId) return;
+
+  try {
+    sessionStorage.setItem(
+      getDiscoverProgressKey(userId),
+      JSON.stringify({
+        ...payload,
+        savedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Best-effort only.
+  }
+}
 
 function getOrCreateSwipeSessionId() {
   if (typeof window === 'undefined') return 'server-session';
@@ -90,6 +156,7 @@ function DiscoverContent() {
   const { tourPhase } = usePadlyTour();
   const userId = user?.profile?.id;
   const router = useRouter();
+  usePageTracking('discover', authState?.accessToken);
 
   const [listings, setListings] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -101,9 +168,11 @@ function DiscoverContent() {
   const [expandedImageIndex, setExpandedImageIndex] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const swipeSessionIdRef = useRef(null);
+  const recommendationClientSessionIdRef = useRef(null);
   const nextOffsetRef = useRef(0);
   // Tracks the last feedData object seen so we only sync on a genuine new result
   const prevFeedDataRef = useRef(null);
+  const restoredProgressRef = useRef(false);
   // Stable refs for currentIndex and listings so handleSwipe doesn't need them as deps
   const currentIndexRef = useRef(currentIndex);
   const listingsRef = useRef(listings);
@@ -114,6 +183,151 @@ function DiscoverContent() {
   const cardViewStartRef = useRef(null);
   const cardPhotoCountRef = useRef(0);
   const cardExpandedRef = useRef(false);
+  const expandedOpenedAtRef = useRef(null);
+  const surfaceStartedAtRef = useRef(Date.now());
+  const promptShownRef = useRef(false);
+  const latestSessionIdRef = useRef(null);
+  const latestTokenRef = useRef(null);
+  const latestListingsRef = useRef([]);
+  const latestRankingContextRef = useRef(null);
+  const sessionMetricsRef = useRef({ likesCount: 0, detailOpensCount: 0, swipesCount: 0 });
+
+  const [rankingContext, setRankingContext] = useState(null);
+  const [feedbackSessionId, setFeedbackSessionId] = useState(null);
+  const [promptAllowed, setPromptAllowed] = useState(false);
+  const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
+  const [feedbackStep, setFeedbackStep] = useState('question');
+  const [pendingFeedbackLabel, setPendingFeedbackLabel] = useState(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
+  const [feedbackCycle, setFeedbackCycle] = useState(0);
+  const [swipesInCycle, setSwipesInCycle] = useState(0);
+
+  if (!recommendationClientSessionIdRef.current && typeof window !== 'undefined') {
+    recommendationClientSessionIdRef.current = createRecommendationClientSessionId('discover');
+  }
+
+  const deriveRankingContext = useCallback((payload) => {
+    const responseContext = payload?.ranking_context;
+    if (responseContext) return responseContext;
+
+    const recommendations = payload?.recommendations || [];
+    const hasMlScores = recommendations.some((listing) => listing?.ml_score != null);
+    return {
+      algorithm_version: recommendations[0]?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+      model_version: hasMlScores ? 'recommender-v1' : null,
+      experiment_name: recommendations.length > 0 ? 'discover_ranker_v1' : null,
+      experiment_variant: recommendations.length > 0 ? (hasMlScores ? 'two_tower' : 'baseline') : null,
+    };
+  }, []);
+
+  const buildSessionPayload = useCallback((recommendations = listings, context = rankingContext) => {
+    if (!recommendationClientSessionIdRef.current) {
+      recommendationClientSessionIdRef.current = createRecommendationClientSessionId('discover');
+    }
+
+    const topListingIds = recommendations
+      .map((listing) => listing?.listing_id)
+      .filter(Boolean)
+      .slice(0, 20);
+    const hasMlScores = recommendations.some((listing) => listing?.ml_score != null);
+
+    return {
+      client_session_id: recommendationClientSessionIdRef.current,
+      surface: 'discover',
+      recommendation_count_shown: recommendations.length,
+      top_listing_ids_shown: topListingIds,
+      algorithm_version: context?.algorithm_version ?? recommendations[0]?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+      model_version: context?.model_version ?? (hasMlScores ? 'recommender-v1' : null),
+      experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'discover_ranker_v1' : null),
+      experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (hasMlScores ? 'two_tower' : 'baseline') : null),
+    };
+  }, [listings, rankingContext]);
+
+  const startNextFeedbackCycle = useCallback(() => {
+    recommendationClientSessionIdRef.current = createRecommendationClientSessionId('discover');
+    sessionMetricsRef.current = { likesCount: 0, detailOpensCount: 0, swipesCount: 0 };
+    setSwipesInCycle(0);
+    setFeedbackSessionId(null);
+    setPromptAllowed(false);
+    setShowFeedbackPrompt(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    promptShownRef.current = false;
+    surfaceStartedAtRef.current = Date.now();
+    setFeedbackCycle((current) => current + 1);
+  }, []);
+
+  const patchRecommendationSession = useCallback(async (payload, { keepalive = false } = {}) => {
+    if (!authState?.accessToken || !feedbackSessionId) return null;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions/${feedbackSessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify(payload),
+        keepalive,
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to update discover recommendation session');
+        return null;
+      }
+
+      if (response.status === 503) return null;
+      const result = await response.json();
+      return result?.data ?? null;
+    } catch {
+      return null;
+    }
+  }, [authState?.accessToken, feedbackSessionId]);
+
+  const findListingPosition = useCallback((listingId) => {
+    if (!listingId) return null;
+    const index = listings.findIndex((item) => item?.listing_id === listingId);
+    return index >= 0 ? index : null;
+  }, [listings]);
+
+  const persistRecommendationEvent = useCallback(async ({
+    eventType,
+    listingId = null,
+    positionInFeed = null,
+    dwellMs = null,
+    metadata = {},
+    keepalive = false,
+  }) => {
+    if (!authState?.accessToken || !feedbackSessionId) return null;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: feedbackSessionId,
+          client_event_id: createRecommendationEventId(eventType),
+          surface: 'discover',
+          event_type: eventType,
+          listing_id: listingId,
+          position_in_feed: positionInFeed,
+          dwell_ms: dwellMs,
+          metadata,
+        }),
+        keepalive,
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to persist discover recommendation event');
+      }
+    } catch {
+      // Best-effort only.
+    }
+  }, [authState?.accessToken, feedbackSessionId]);
 
   // ── shared fetch helper (used by the query AND loadMore) ──────────────────
 
@@ -229,6 +443,7 @@ function DiscoverContent() {
     }
 
     const data = await res.json();
+    const nextRankingContext = deriveRankingContext(data);
 
     const likedIds = new Set(getLikedListings().map((l) => l.listing_id));
     const fresh = (data.recommendations || []).filter(
@@ -253,8 +468,9 @@ function DiscoverContent() {
       hasCorePreferences,
       hasMore: Boolean(data.has_more),
       nextOffset: (data.offset || 0) + (data.count || 0),
+      rankingContext: nextRankingContext,
     };
-  }, [userId, getValidToken]);
+  }, [deriveRankingContext, getValidToken, userId]);
 
   // ── cached initial feed (5-min stale time) ─────────────────────────────────
 
@@ -272,22 +488,59 @@ function DiscoverContent() {
     retry: false,
   });
 
+  useLayoutEffect(() => {
+    if (!userId) return;
+
+    const restored = loadDiscoverProgress(userId);
+    if (!restored) return;
+
+    restoredProgressRef.current = true;
+    setListings(Array.isArray(restored.listings) ? restored.listings : []);
+    setCurrentIndex(
+      Number.isFinite(restored.currentIndex)
+        ? Math.max(0, Math.min(restored.currentIndex, restored.listings?.length || 0))
+        : 0
+    );
+    setHasMore(Boolean(restored.hasMore));
+    setMissingCorePreferences(Boolean(restored.missingCorePreferences));
+    setEmptyResultReason(restored.emptyResultReason ?? null);
+    setRankingContext(restored.rankingContext ?? null);
+    nextOffsetRef.current = Number.isFinite(restored.nextOffset) ? restored.nextOffset : 0;
+  }, [userId]);
+
   // Sync query data → swipe-stack state.
   // useLayoutEffect runs before paint so there is no visible flash of empty state on
   // remounts that have a cache hit (feedData is available immediately).
   useLayoutEffect(() => {
     if (!feedData || feedData === prevFeedDataRef.current) return;
     prevFeedDataRef.current = feedData;
+    if (restoredProgressRef.current) {
+      restoredProgressRef.current = false;
+      return;
+    }
     setListings(feedData.listings);
     setCurrentIndex(0);
     setHasMore(feedData.hasMore);
     setMissingCorePreferences(!feedData.hasCorePreferences);
+    setRankingContext(feedData.rankingContext ?? null);
     setEmptyResultReason(
       feedData.listings.length === 0
         ? (feedData.hasCorePreferences ? 'strict_constraints' : 'missing_preferences')
         : null
     );
     nextOffsetRef.current = feedData.nextOffset;
+    sessionMetricsRef.current = { likesCount: 0, detailOpensCount: 0, swipesCount: 0 };
+    setSwipesInCycle(0);
+    setFeedbackCycle(0);
+    promptShownRef.current = false;
+    setFeedbackSessionId(null);
+    setPromptAllowed(false);
+    setShowFeedbackPrompt(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    setFeedbackAcknowledged(false);
+    surfaceStartedAtRef.current = Date.now();
+    recommendationClientSessionIdRef.current = createRecommendationClientSessionId('discover');
   }, [feedData]);
 
   // Only show the full-page spinner on the very first load (no cached data yet).
@@ -310,6 +563,166 @@ function DiscoverContent() {
       setAppendLoading(false);
     }
   }, [fetchFeedPage]);
+
+  useEffect(() => {
+    latestSessionIdRef.current = feedbackSessionId;
+  }, [feedbackSessionId]);
+
+  useEffect(() => {
+    latestTokenRef.current = authState?.accessToken ?? null;
+  }, [authState?.accessToken]);
+
+  useEffect(() => {
+    latestListingsRef.current = listings;
+  }, [listings]);
+
+  useEffect(() => {
+    latestRankingContextRef.current = rankingContext;
+  }, [rankingContext]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    if (listings.length === 0 && currentIndex === 0) {
+      clearDiscoverProgress(userId);
+      return;
+    }
+
+    saveDiscoverProgress(userId, {
+      listings,
+      currentIndex,
+      hasMore,
+      nextOffset: nextOffsetRef.current,
+      missingCorePreferences,
+      emptyResultReason,
+      rankingContext,
+    });
+  }, [
+    currentIndex,
+    emptyResultReason,
+    hasMore,
+    listings,
+    missingCorePreferences,
+    rankingContext,
+    userId,
+  ]);
+
+  useEffect(() => {
+    if (!authState?.accessToken || !userId || loading || error || listings.length === 0) return;
+
+    let cancelled = false;
+
+    const ensureRecommendationSession = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authState.accessToken}`,
+          },
+          body: JSON.stringify(buildSessionPayload(listings, rankingContext)),
+        });
+
+        if (!response.ok && response.status !== 503) {
+          console.warn('Failed to create discover recommendation session');
+          return;
+        }
+
+        if (response.status === 503) return;
+
+        const result = await response.json();
+        if (cancelled) return;
+
+        setFeedbackSessionId(result?.data?.id ?? null);
+        setPromptAllowed(Boolean(result?.prompt_allowed));
+      } catch {
+        // Best-effort only.
+      }
+    };
+
+    void ensureRecommendationSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState?.accessToken, buildSessionPayload, error, feedbackCycle, listings, loading, rankingContext, userId]);
+
+  useEffect(() => {
+    if (
+      promptShownRef.current ||
+      !feedbackSessionId ||
+      !promptAllowed ||
+      showFeedbackPrompt ||
+      feedbackSubmitting ||
+      loading ||
+      error ||
+      swipesInCycle < DISCOVER_FEEDBACK_SWIPE_THRESHOLD
+    ) {
+      return;
+    }
+
+    promptShownRef.current = true;
+    setShowFeedbackPrompt(true);
+    void patchRecommendationSession({
+      prompt_presented: true,
+      likes_count: sessionMetricsRef.current.likesCount,
+      detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+      recommendation_count_shown: listings.length,
+      top_listing_ids_shown: listings.map((listing) => listing?.listing_id).filter(Boolean).slice(0, 20),
+      surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+      algorithm_version: rankingContext?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+      model_version: rankingContext?.model_version ?? null,
+      experiment_name: rankingContext?.experiment_name ?? 'discover_ranker_v1',
+      experiment_variant: rankingContext?.experiment_variant ?? null,
+    });
+  }, [
+    error,
+    feedbackSessionId,
+    feedbackSubmitting,
+    listings,
+    loading,
+    patchRecommendationSession,
+    promptAllowed,
+    rankingContext,
+    showFeedbackPrompt,
+    swipesInCycle,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      const token = latestTokenRef.current;
+      const sessionId = latestSessionIdRef.current;
+      if (!token || !sessionId) return;
+
+      const recommendations = latestListingsRef.current || [];
+      const context = latestRankingContextRef.current;
+      const topListingIds = recommendations
+        .map((listing) => listing?.listing_id)
+        .filter(Boolean)
+        .slice(0, 20);
+
+      fetch(`${API_BASE}/api/interactions/recommendation-sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          mark_ended: true,
+          surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+          likes_count: sessionMetricsRef.current.likesCount,
+          detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+          recommendation_count_shown: recommendations.length,
+          top_listing_ids_shown: topListingIds,
+          algorithm_version: context?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+          model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
+          experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'discover_ranker_v1' : null),
+          experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     setExpandedImageIndex(0);
@@ -453,6 +866,12 @@ function DiscoverContent() {
       startedAt,
     });
 
+    sessionMetricsRef.current.swipesCount += 1;
+    setSwipesInCycle(sessionMetricsRef.current.swipesCount);
+    if (action === 'like') {
+      sessionMetricsRef.current.likesCount += 1;
+    }
+
     setCurrentIndex((prev) => prev + 1);
 
     if (tourPhase === 'discover') {
@@ -468,15 +887,132 @@ function DiscoverContent() {
   };
 
   const handleModalAction = (direction) => {
-    setExpandedListing(null);
+    closeExpanded();
     setTimeout(() => handleButton(direction), 200);
   };
 
   const openExpanded = useCallback((listing) => {
     cardExpandedRef.current = true;
+    sessionMetricsRef.current.detailOpensCount += 1;
+    const position = findListingPosition(listing?.listing_id);
+    void persistRecommendationEvent({
+      eventType: 'detail_open',
+      listingId: listing?.listing_id,
+      positionInFeed: position,
+      metadata: {
+        match_percent: listing?.match_percent ?? null,
+        open_type: 'discover_quick_view',
+      },
+    });
+    expandedOpenedAtRef.current = Date.now();
     setExpandedImageIndex(0);
     setExpandedListing(listing);
-  }, []);
+  }, [findListingPosition, persistRecommendationEvent]);
+
+  const closeExpanded = useCallback(() => {
+    if (expandedListing?.listing_id) {
+      const position = findListingPosition(expandedListing.listing_id);
+      const dwellMs =
+        expandedOpenedAtRef.current != null
+          ? Math.max(0, Date.now() - expandedOpenedAtRef.current)
+          : null;
+      void persistRecommendationEvent({
+        eventType: 'detail_view',
+        listingId: expandedListing.listing_id,
+        positionInFeed: position,
+        dwellMs,
+        metadata: {
+          view_type: 'discover_quick_view',
+        },
+      });
+    }
+
+    expandedOpenedAtRef.current = null;
+    setExpandedListing(null);
+  }, [expandedListing, findListingPosition, persistRecommendationEvent]);
+
+  const submitFeedback = useCallback(async ({ feedbackLabel, reasonLabel = null }) => {
+    if (!authState?.accessToken || !feedbackSessionId || feedbackSubmitting) return;
+
+    setFeedbackSubmitting(true);
+    try {
+      await patchRecommendationSession({
+        likes_count: sessionMetricsRef.current.likesCount,
+        detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+        recommendation_count_shown: listings.length,
+        top_listing_ids_shown: listings.map((listing) => listing?.listing_id).filter(Boolean).slice(0, 20),
+        surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+        algorithm_version: rankingContext?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+        model_version: rankingContext?.model_version ?? null,
+        experiment_name: rankingContext?.experiment_name ?? 'discover_ranker_v1',
+        experiment_variant: rankingContext?.experiment_variant ?? null,
+      });
+
+      const response = await fetch(`${API_BASE}/api/interactions/recommendation-feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: feedbackSessionId,
+          feedback_label: feedbackLabel,
+          reason_label: reasonLabel,
+        }),
+      });
+
+      if (!response.ok && response.status !== 503) {
+        console.warn('Failed to submit discover recommendation feedback');
+        return;
+      }
+
+      setShowFeedbackPrompt(false);
+      setPromptAllowed(false);
+      setFeedbackStep('question');
+      setPendingFeedbackLabel(null);
+      setFeedbackAcknowledged(true);
+      startNextFeedbackCycle();
+    } catch {
+      // Best-effort only.
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }, [
+    authState?.accessToken,
+    feedbackSessionId,
+    feedbackSubmitting,
+    listings,
+    patchRecommendationSession,
+    rankingContext,
+    startNextFeedbackCycle,
+  ]);
+
+  const dismissFeedbackPrompt = useCallback(async () => {
+    await patchRecommendationSession({
+      prompt_dismissed: true,
+      likes_count: sessionMetricsRef.current.likesCount,
+      detail_opens_count: sessionMetricsRef.current.detailOpensCount,
+      surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
+    });
+    startNextFeedbackCycle();
+  }, [patchRecommendationSession, startNextFeedbackCycle]);
+
+  const handleFeedbackChoice = useCallback(async (value) => {
+    if (value === 'not_useful') {
+      setPendingFeedbackLabel(value);
+      setFeedbackStep('reason');
+      return;
+    }
+
+    await submitFeedback({ feedbackLabel: value });
+  }, [submitFeedback]);
+
+  const handleNegativeReason = useCallback(async (reasonLabel) => {
+    await submitFeedback({
+      feedbackLabel: pendingFeedbackLabel || 'not_useful',
+      reasonLabel,
+    });
+  }, [pendingFeedbackLabel, submitFeedback]);
 
   // Auto-advance modal images every 5s while modal is open
   useEffect(() => {
@@ -513,12 +1049,103 @@ function DiscoverContent() {
           <Title order={2} style={{ color: '#111', fontWeight: 500 }}>
             Discover
           </Title>
+          {feedbackAcknowledged && (
+            <Text size="sm" c="teal.7">
+              Thanks. Your feedback was saved for recommendation evaluation.
+            </Text>
+          )}
           {!loading && !isDone && !noRecommendations && (
             <Text size="sm" c="dimmed" data-tour="discover-counter">
               {remaining} listing{remaining !== 1 ? 's' : ''} left
             </Text>
           )}
         </Stack>
+
+        {showFeedbackPrompt && (
+          <Box style={{ width: '100%', maxWidth: 520, margin: '0 auto 1.25rem' }}>
+            <Box
+              style={{
+                border: '1px solid #d3f9d8',
+                backgroundColor: '#f8fff9',
+                borderRadius: 16,
+                padding: '1rem',
+                boxShadow: '0 8px 28px rgba(18, 184, 134, 0.08)',
+              }}
+            >
+              <Stack gap="md">
+                {feedbackStep === 'question' ? (
+                  <>
+                    <Stack gap={4}>
+                      <Title order={4} style={{ color: '#111' }}>
+                        How useful were these recommendations?
+                      </Title>
+                      <Text size="sm" c="dimmed">
+                        Your feedback helps us improve how listings are ranked.
+                      </Text>
+                    </Stack>
+                    <Stack gap="sm">
+                      {MATCHES_FEEDBACK_CHOICES.map((choice) => (
+                        <Button
+                          key={choice.value}
+                          size="md"
+                          variant={choice.value === 'very_useful' ? 'filled' : 'light'}
+                          color="teal"
+                          disabled={feedbackSubmitting}
+                          onClick={() => handleFeedbackChoice(choice.value)}
+                        >
+                          {choice.label}
+                        </Button>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        color="gray"
+                        disabled={feedbackSubmitting}
+                        onClick={dismissFeedbackPrompt}
+                      >
+                        Not now
+                      </Button>
+                    </Stack>
+                  </>
+                ) : (
+                  <>
+                    <Stack gap={4}>
+                      <Title order={4} style={{ color: '#111' }}>
+                        What felt off?
+                      </Title>
+                      <Text size="sm" c="dimmed">
+                        Optional
+                      </Text>
+                    </Stack>
+                    <Stack gap="sm">
+                      {MATCHES_NEGATIVE_REASON_CHOICES.map((choice) => (
+                        <Button
+                          key={choice.value}
+                          size="md"
+                          variant="light"
+                          color="teal"
+                          disabled={feedbackSubmitting}
+                          onClick={() => handleNegativeReason(choice.value)}
+                        >
+                          {choice.label}
+                        </Button>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        color="gray"
+                        disabled={feedbackSubmitting}
+                        onClick={() => submitFeedback({ feedbackLabel: pendingFeedbackLabel || 'not_useful' })}
+                      >
+                        Skip
+                      </Button>
+                    </Stack>
+                  </>
+                )}
+              </Stack>
+            </Box>
+          </Box>
+        )}
 
         {/* Content */}
         <Stack align="center" gap="xl">
@@ -678,7 +1305,7 @@ function DiscoverContent() {
       {/* Quick-view modal */}
       <Modal
         opened={!!expandedListing}
-        onClose={() => setExpandedListing(null)}
+        onClose={closeExpanded}
         size="min(90vw, 720px)"
         padding={0}
         radius="lg"
@@ -786,7 +1413,7 @@ function DiscoverContent() {
                     color="white"
                     size="lg"
                     radius="xl"
-                    onClick={() => setExpandedListing(null)}
+                    onClick={closeExpanded}
                     style={{ color: '#fff' }}
                   >
                     <IconX size={18} />

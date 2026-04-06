@@ -17,6 +17,7 @@ import {
   Button,
   Card,
   Group,
+  Grid,
   Avatar,
   Loader,
   Alert,
@@ -29,26 +30,37 @@ import {
   IconBuilding,
   IconSchool,
   IconBriefcase,
+  IconHeart,
   IconCheck,
   IconAlertCircle,
   IconMail,
   IconShield,
   IconSettings,
+  IconMapPin,
 } from '@tabler/icons-react';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { PreferencesForm } from '../components/PreferencesForm';
-import { SkeletonAccountProfile } from '../components/Skeletons';
+import { ImageWithFallback } from '../components/ImageWithFallback';
+import { SkeletonAccountProfile, SkeletonListingCard } from '../components/Skeletons';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../../../lib/api';
 
 function AccountTabs() {
   const searchParams = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(tabFromUrl === 'preferences' ? 'preferences' : 'profile');
+  const initialTab = tabFromUrl === 'preferences'
+    ? 'preferences'
+    : tabFromUrl === 'interested'
+      ? 'interested'
+      : 'profile';
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   useEffect(() => {
     const t = searchParams.get('tab');
     if (t === 'preferences') setActiveTab('preferences');
+    else if (t === 'interested') setActiveTab('interested');
+    else setActiveTab('profile');
   }, [searchParams]);
 
   return (
@@ -60,6 +72,9 @@ function AccountTabs() {
         <Tabs.Tab value="preferences" leftSection={<IconSettings size={16} />}>
           Preferences
         </Tabs.Tab>
+        <Tabs.Tab value="interested" leftSection={<IconHeart size={16} />}>
+          Interested Listings
+        </Tabs.Tab>
       </Tabs.List>
 
       <Tabs.Panel value="profile">
@@ -68,6 +83,10 @@ function AccountTabs() {
 
       <Tabs.Panel value="preferences">
         <PreferencesForm />
+      </Tabs.Panel>
+
+      <Tabs.Panel value="interested">
+        <InterestedListingsPanel />
       </Tabs.Panel>
     </Tabs>
   );
@@ -377,6 +396,162 @@ function ProfilePanel() {
           Save Changes
         </Button>
       </Group>
+    </Stack>
+  );
+}
+
+function InterestedListingsPanel() {
+  const { authState, getValidToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['interested-listings'],
+    queryFn: async () => {
+      const token = await getValidToken();
+      return api.getInterestedListings(token);
+    },
+    enabled: !!authState?.accessToken,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const listings = data?.data || [];
+
+  const handleRemove = async (listingId) => {
+    const token = await getValidToken();
+    await api.unmarkInterestedListing(token, listingId);
+    await queryClient.invalidateQueries({ queryKey: ['interested-listings'] });
+  };
+
+  if (isLoading) {
+    return (
+      <Grid gutter="lg">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Grid.Col key={index} span={{ base: 12, md: 6, xl: 4 }}>
+            <SkeletonListingCard />
+          </Grid.Col>
+        ))}
+      </Grid>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert icon={<IconAlertCircle size={16} />} color="red" title="Unable to load interested listings">
+        {getErrorMessage(error, 'Please try again in a moment.')}
+      </Alert>
+    );
+  }
+
+  if (listings.length === 0) {
+    return (
+      <Card withBorder padding="xl" radius="md">
+        <Stack gap="xs" align="center" py="xl">
+          <IconHeart size={32} color="#12b886" />
+          <Title order={3}>No interested listings yet</Title>
+          <Text c="dimmed" ta="center" maw={420}>
+            When you open a listing and tap &quot;I&apos;m interested&quot;, it will show up here.
+          </Text>
+        </Stack>
+      </Card>
+    );
+  }
+
+  return (
+    <Stack gap="lg">
+      <Text c="dimmed">
+        {listings.length} interested listing{listings.length === 1 ? '' : 's'}
+      </Text>
+
+      <Grid gutter="lg">
+        {listings.map((listing) => {
+          const image = (() => {
+            if (Array.isArray(listing.images)) return listing.images[0];
+            if (typeof listing.images === 'string') {
+              try {
+                const parsed = JSON.parse(listing.images);
+                if (Array.isArray(parsed)) return parsed[0];
+              } catch {
+                return listing.images;
+              }
+            }
+            return 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+          })();
+
+          const title = listing.title || 'Listing';
+          const location = [listing.city, listing.state].filter(Boolean).join(', ');
+
+          return (
+            <Grid.Col key={listing.id || listing.listing_id} span={{ base: 12, md: 6, xl: 4 }}>
+              <Card withBorder radius="lg" padding="md" style={{ height: '100%' }}>
+                <Card.Section>
+                  <Box style={{ position: 'relative', paddingBottom: '62%', backgroundColor: '#f3f4f6' }}>
+                    <ImageWithFallback
+                      src={image}
+                      alt={title}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                      }}
+                    />
+                  </Box>
+                </Card.Section>
+
+                <Stack gap="sm" mt="md">
+                  <Stack gap={4}>
+                    <Text fw={600} lineClamp={2}>
+                      {title}
+                    </Text>
+                    {location && (
+                      <Group gap={4}>
+                        <IconMapPin size={13} color="#868e96" />
+                        <Text size="sm" c="dimmed" lineClamp={1}>
+                          {location}
+                        </Text>
+                      </Group>
+                    )}
+                  </Stack>
+
+                  {listing.price_per_month != null && (
+                    <Text fw={700} size="lg" c="teal.6">
+                      ${Number(listing.price_per_month).toLocaleString()}/mo
+                    </Text>
+                  )}
+
+                  <Text size="sm" c="dimmed">
+                    {[
+                      listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
+                      listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
+                      listing.area_sqft != null && `${Number(listing.area_sqft).toLocaleString()} sq ft`,
+                    ].filter(Boolean).join(' · ')}
+                  </Text>
+
+                  <Group grow mt="sm">
+                    <Button
+                      component="a"
+                      href={`/listings/${listing.id}`}
+                      color="teal"
+                      variant="light"
+                    >
+                      View Details
+                    </Button>
+                    <Button
+                      color="gray"
+                      variant="subtle"
+                      onClick={() => handleRemove(String(listing.id))}
+                    >
+                      Remove
+                    </Button>
+                  </Group>
+                </Stack>
+              </Card>
+            </Grid.Col>
+          );
+        })}
+      </Grid>
     </Stack>
   );
 }

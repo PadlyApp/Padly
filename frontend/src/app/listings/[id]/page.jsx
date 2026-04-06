@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, Tooltip, ActionIcon } from '@mantine/core';
 import { SkeletonListingDetail } from '../../components/Skeletons';
 import { IconBookmark, IconBookmarkFilled, IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
@@ -13,6 +13,7 @@ import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
+import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -48,27 +49,37 @@ function parseTitle(raw) {
 
 export default function ListingDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const listingId = params.id;
   const { getValidToken, authState } = useAuth();
+  const recommendationSessionId = searchParams.get('recommendationSessionId');
+  const recommendationSource = searchParams.get('source');
+  const trackedPosition = searchParams.get('position');
+  const parsedPosition = trackedPosition == null ? Number.NaN : Number(trackedPosition);
+  const positionInFeed = Number.isFinite(parsedPosition) && parsedPosition >= 0 ? parsedPosition : null;
 
   usePageTracking('listing_detail', authState?.accessToken);
 
   const [userGroup, setUserGroup] = useState(null);
   const [isSaved, setIsSaved] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [isInterested, setIsInterested] = useState(false);
+  const [interestLoading, setInterestLoading] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
 
   const viewStartRef = useRef(Date.now());
   useEffect(() => {
-    if (!authState?.accessToken) return;
+    if (!authState?.accessToken || !listingId) return;
     viewStartRef.current = Date.now();
-    const sessionId =
+    const genericSessionId =
       (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('padly_swipe_session_id')) ||
       `listing-detail-${Date.now()}`;
+    const shouldTrackPassiveDwell = recommendationSource === 'matches' && Boolean(recommendationSessionId);
 
     return () => {
-      const duration_ms = Math.max(0, Date.now() - viewStartRef.current);
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/interactions/listing-views`, {
+      const dwellMs = Math.max(0, Date.now() - viewStartRef.current);
+
+      fetch(`${API_BASE}/api/interactions/listing-views`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,16 +88,38 @@ export default function ListingDetailPage() {
         body: JSON.stringify({
           listing_id: listingId,
           surface: 'listing_detail',
-          session_id: sessionId,
-          view_duration_ms: duration_ms,
+          session_id: genericSessionId,
+          view_duration_ms: dwellMs,
           expanded: false,
           photos_viewed_count: 0,
         }),
         keepalive: true,
       }).catch(() => {});
+
+      if (!shouldTrackPassiveDwell) return;
+
+      fetch(`${API_BASE}/api/interactions/recommendation-events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          recommendation_session_id: recommendationSessionId,
+          client_event_id: createRecommendationEventId('detail-view'),
+          surface: 'matches',
+          event_type: 'detail_view',
+          listing_id: listingId,
+          position_in_feed: positionInFeed,
+          dwell_ms: dwellMs,
+          metadata: {
+            source: 'listing_detail_page',
+          },
+        }),
+        keepalive: true,
+      }).catch(() => {});
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listingId, authState?.accessToken]);
+  }, [authState?.accessToken, listingId, positionInFeed, recommendationSessionId, recommendationSource]);
 
   const { data: listingData, isLoading, error, refetch } = useQuery({
     queryKey: ['listing', listingId],
@@ -139,6 +172,28 @@ export default function ListingDetailPage() {
     return () => { cancelled = true; };
   }, [listingId, getValidToken]);
 
+  useEffect(() => {
+    if (!listingId || !authState?.accessToken) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = await getValidToken();
+        if (!token || cancelled) return;
+        const response = await api.getInterestedListingIds(token);
+        if (!cancelled) {
+          setIsInterested((response.interested_listing_ids || []).includes(listingId));
+        }
+      } catch {
+        // Interest state is non-critical.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authState?.accessToken, getValidToken, listingId]);
+
   const handleGroupSave = async () => {
     if (!userGroup || saveLoading) return;
     setSaveLoading(true);
@@ -161,6 +216,32 @@ export default function ListingDetailPage() {
       setIsSaved(wasSaved);
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  const handleInterestedToggle = async () => {
+    if (interestLoading) return;
+
+    setInterestLoading(true);
+    const nextInterested = !isInterested;
+    setIsInterested(nextInterested);
+
+    try {
+      const token = await getValidToken();
+      if (!token) {
+        setIsInterested(!nextInterested);
+        return;
+      }
+
+      if (nextInterested) {
+        await api.markInterestedListing(token, listingId, recommendationSource || 'listing_detail');
+      } else {
+        await api.unmarkInterestedListing(token, listingId);
+      }
+    } catch {
+      setIsInterested(!nextInterested);
+    } finally {
+      setInterestLoading(false);
     }
   };
 
@@ -411,7 +492,7 @@ export default function ListingDetailPage() {
               <Stack gap="sm" mt="md">
                 {userGroup && (
                   <Tooltip
-                    label={isSaved ? `Remove from ${userGroup.group_name}` : `Save to ${userGroup.group_name}`}
+                    label={isSaved ? `Remove interest from ${userGroup.group_name}` : `Mark interested for ${userGroup.group_name}`}
                     withArrow
                   >
                     <Button
@@ -424,12 +505,20 @@ export default function ListingDetailPage() {
                       onClick={handleGroupSave}
                       leftSection={isSaved ? <IconBookmarkFilled size={18} /> : <IconBookmark size={18} />}
                     >
-                      {isSaved ? 'Saved for Group' : 'Save for Group'}
+                      {isSaved ? 'Interested for Group' : 'Mark Interested for Group'}
                     </Button>
                   </Tooltip>
                 )}
-                <Button fullWidth size="lg" radius="md" color="teal" variant="outline">
-                  Contact Host
+                <Button
+                  fullWidth
+                  size="lg"
+                  radius="md"
+                  color="teal"
+                  variant={isInterested ? 'filled' : 'outline'}
+                  loading={interestLoading}
+                  onClick={handleInterestedToggle}
+                >
+                  {isInterested ? 'Interested' : "I'm interested"}
                 </Button>
               </Stack>
             </Stack>

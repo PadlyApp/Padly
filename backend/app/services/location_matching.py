@@ -310,16 +310,27 @@ def metro_for_city(value: Any) -> Optional[str]:
     return None
 
 
+def explicit_metro_id(value: Any) -> Optional[str]:
+    raw = normalize_text(value)
+    if not raw:
+        return None
+    if " (" in raw:
+        raw = raw.split(" (", 1)[0].strip()
+    if "," in raw:
+        raw = raw.split(",", 1)[0].strip()
+    return _METRO_DISPLAY_NAMES.get(raw)
+
+
 def cities_match(target_city: Any, listing_city: Any) -> bool:
     target = normalize_city_name(target_city)
     listing = normalize_city_name(listing_city)
     if not target or not listing:
         return True
 
-    target_as_metro = metro_for_city(target)
-    listing_as_metro = metro_for_city(listing)
-    if target_as_metro or listing_as_metro:
-        return bool(target_as_metro) and target_as_metro == listing_as_metro
+    target_as_explicit_metro = explicit_metro_id(target_city)
+    if target_as_explicit_metro:
+        listing_as_metro = metro_for_city(listing)
+        return listing_as_metro == target_as_explicit_metro
 
     # Otherwise strict exact match only
     return target == listing
