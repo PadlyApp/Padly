@@ -21,7 +21,6 @@ from app.routes import (
     options_router,
 )
 from app.routes.roommate_intros import router as roommate_intros_router
-from app.routes.stable_matching import router as stable_matching_router
 from app.routes.groups import router as groups_router
 
 # Initialize FastAPI application
@@ -65,7 +64,6 @@ app.include_router(roommates_router)
 app.include_router(groups_router)  # Roommate groups endpoints
 app.include_router(preferences_router)
 app.include_router(matches_router)
-app.include_router(stable_matching_router)  # Stable matching endpoints
 app.include_router(admin_router)
 app.include_router(recommendations_router)
 app.include_router(interactions_router)
@@ -93,4 +91,3 @@ async def health_check():
         "service": "Padly API",
         "version": "1.0.0"
     }
-

@@ -734,7 +734,6 @@ def _load_existing_dedupe_keys() -> set[Tuple[Any, ...]]:
 
 
 def _wipe_existing() -> None:
-    supabase_admin.table("stable_matches").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
     supabase_admin.table("listing_photos").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
     supabase_admin.table("listings").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
 
@@ -788,7 +787,7 @@ def main() -> int:
     parser.add_argument("inputs", nargs="+", help="One or more exported JSON/JSONL dataset files.")
     parser.add_argument("--host-user-id", help="users.id to assign as the host for imported listings.")
     parser.add_argument("--limit-per-city", type=int, default=135, help="Max listings to keep per metro bucket.")
-    parser.add_argument("--wipe-existing", action="store_true", help="Delete existing listings, listing_photos, and stable_matches before import.")
+    parser.add_argument("--wipe-existing", action="store_true", help="Delete existing listings and listing_photos before import.")
     parser.add_argument("--dry-run", action="store_true", help="Parse and summarise without writing to Supabase.")
     args = parser.parse_args()
 

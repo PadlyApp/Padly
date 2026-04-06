@@ -24,6 +24,13 @@ import os
 router = APIRouter(prefix="/api/roommate-groups", tags=["Roommate Groups"])
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _fetch_active_listings_for_group_location(supabase: Any, group: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Load all active listings, then apply metro-aware location matching in Python."""
     page_size = 1000
@@ -1754,57 +1761,21 @@ async def remove_member(
 
 
 # =============================================================================
-# Integration with Stable Matching
+# Legacy stable-matching retirement helpers
 # =============================================================================
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _stable_group_listing_writes_enabled() -> bool:
-    """
-    Phase 3B control:
-    - false (default): stable matching writes are disabled (read-only legacy)
-    - true: allow legacy stable write operations (rollback path)
-    """
-    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
-
 
 async def _maybe_trigger_legacy_stable_matching(
     target_city: Optional[str],
     reason: str,
 ) -> Dict[str, Any]:
     """
-    Trigger legacy stable matching only when explicitly enabled.
+    Stable matching has been retired. Preserve response shape for legacy callers.
     """
-    if not target_city:
-        return {"status": "skipped", "message": "No city specified"}
-
-    if not _stable_group_listing_writes_enabled():
-        return {
-            "status": "skipped",
-            "message": (
-                "Legacy stable matching writes are disabled in Phase 3B "
-                f"(reason={reason})."
-            ),
-        }
-
-    from app.routes.stable_matching import run_matching, RunMatchingRequest
-
-    try:
-        matching_request = RunMatchingRequest(city=target_city, date_flexibility_days=30)
-        matching_response = await run_matching(matching_request)
-        return {
-            "status": "success",
-            "city": target_city,
-            "total_matches": len(matching_response.matches),
-            "message": matching_response.message,
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return {
+        "status": "retired",
+        "city": target_city,
+        "message": f"Legacy stable matching has been removed (reason={reason}).",
+    }
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -2403,95 +2374,10 @@ async def confirm_match_as_group(
     Confirmed matches are preserved during re-matching - only unconfirmed
     matches are recalculated when new groups join or preferences change.
     """
-    from datetime import datetime, timezone
-
-    if not _stable_group_listing_writes_enabled():
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Stable match confirmations are disabled in Phase 3B. "
-                "Group->Listing serving now uses neural ranking."
-            ),
-        )
-    
-    supabase = get_admin_client()
-    
-    # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    
-    auth_user_id = user_response.user.id
-    
-    # Look up the user in the users table by auth_id
-    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
-    if not user_record.data:
-        raise HTTPException(status_code=404, detail="User profile not found")
-    
-    current_user_id = user_record.data[0]['id']
-    
-    # Check if user is a member of this group
-    member_check = supabase.table('group_members')\
-        .select('user_id, is_creator')\
-        .eq('group_id', group_id)\
-        .eq('user_id', current_user_id)\
-        .eq('status', 'accepted')\
-        .execute()
-    
-    if not member_check.data:
-        raise HTTPException(status_code=403, detail="Only group members can confirm matches")
-    
-    # Get the active match for this group
-    match_response = supabase.table('stable_matches')\
-        .select('*, listings(id, title, city, price_per_month)')\
-        .eq('group_id', group_id)\
-        .eq('status', 'active')\
-        .execute()
-    
-    if not match_response.data:
-        raise HTTPException(status_code=404, detail="No active match found for this group")
-    
-    match = match_response.data[0]
-    
-    # Check if already confirmed by group
-    if match.get('group_confirmed_at'):
-        return {
-            "status": "already_confirmed",
-            "message": "This match was already confirmed by your group",
-            "match_id": match['id'],
-            "group_confirmed_at": match['group_confirmed_at'],
-            "listing_confirmed_at": match.get('listing_confirmed_at'),
-            "fully_confirmed": match.get('listing_confirmed_at') is not None
-        }
-    
-    # Confirm the match
-    now = datetime.now(timezone.utc).isoformat()
-    
-    update_response = supabase.table('stable_matches')\
-        .update({'group_confirmed_at': now})\
-        .eq('id', match['id'])\
-        .execute()
-    
-    # Check if now fully confirmed
-    listing_confirmed = match.get('listing_confirmed_at') is not None
-    fully_confirmed = listing_confirmed  # Group just confirmed, so fully_confirmed depends on listing
-    
-    listing_info = match.get('listings', {})
-    
-    return {
-        "status": "success",
-        "message": "Match confirmed by group" + (" - Waiting for listing owner" if not fully_confirmed else " - Both parties confirmed!"),
-        "match_id": match['id'],
-        "listing": {
-            "id": listing_info.get('id'),
-            "title": listing_info.get('title'),
-            "city": listing_info.get('city'),
-            "price_per_month": listing_info.get('price_per_month')
-        },
-        "group_confirmed_at": now,
-        "listing_confirmed_at": match.get('listing_confirmed_at'),
-        "fully_confirmed": fully_confirmed
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="Stable match confirmations have been retired.",
+    )
 
 
 @router.delete("/{group_id}/reject-match", response_model=dict)
@@ -2505,85 +2391,10 @@ async def reject_match_as_group(
     This removes the match and optionally triggers re-matching
     to find a new match for the group.
     """
-    if not _stable_group_listing_writes_enabled():
-        raise HTTPException(
-            status_code=410,
-            detail=(
-                "Stable match rejection writes are disabled in Phase 3B. "
-                "Group->Listing serving now uses neural ranking."
-            ),
-        )
-
-    supabase = get_admin_client()
-    
-    # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    
-    auth_user_id = user_response.user.id
-    
-    # Look up the user in the users table by auth_id
-    user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
-    if not user_record.data:
-        raise HTTPException(status_code=404, detail="User profile not found")
-    
-    current_user_id = user_record.data[0]['id']
-    
-    # Check if user is a member of this group
-    member_check = supabase.table('group_members')\
-        .select('user_id')\
-        .eq('group_id', group_id)\
-        .eq('user_id', current_user_id)\
-        .eq('status', 'accepted')\
-        .execute()
-    
-    if not member_check.data:
-        raise HTTPException(status_code=403, detail="Only group members can reject matches")
-    
-    # Get the active match for this group
-    match_response = supabase.table('stable_matches')\
-        .select('*')\
-        .eq('group_id', group_id)\
-        .eq('status', 'active')\
-        .execute()
-    
-    if not match_response.data:
-        raise HTTPException(status_code=404, detail="No active match found for this group")
-    
-    match = match_response.data[0]
-    
-    # Check if already confirmed by BOTH parties - can't reject a fully confirmed match
-    if match.get('group_confirmed_at') and match.get('listing_confirmed_at'):
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot reject a fully confirmed match. Contact support if needed."
-        )
-    
-    # Mark the match as cancelled
-    supabase.table('stable_matches')\
-        .update({'status': 'cancelled'})\
-        .eq('id', match['id'])\
-        .execute()
-    
-    # Get group city for optional legacy re-matching (Phase 3B default OFF)
-    group_response = supabase.table('roommate_groups')\
-        .select('target_city')\
-        .eq('id', group_id)\
-        .single()\
-        .execute()
-
-    matching_result = await _maybe_trigger_legacy_stable_matching(
-        target_city=(group_response.data or {}).get("target_city"),
-        reason="group_reject_match",
+    raise HTTPException(
+        status_code=410,
+        detail="Stable match rejections have been retired.",
     )
-    
-    return {
-        "status": "success",
-        "message": "Match rejected. Re-matching triggered to find new options.",
-        "rejected_match_id": match['id'],
-        "matching": matching_result
-    }
 
 
 @router.get("/{group_id}/compatible-users", response_model=dict)

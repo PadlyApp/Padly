@@ -3,7 +3,7 @@ Matches routes
 
 This module provides endpoints for users to discover:
 1. Compatible roommate groups (User-to-Group matching)
-2. Listings for their group (via stable matching)
+2. Their current groups and next-step listing endpoints
 
 Note: Individual user→listing matching is deprecated. 
 Users should join/create a group first, then get group→listing matches.
@@ -209,11 +209,11 @@ async def get_user_group_status(
     
     This endpoint helps users understand:
     1. Which group(s) they belong to
-    2. What stable matches their group has (from LNS algorithm)
-    
+    2. Where to fetch their current ranked listing feed
+
     For individual user→listing matches, users should:
     1. Create or join a roommate group
-    2. Use /api/roommate-groups/{group_id}/matches for stable matches
+    2. Use /api/roommate-groups/{group_id}/matches for ranked recommendations
     3. Use /api/roommate-groups/{group_id}/eligible-listings for browsing
     """
     supabase = get_admin_client()
@@ -238,7 +238,7 @@ async def get_user_group_status(
             ]
         }
     
-    # Get matches for each group
+    # Stable matching is retired. Surface group membership plus the ranked-feed endpoint.
     groups_with_matches = []
     for membership in member_response.data:
         group = membership.get('roommate_groups', {})
@@ -247,27 +247,21 @@ async def get_user_group_status(
         if not group_id:
             continue
         
-        # Get stable matches for this group
-        matches_response = supabase.table('stable_matches')\
-            .select('*, listings(*)')\
-            .eq('group_id', group_id)\
-            .eq('status', 'active')\
-            .order('group_rank')\
-            .limit(10)\
-            .execute()
-        
         groups_with_matches.append({
             "group_id": group_id,
             "group_name": group.get('group_name'),
             "target_city": group.get('target_city'),
             "is_creator": membership.get('is_creator', False),
-            "match_count": len(matches_response.data) if matches_response.data else 0,
-            "top_matches": matches_response.data[:5] if matches_response.data else []
+            "match_count": None,
+            "top_matches": [],
+            "listing_feed_endpoint": f"/api/roommate-groups/{group_id}/matches",
+            "eligible_listings_endpoint": f"/api/roommate-groups/{group_id}/eligible-listings",
         })
     
     return {
         "status": "success",
         "user_id": user_id,
+        "mode": "stable_matching_retired",
         "groups": groups_with_matches,
         "endpoints": {
             "group_matches": "/api/roommate-groups/{group_id}/matches",
