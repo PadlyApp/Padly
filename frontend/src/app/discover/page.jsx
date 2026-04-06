@@ -41,6 +41,37 @@ function getOrCreateSwipeSessionId() {
   return generated;
 }
 
+function collectDeviceContext() {
+  if (typeof window === 'undefined') return {};
+  const ua = navigator.userAgent || '';
+  const isTablet = /Tablet|iPad/i.test(ua);
+  const isMobile = /Mobi|Android/i.test(ua);
+  const deviceType = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+
+  let os = 'unknown';
+  if (/Windows/i.test(ua)) os = 'windows';
+  else if (/Mac OS X/i.test(ua)) os = 'macos';
+  else if (/Android/i.test(ua)) os = 'android';
+  else if (/iPhone|iPad|iPod/i.test(ua)) os = 'ios';
+  else if (/Linux/i.test(ua)) os = 'linux';
+
+  let browser = 'unknown';
+  if (/Firefox\/\d/i.test(ua)) browser = 'firefox';
+  else if (/Edg\/\d/i.test(ua)) browser = 'edge';
+  else if (/Chrome\/\d/i.test(ua) && !/Chromium/i.test(ua)) browser = 'chrome';
+  else if (/Safari\/\d/i.test(ua) && !/Chrome/i.test(ua)) browser = 'safari';
+
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return {
+    device_type: deviceType,
+    os,
+    browser,
+    screen_width: window.screen?.width ?? null,
+    screen_height: window.screen?.height ?? null,
+    connection_type: conn?.effectiveType ?? conn?.type ?? null,
+  };
+}
+
 // ── page ────────────────────────────────────────────────────────────────────
 
 export default function DiscoverPage() {
@@ -68,6 +99,10 @@ function DiscoverContent() {
   const [hasMore, setHasMore] = useState(false);
   const swipeSessionIdRef = useRef(null);
   const nextOffsetRef = useRef(0);
+  const activeFilterBodyRef = useRef({});
+  const cardViewStartRef = useRef(null);
+  const cardPhotoCountRef = useRef(0);
+  const cardExpandedRef = useRef(false);
 
   const fetchRecommendations = useCallback(async ({ append = false } = {}) => {
     setLoading(true);
@@ -175,6 +210,9 @@ function DiscoverContent() {
         ...likedExtras,
       };
 
+      // Cache the filter body so swipe-context events can reference it.
+      activeFilterBodyRef.current = body;
+
       const res = await fetch(`${API_BASE}/api/recommendations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -200,6 +238,15 @@ function DiscoverContent() {
 
       setHasMore(Boolean(data.has_more));
       nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
+
+      // Fire search query event — demand intelligence, best-effort.
+      if (authState?.accessToken) {
+        void persistSearchQueryEvent({
+          filterBody: body,
+          resultsCount: (data.recommendations || []).length,
+          searchOffset: body.offset || 0,
+        });
+      }
 
       if (append) {
         setListings((prev) => [...prev, ...fresh]);
@@ -280,6 +327,84 @@ function DiscoverContent() {
     }
   }, [authState?.accessToken, userId]);
 
+  const persistSwipeContextEvent = useCallback(async ({ listing, action }) => {
+    if (!authState?.accessToken || !listing?.listing_id) return;
+    if (!swipeSessionIdRef.current) {
+      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+    }
+    try {
+      await fetch(`${API_BASE}/api/interactions/swipe-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
+        body: JSON.stringify({
+          listing_id: listing.listing_id,
+          action,
+          session_id: swipeSessionIdRef.current,
+          active_filters_snapshot: activeFilterBodyRef.current || null,
+          device_context: collectDeviceContext(),
+        }),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  }, [authState?.accessToken]);
+
+  const persistListingViewEvent = useCallback(async ({ listing, surface }) => {
+    if (!authState?.accessToken || !listing?.listing_id) return;
+    if (!swipeSessionIdRef.current) {
+      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+    }
+    const duration_ms =
+      cardViewStartRef.current != null
+        ? Math.max(0, Date.now() - cardViewStartRef.current)
+        : null;
+    try {
+      await fetch(`${API_BASE}/api/interactions/listing-views`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
+        body: JSON.stringify({
+          listing_id: listing.listing_id,
+          surface,
+          session_id: swipeSessionIdRef.current,
+          view_duration_ms: duration_ms,
+          expanded: cardExpandedRef.current,
+          photos_viewed_count: cardPhotoCountRef.current,
+        }),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  }, [authState?.accessToken]);
+
+  const persistSearchQueryEvent = useCallback(async ({ filterBody, resultsCount, searchOffset }) => {
+    if (!authState?.accessToken) return;
+    if (!swipeSessionIdRef.current) {
+      swipeSessionIdRef.current = getOrCreateSwipeSessionId();
+    }
+    try {
+      await fetch(`${API_BASE}/api/interactions/search-queries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
+        body: JSON.stringify({
+          session_id: swipeSessionIdRef.current,
+          filter_snapshot: filterBody,
+          results_returned: resultsCount,
+          offset: searchOffset,
+        }),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  }, [authState?.accessToken]);
+
+  // Reset view-tracking refs whenever the top card changes.
+  useEffect(() => {
+    if (listings.length === 0 || currentIndex >= listings.length) return;
+    cardViewStartRef.current = Date.now();
+    cardPhotoCountRef.current = 0;
+    cardExpandedRef.current = false;
+  }, [currentIndex, listings.length]);
+
   const handleSwipe = useCallback((direction, listing) => {
     const action = direction === 'right' ? 'like' : 'pass';
     if (action === 'like') saveLikedListing(listing);
@@ -291,6 +416,10 @@ function DiscoverContent() {
         ? currentIndex
         : listings.findIndex((item) => item.listing_id === listing?.listing_id);
     const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
+
+    // Fire data logging events before advancing the index (best-effort, parallel).
+    void persistListingViewEvent({ listing, surface: 'discover_card' });
+    void persistSwipeContextEvent({ listing, action });
 
     void persistSwipeEvent({
       listing,
@@ -306,7 +435,7 @@ function DiscoverContent() {
         detail: { direction },
       }));
     }
-  }, [currentIndex, listings, persistSwipeEvent, tourPhase]);
+  }, [currentIndex, listings, persistSwipeEvent, persistListingViewEvent, persistSwipeContextEvent, tourPhase]);
 
   const handleButton = (direction) => {
     if (currentIndex >= listings.length) return;
@@ -320,6 +449,7 @@ function DiscoverContent() {
 
 
   const openExpanded = (listing) => {
+    cardExpandedRef.current = true;
     setExpandedImageIndex(0);
     setExpandedListing(listing);
   };
@@ -481,6 +611,7 @@ function DiscoverContent() {
                       isTop={offset === 0}
                       stackOffset={offset}
                       onExpand={openExpanded}
+                      onPhotoChange={offset === 0 ? () => { cardPhotoCountRef.current += 1; } : undefined}
                     />
                   );
                 })}

@@ -10,8 +10,9 @@ import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
-import Link from 'next/link';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePageTracking } from '../../hooks/usePageTracking';
+import Link from 'next/link';
 import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 
 export default function ListingDetailPage() {
@@ -29,6 +30,8 @@ export default function ListingDetailPage() {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
   }, [trackedPosition]);
 
+  usePageTracking('listing_detail', authState?.accessToken);
+
   const { data: listingData, isLoading, error, refetch } = useQuery({
     queryKey: ['listing', listingId],
     queryFn: () => api.getListing(listingId),
@@ -40,16 +43,38 @@ export default function ListingDetailPage() {
   }, [listingId]);
 
   useEffect(() => {
+    if (!authState?.accessToken || !listingId) return;
+
+    const genericSessionId =
+      (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('padly_swipe_session_id')) ||
+      `listing-detail-${Date.now()}`;
+
     const shouldTrackPassiveDwell =
       recommendationSource === 'matches'
       && !!recommendationSessionId
-      && !!authState?.accessToken
-      && !!listingId;
 
     return () => {
+      const dwellMs = Math.max(0, Date.now() - detailStartedAtRef.current);
+
+      fetch(`${API_BASE}/api/interactions/listing-views`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authState.accessToken}`,
+        },
+        body: JSON.stringify({
+          listing_id: listingId,
+          surface: 'listing_detail',
+          session_id: genericSessionId,
+          view_duration_ms: dwellMs,
+          expanded: false,
+          photos_viewed_count: 0,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+
       if (!shouldTrackPassiveDwell) return;
 
-      const dwellMs = Math.max(0, Date.now() - detailStartedAtRef.current);
       fetch(`${API_BASE}/api/interactions/recommendation-events`, {
         method: 'POST',
         headers: {

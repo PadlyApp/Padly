@@ -11,6 +11,7 @@ import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useAuth } from '../contexts/AuthContext';
+import { usePageTracking } from '../hooks/usePageTracking';
 import { getLikedListings } from '../discover/likedListings';
 import {
   createAppError,
@@ -45,6 +46,8 @@ function MatchesPageContent() {
   const latestTokenRef = useRef(null);
   const latestListingsRef = useRef([]);
   const latestRankingContextRef = useRef(null);
+
+  usePageTracking('matches', authState?.accessToken);
 
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);

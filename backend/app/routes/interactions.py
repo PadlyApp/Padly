@@ -7,7 +7,7 @@ Phase 1 endpoint(s) for swipe event capture from Discover.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Literal
+from typing import Any, Dict, Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -981,6 +981,201 @@ async def get_my_saved_listings_for_group(
         return {"status": "success", "saved_listing_ids": ids}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch saved listings: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Data logging endpoints (analytics / AI training)
+# All four are best-effort: failures are returned as 500 but callers should
+# fire-and-forget these. They write to new tables and never touch existing ones.
+# ---------------------------------------------------------------------------
+
+class SwipeContextEventCreate(BaseModel):
+    listing_id: str
+    action: Literal["like", "pass", "super_like", "group_save"]
+    session_id: str = Field(..., min_length=1, max_length=128)
+    active_filters_snapshot: Optional[Dict[str, Any]] = None
+    device_context: Optional[Dict[str, Any]] = None
+
+
+class ListingViewEventCreate(BaseModel):
+    listing_id: str
+    surface: Literal["discover_card", "listing_detail", "matches_card"]
+    session_id: str = Field(..., min_length=1, max_length=128)
+    view_duration_ms: Optional[int] = Field(default=None, ge=0)
+    expanded: bool = False
+    photos_viewed_count: int = Field(default=0, ge=0)
+
+
+class PageViewEventCreate(BaseModel):
+    page: Literal[
+        "discover", "matches", "listing_detail", "preferences",
+        "account", "groups", "roommates", "onboarding"
+    ]
+    session_id: str = Field(..., min_length=1, max_length=128)
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+    referrer_page: Optional[str] = Field(default=None, max_length=100)
+
+
+class SearchQueryEventCreate(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=128)
+    filter_snapshot: Dict[str, Any]
+    results_returned: int = Field(default=0, ge=0)
+    offset: int = Field(default=0, ge=0)
+
+
+@router.post("/swipe-context")
+async def create_swipe_context_event(
+    payload: SwipeContextEventCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist filter + device context alongside a swipe.
+
+    Companion to POST /swipes — writes to swipe_context_events without
+    touching the existing swipe_interactions table. Join the two tables on
+    (actor_user_id, listing_id, session_id) to get the full swipe picture.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        insert_data = {
+            "actor_user_id": user_id,
+            "listing_id": payload.listing_id,
+            "session_id": payload.session_id,
+            "action": payload.action,
+            "active_filters_snapshot": payload.active_filters_snapshot,
+            "device_context": payload.device_context,
+        }
+        created = supabase.table("swipe_context_events").insert(insert_data).execute()
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Swipe context event was not persisted")
+        return {"status": "success", "event_id": created.data[0]["event_id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "swipe_context_events" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="swipe_context_events table not found. Run migration 012.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store swipe context: {e}")
+
+
+@router.post("/listing-views")
+async def create_listing_view_event(
+    payload: ListingViewEventCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist a listing view duration event.
+
+    Fire on card mount (discover stack, matches grid) and on listing detail
+    page unmount. Best-effort — callers should not block on this response.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        insert_data = {
+            "user_id": user_id,
+            "listing_id": payload.listing_id,
+            "surface": payload.surface,
+            "session_id": payload.session_id,
+            "view_duration_ms": payload.view_duration_ms,
+            "expanded": payload.expanded,
+            "photos_viewed_count": payload.photos_viewed_count,
+        }
+        created = supabase.table("listing_view_events").insert(insert_data).execute()
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Listing view event was not persisted")
+        return {"status": "success", "event_id": created.data[0]["event_id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "listing_view_events" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="listing_view_events table not found. Run migration 014.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store listing view event: {e}")
+
+
+@router.post("/page-views")
+async def create_page_view_event(
+    payload: PageViewEventCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist a page view event for funnel analytics.
+
+    Fire on page component mount; send duration_ms on unmount via keepalive fetch.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        insert_data = {
+            "user_id": user_id,
+            "page": payload.page,
+            "session_id": payload.session_id,
+            "duration_ms": payload.duration_ms,
+            "referrer_page": payload.referrer_page,
+        }
+        created = supabase.table("page_view_events").insert(insert_data).execute()
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Page view event was not persisted")
+        return {"status": "success", "event_id": created.data[0]["event_id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "page_view_events" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="page_view_events table not found. Run migration 016.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store page view event: {e}")
+
+
+@router.post("/search-queries")
+async def create_search_query_event(
+    payload: SearchQueryEventCreate,
+    token: str = Depends(require_user_token),
+):
+    """
+    Persist a search/filter event for demand intelligence.
+
+    Fire each time the discover feed calls /api/recommendations, capturing
+    the full filter state and how many results were returned.
+    """
+    supabase = get_admin_client()
+    user_id = _resolve_current_user_id(token)
+
+    try:
+        insert_data = {
+            "user_id": user_id,
+            "session_id": payload.session_id,
+            "filter_snapshot": payload.filter_snapshot,
+            "results_returned": payload.results_returned,
+            "offset": payload.offset,
+        }
+        created = supabase.table("search_query_events").insert(insert_data).execute()
+        if not created.data:
+            raise HTTPException(status_code=500, detail="Search query event was not persisted")
+        return {"status": "success", "event_id": created.data[0]["event_id"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "search_query_events" in err and "does not exist" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="search_query_events table not found. Run migration 018.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to store search query event: {e}")
 
 
 @router.get("/behavior/health")
