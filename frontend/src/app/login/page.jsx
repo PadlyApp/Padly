@@ -57,12 +57,11 @@ export default function LoginPage() {
         color: 'green',
       });
 
-      // Check if user has completed onboarding
-      const onboardingComplete = localStorage.getItem('padly_onboarding_complete');
-      if (!onboardingComplete) {
-        router.push('/onboarding');
+      const preferencesComplete = localStorage.getItem('padly_preferences_complete');
+      if (!preferencesComplete) {
+        router.push('/preferences-setup');
       } else {
-        router.push('/');
+        router.push('/discover');
       }
     } catch (err) {
       const message = normalizeAuthErrorMessage(err, { flow: 'signin' });

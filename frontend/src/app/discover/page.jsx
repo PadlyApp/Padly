@@ -1,14 +1,16 @@
-﻿'use client';
+'use client';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Container, Box, Text, Title, Button, Stack, Loader, ActionIcon, Group, Progress, Modal, Badge, Divider, ThemeIcon } from '@mantine/core';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Container, Box, Text, Title, Button, Stack, ActionIcon, Group, Progress, Modal, Badge, Divider, ThemeIcon } from '@mantine/core';
 import { useHotkeys } from '@mantine/hooks';
 import { IconX, IconHeart, IconRefresh, IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
+import { SkeletonSwipeCard } from '../components/Skeletons';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
@@ -19,6 +21,7 @@ import {
   normalizeRecommendationsError,
   parseApiErrorResponse,
 } from '../../../lib/errorHandling';
+import { formatAmenityLabel } from '../../../lib/formatters';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
@@ -52,15 +55,15 @@ export default function DiscoverPage() {
 }
 
 function DiscoverContent() {
-  const { user, authState } = useAuth();
+  const { user, getValidToken } = useAuth();
   const { tourPhase } = usePadlyTour();
   const userId = user?.profile?.id;
   const router = useRouter();
 
   const [listings, setListings] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [appendLoading, setAppendLoading] = useState(false);
+  const [appendError, setAppendError] = useState(null);
   const [missingCorePreferences, setMissingCorePreferences] = useState(false);
   const [emptyResultReason, setEmptyResultReason] = useState(null);
   const [expandedListing, setExpandedListing] = useState(null);
@@ -68,162 +71,194 @@ function DiscoverContent() {
   const [hasMore, setHasMore] = useState(false);
   const swipeSessionIdRef = useRef(null);
   const nextOffsetRef = useRef(0);
+  // Tracks the last feedData object seen so we only sync on a genuine new result
+  const prevFeedDataRef = useRef(null);
+  // Stable refs for currentIndex and listings so handleSwipe doesn't need them as deps
+  const currentIndexRef = useRef(currentIndex);
+  const listingsRef = useRef(listings);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { listingsRef.current = listings; }, [listings]);
 
-  const fetchRecommendations = useCallback(async ({ append = false } = {}) => {
-    setLoading(true);
-    setError(null);
-    if (!append) setEmptyResultReason(null);
+  // ── shared fetch helper (used by the query AND loadMore) ──────────────────
+
+  const fetchFeedPage = useCallback(async ({ offset = 0 } = {}) => {
+    const token = await getValidToken();
+    if (!token) throw new Error('Not authenticated');
+
+    let prefs = {};
+    let hasCorePreferences = false;
+    const swipedIds = new Set();
+
+    const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (prefRes.ok) {
+      const prefData = await prefRes.json();
+      prefs = prefData.data || prefData || {};
+      hasCorePreferences = hasCompleteCorePreferences(prefs);
+    }
+
+    if (!hasCorePreferences) {
+      return { listings: [], prefs, hasCorePreferences, hasMore: false, nextOffset: 0 };
+    }
 
     try {
-      // Fetch user preferences
-      let prefs = {};
-      let hasCorePreferences = false;
-      const swipedIds = new Set();
-      if (userId && authState?.accessToken) {
-        const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-          headers: { Authorization: `Bearer ${authState.accessToken}` },
-        });
-        if (prefRes.ok) {
-          const prefData = await prefRes.json();
-          prefs = prefData.data || prefData || {};
-          hasCorePreferences = hasCompleteCorePreferences(prefs);
-        }
-        setMissingCorePreferences(!hasCorePreferences);
-
-        if (!hasCorePreferences) {
-          setLoading(false);
-          setListings([]);
-          setEmptyResultReason('missing_preferences');
-          return;
-        }
-
-        try {
-          const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
-            headers: { Authorization: `Bearer ${authState.accessToken}` },
-          });
-          if (swipesRes.ok) {
-            const swipesPayload = await swipesRes.json();
-            for (const event of swipesPayload?.data || []) {
-              if (event?.listing_id) swipedIds.add(event.listing_id);
-            }
-          }
-        } catch {
-          // Swipe history fetch is optional; fall back to local liked cache only.
-        }
-      }
-
-      // Build liked-listing averages to personalise the model
-      const liked = getLikedListings();
-      const likedExtras = {};
-      let behaviorSampleSize;
-
-      // Prefer persisted behavior features from backend (Phase 2A).
-      if (authState?.accessToken) {
-        try {
-          const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
-            headers: { Authorization: `Bearer ${authState.accessToken}` },
-          });
-          if (behaviorRes.ok) {
-            const behaviorPayload = await behaviorRes.json();
-            const behavior = behaviorPayload?.data || {};
-            if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
-            if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
-            if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
-            if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
-          }
-        } catch {
-          // Behavior vector is optional in Phase 2A.
-        }
-      }
-
-      // Fallback to local in-session liked cache when backend behavior data is sparse.
-      if (liked.length > 0) {
-        const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
-        if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
-        if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
-        if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
-      }
-
-      const body = {
-        budget_min:      prefs.budget_min     ?? undefined,
-        budget_max:      prefs.budget_max     ?? undefined,
-        target_country: prefs.target_country ?? undefined,
-        target_state_province: prefs.target_state_province ?? undefined,
-        target_city: prefs.target_city ?? undefined,
-        required_bedrooms: prefs.required_bedrooms ?? undefined,
-        target_bathrooms: prefs.target_bathrooms ?? undefined,
-        desired_beds:    prefs.required_bedrooms ?? undefined,
-        desired_baths:   prefs.target_bathrooms  ?? undefined,
-        target_deposit_amount: prefs.target_deposit_amount ?? undefined,
-        furnished_preference: prefs.furnished_preference ?? undefined,
-        gender_policy: prefs.gender_policy ?? undefined,
-        target_lease_type: prefs.target_lease_type ?? undefined,
-        target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
-        move_in_date: prefs.move_in_date ?? undefined,
-        target_furnished: prefs.target_furnished ?? undefined,
-        wants_furnished:
-          prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
-            ? 1
-            : prefs.target_furnished === true
-              ? 1
-              : undefined,
-        pref_lat:        prefs.target_latitude   ?? undefined,
-        pref_lon:        prefs.target_longitude  ?? undefined,
-        top_n: 50,
-        offset: append ? nextOffsetRef.current : 0,
-        behavior_sample_size: behaviorSampleSize,
-        ...likedExtras,
-      };
-
-      const res = await fetch(`${API_BASE}/api/recommendations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (!res.ok) {
-        const apiError = await parseApiErrorResponse(res, 'Failed to fetch recommendations');
-        throw createAppError(apiError.message, {
-          status: apiError.status,
-          payload: apiError.payload,
-          rawMessage: apiError.message,
-        });
+      if (swipesRes.ok) {
+        const swipesPayload = await swipesRes.json();
+        for (const event of swipesPayload?.data || []) {
+          if (event?.listing_id) swipedIds.add(event.listing_id);
+        }
       }
-
-      const data = await res.json();
-
-      // Filter out listings already seen via swipes or saved likes.
-      const likedIds = new Set(getLikedListings().map((l) => l.listing_id));
-      const fresh = (data.recommendations || []).filter(
-        (l) => !likedIds.has(l.listing_id) && !swipedIds.has(l.listing_id)
-      );
-
-      setHasMore(Boolean(data.has_more));
-      nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
-
-      if (append) {
-        setListings((prev) => [...prev, ...fresh]);
-      } else {
-        setListings(fresh);
-        setCurrentIndex(0);
-        setEmptyResultReason(
-          fresh.length === 0
-            ? (hasCorePreferences ? 'strict_constraints' : 'missing_preferences')
-            : null
-        );
-        nextOffsetRef.current = (data.offset || 0) + (data.count || 0);
-      }
-    } catch (err) {
-      setError(normalizeRecommendationsError(err));
-    } finally {
-      setLoading(false);
+    } catch {
+      // Swipe history fetch is optional; fall back to local liked cache only.
     }
-  }, [userId, authState?.accessToken]);
 
-  useEffect(() => {
-    fetchRecommendations();
-  }, [fetchRecommendations]);
+    const liked = getLikedListings();
+    const likedExtras = {};
+    let behaviorSampleSize;
 
+    try {
+      const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (behaviorRes.ok) {
+        const behaviorPayload = await behaviorRes.json();
+        const behavior = behaviorPayload?.data || {};
+        if (behavior.liked_mean_price != null) likedExtras.liked_mean_price = behavior.liked_mean_price;
+        if (behavior.liked_mean_beds != null) likedExtras.liked_mean_beds = behavior.liked_mean_beds;
+        if (behavior.liked_mean_sqfeet != null) likedExtras.liked_mean_sqfeet = behavior.liked_mean_sqfeet;
+        if (behavior.sample_size != null) behaviorSampleSize = behavior.sample_size;
+      }
+    } catch {
+      // Behavior vector is optional.
+    }
+
+    if (liked.length > 0) {
+      const avg = (arr) => arr.filter(Boolean).reduce((a, b) => a + b, 0) / arr.filter(Boolean).length;
+      if (likedExtras.liked_mean_price == null) likedExtras.liked_mean_price = avg(liked.map((l) => l.price_per_month));
+      if (likedExtras.liked_mean_beds == null) likedExtras.liked_mean_beds = avg(liked.map((l) => l.number_of_bedrooms));
+      if (likedExtras.liked_mean_sqfeet == null) likedExtras.liked_mean_sqfeet = avg(liked.map((l) => l.area_sqft));
+    }
+
+    const body = {
+      budget_min:      prefs.budget_min     ?? undefined,
+      budget_max:      prefs.budget_max     ?? undefined,
+      target_country: prefs.target_country ?? undefined,
+      target_state_province: prefs.target_state_province ?? undefined,
+      target_city: prefs.target_city ?? undefined,
+      required_bedrooms: prefs.required_bedrooms ?? undefined,
+      target_bathrooms: prefs.target_bathrooms ?? undefined,
+      desired_beds:    prefs.required_bedrooms ?? undefined,
+      desired_baths:   prefs.target_bathrooms  ?? undefined,
+      target_deposit_amount: prefs.target_deposit_amount ?? undefined,
+      furnished_preference: prefs.furnished_preference ?? undefined,
+      gender_policy: prefs.gender_policy ?? undefined,
+      target_lease_type: prefs.target_lease_type ?? undefined,
+      target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+      move_in_date: prefs.move_in_date ?? undefined,
+      target_furnished: prefs.target_furnished ?? undefined,
+      wants_furnished:
+        prefs.furnished_preference === 'required' || prefs.furnished_preference === 'preferred'
+          ? 1
+          : prefs.target_furnished === true
+            ? 1
+            : undefined,
+      pref_lat:        prefs.target_latitude   ?? undefined,
+      pref_lon:        prefs.target_longitude  ?? undefined,
+      top_n: 50,
+      offset,
+      behavior_sample_size: behaviorSampleSize,
+      ...likedExtras,
+    };
+
+    const res = await fetch(`${API_BASE}/api/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const apiError = await parseApiErrorResponse(res, 'Failed to fetch recommendations');
+      throw createAppError(apiError.message, {
+        status: apiError.status,
+        payload: apiError.payload,
+        rawMessage: apiError.message,
+      });
+    }
+
+    const data = await res.json();
+
+    const likedIds = new Set(getLikedListings().map((l) => l.listing_id));
+    const fresh = (data.recommendations || []).filter(
+      (l) => !likedIds.has(l.listing_id) && !swipedIds.has(l.listing_id)
+    );
+
+    return {
+      listings: fresh,
+      prefs,
+      hasCorePreferences,
+      hasMore: Boolean(data.has_more),
+      nextOffset: (data.offset || 0) + (data.count || 0),
+    };
+  }, [userId, getValidToken]);
+
+  // ── cached initial feed (5-min stale time) ─────────────────────────────────
+
+  const {
+    data: feedData,
+    isLoading: feedLoading,
+    error: feedQueryError,
+    refetch: refetchFeed,
+  } = useQuery({
+    queryKey: ['discover-feed', userId],
+    queryFn: () => fetchFeedPage({ offset: 0 }),
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
+    gcTime:    10 * 60 * 1000,
+    retry: false,
+  });
+
+  // Sync query data → swipe-stack state.
+  // useLayoutEffect runs before paint so there is no visible flash of empty state on
+  // remounts that have a cache hit (feedData is available immediately).
+  useLayoutEffect(() => {
+    if (!feedData || feedData === prevFeedDataRef.current) return;
+    prevFeedDataRef.current = feedData;
+    setListings(feedData.listings);
+    setCurrentIndex(0);
+    setHasMore(feedData.hasMore);
+    setMissingCorePreferences(!feedData.hasCorePreferences);
+    setEmptyResultReason(
+      feedData.listings.length === 0
+        ? (feedData.hasCorePreferences ? 'strict_constraints' : 'missing_preferences')
+        : null
+    );
+    nextOffsetRef.current = feedData.nextOffset;
+  }, [feedData]);
+
+  // Only show the full-page spinner on the very first load (no cached data yet).
+  const loading = (feedLoading && !feedData) || appendLoading;
+  const error = feedQueryError ? normalizeRecommendationsError(feedQueryError) : appendError;
+
+  // ── append more listings ───────────────────────────────────────────────────
+
+  const loadMore = useCallback(async () => {
+    setAppendLoading(true);
+    setAppendError(null);
+    try {
+      const page = await fetchFeedPage({ offset: nextOffsetRef.current });
+      setHasMore(page.hasMore);
+      nextOffsetRef.current = page.nextOffset;
+      setListings((prev) => [...prev, ...page.listings]);
+    } catch (err) {
+      setAppendError(normalizeRecommendationsError(err));
+    } finally {
+      setAppendLoading(false);
+    }
+  }, [fetchFeedPage]);
 
   useEffect(() => {
     setExpandedImageIndex(0);
@@ -232,12 +267,16 @@ function DiscoverContent() {
   useEffect(() => {
     const remaining = listings.length - currentIndex;
     if (!loading && !error && hasMore && remaining === 0) {
-      fetchRecommendations({ append: true });
+      loadMore();
     }
-  }, [currentIndex, listings.length, loading, error, hasMore, fetchRecommendations]);
+  }, [currentIndex, listings.length, loading, error, hasMore, loadMore]);
+
+  // ── swipe actions ─────────────────────────────────────────────────────────
 
   const persistSwipeEvent = useCallback(async ({ listing, action, position, startedAt }) => {
-    if (!authState?.accessToken || !userId || !listing?.listing_id) return;
+    if (!userId || !listing?.listing_id) return;
+    const token = await getValidToken();
+    if (!token) return;
 
     if (!swipeSessionIdRef.current) {
       swipeSessionIdRef.current = getOrCreateSwipeSessionId();
@@ -253,7 +292,7 @@ function DiscoverContent() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           listing_id: listing.listing_id,
@@ -271,31 +310,33 @@ function DiscoverContent() {
         }),
       });
 
-      // Do not disrupt UX on telemetry failures.
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to persist swipe interaction');
       }
     } catch {
       // Best-effort only.
     }
-  }, [authState?.accessToken, userId]);
+  }, [userId, getValidToken]);
 
+  // Stable handleSwipe: reads currentIndex/listings from refs so the callback
+  // identity doesn't change on every swipe (prevents SwipeCard re-renders).
   const handleSwipe = useCallback((direction, listing) => {
     const action = direction === 'right' ? 'like' : 'pass';
     if (action === 'like') saveLikedListing(listing);
 
-    // Feed position must match the card index in this session's stack (0-based).
-    const top = listings[currentIndex];
+    const currentListings = listingsRef.current;
+    const currentIdx = currentIndexRef.current;
+    const top = currentListings[currentIdx];
     const position =
       top && listing?.listing_id === top.listing_id
-        ? currentIndex
-        : listings.findIndex((item) => item.listing_id === listing?.listing_id);
+        ? currentIdx
+        : currentListings.findIndex((item) => item.listing_id === listing?.listing_id);
     const startedAt = typeof performance !== 'undefined' ? performance.now() : null;
 
     void persistSwipeEvent({
       listing,
       action,
-      position: position >= 0 ? position : currentIndex,
+      position: position >= 0 ? position : currentIdx,
       startedAt,
     });
 
@@ -306,11 +347,11 @@ function DiscoverContent() {
         detail: { direction },
       }));
     }
-  }, [currentIndex, listings, persistSwipeEvent, tourPhase]);
+  }, [persistSwipeEvent, tourPhase]);
 
   const handleButton = (direction) => {
-    if (currentIndex >= listings.length) return;
-    handleSwipe(direction, listings[currentIndex]);
+    if (currentIndexRef.current >= listingsRef.current.length) return;
+    handleSwipe(direction, listingsRef.current[currentIndexRef.current]);
   };
 
   const handleModalAction = (direction) => {
@@ -318,11 +359,10 @@ function DiscoverContent() {
     setTimeout(() => handleButton(direction), 200);
   };
 
-
-  const openExpanded = (listing) => {
+  const openExpanded = useCallback((listing) => {
     setExpandedImageIndex(0);
     setExpandedListing(listing);
-  };
+  }, []);
 
   // Auto-advance modal images every 5s while modal is open
   useEffect(() => {
@@ -370,18 +410,13 @@ function DiscoverContent() {
         <Stack align="center" gap="xl">
 
           {/* Loading */}
-          {loading && (
-            <Stack align="center" gap="md" style={{ height: 520, justifyContent: 'center' }}>
-              <Loader size="lg" color="#20c997" />
-              <Text c="dimmed">Finding listings for you…</Text>
-            </Stack>
-          )}
+          {loading && <SkeletonSwipeCard />}
 
           {/* Error */}
           {!loading && error && (
             <Stack align="center" gap="md" style={{ height: 520, justifyContent: 'center' }}>
               <Text c="red">{error}</Text>
-              <Button onClick={fetchRecommendations} variant="light" color="teal">
+              <Button onClick={refetchFeed} variant="light" color="teal">
                 Try again
               </Button>
             </Stack>
@@ -413,7 +448,7 @@ function DiscoverContent() {
                 </Button>
                 <Button
                   leftSection={<IconRefresh size={16} />}
-                  onClick={fetchRecommendations}
+                  onClick={refetchFeed}
                   color="teal"
                 >
                   Retry
@@ -438,7 +473,7 @@ function DiscoverContent() {
               <Group gap="md" justify="center">
                 <Button
                   leftSection={<IconRefresh size={16} />}
-                  onClick={fetchRecommendations}
+                  onClick={refetchFeed}
                   color="teal"
                 >
                   Reload
@@ -797,7 +832,7 @@ function DiscoverContent() {
                       .filter(([, v]) => v)
                       .map(([key]) => (
                         <Badge key={key} variant="light" color="teal" size="sm" radius="sm">
-                          {key}
+                          {formatAmenityLabel(key)}
                         </Badge>
                       ))}
                   </Group>
