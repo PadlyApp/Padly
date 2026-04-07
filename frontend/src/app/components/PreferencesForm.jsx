@@ -468,8 +468,24 @@ export function PreferencesForm() {
 
       const saveResult = await response.json();
       const persistedPrefs = saveResult?.data || payload;
+      const previousPersistedPrefs = prevPrefsRef.current || savedPrefs || {};
+      const previousLocation = {
+        target_country: previousPersistedPrefs.target_country || null,
+        target_state_province: previousPersistedPrefs.target_state_province || null,
+        target_city: previousPersistedPrefs.target_city || null,
+      };
+      const nextLocation = {
+        target_country: persistedPrefs.target_country || null,
+        target_state_province: persistedPrefs.target_state_province || null,
+        target_city: persistedPrefs.target_city || null,
+      };
+      const locationChanged =
+        previousLocation.target_country !== nextLocation.target_country ||
+        previousLocation.target_state_province !== nextLocation.target_state_province ||
+        previousLocation.target_city !== nextLocation.target_city;
 
       queryClient.setQueryData(['preferences', userId], persistedPrefs);
+      queryClient.setQueryData(['user-prefs', userId], persistedPrefs);
       writePrefsShadow(userId, persistedPrefs);
       prevPrefsRef.current = persistedPrefs;
       setPrefs((prev) => ({
@@ -487,7 +503,17 @@ export function PreferencesForm() {
       setTimeout(() => setSuccess(false), 3000);
       queryClient.invalidateQueries({ queryKey: ['preferences', userId], refetchType: 'inactive' });
       queryClient.invalidateQueries({ queryKey: ['user-prefs', userId] });
-      queryClient.invalidateQueries({ queryKey: ['discover-feed', userId] });
+      queryClient.invalidateQueries({ queryKey: ['discover-feed', userId], refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: ['matches-feed', userId], refetchType: 'all' });
+
+      if (locationChanged && typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem(`padly_discover_progress:${userId}`);
+        } catch {
+          // Ignore storage failures silently.
+        }
+      }
+
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
       if (tourPhase === 'preferences') {

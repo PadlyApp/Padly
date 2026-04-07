@@ -18,6 +18,7 @@ import {
   Card,
   Group,
   Grid,
+  ActionIcon,
   Avatar,
   Loader,
   Alert,
@@ -37,6 +38,8 @@ import {
   IconShield,
   IconSettings,
   IconMapPin,
+  IconChevronLeft,
+  IconChevronRight,
 } from '@tabler/icons-react';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -45,6 +48,252 @@ import { ImageWithFallback } from '../components/ImageWithFallback';
 import { SkeletonAccountProfile, SkeletonListingCard } from '../components/Skeletons';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../../../lib/api';
+
+const INTERESTED_LISTING_FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
+
+function normalizeImageUrl(value) {
+  if (!value) return null;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const normalized = normalizeImageUrl(item);
+      if (normalized) return normalized;
+    }
+    return null;
+  }
+
+  if (typeof value === 'object') {
+    return normalizeImageUrl(
+      value.url || value.image_url || value.imageUrl || value.src || value.href || value.original || value.thumbnail
+    );
+  }
+
+  if (typeof value !== 'string') return null;
+
+  let candidate = value.trim();
+  if (!candidate) return null;
+
+  // Handle URL strings that come from serialized JSON payloads.
+  candidate = candidate.replace(/\\\//g, '/').replace(/^['\"]+|['\"]+$/g, '');
+
+  if (candidate.startsWith('[') || candidate.startsWith('{')) {
+    try {
+      return normalizeImageUrl(JSON.parse(candidate));
+    } catch {
+      // Continue with URL extraction fallback below.
+    }
+  }
+
+  const matchedUrl = candidate.match(/https?:\/\/[^\s\"'\],}]+/i);
+  if (matchedUrl?.[0]) {
+    candidate = matchedUrl[0];
+  }
+
+  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
+  if (candidate.startsWith('www.')) candidate = `https://${candidate}`;
+
+  return /^https?:\/\//i.test(candidate) ? candidate : null;
+}
+
+function extractImageUrls(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractImageUrls(item));
+  }
+
+  if (typeof value === 'object') {
+    return extractImageUrls(
+      value.urls || value.images || value.image_urls || value.image_url || value.url || value.src || value.href || value.original || value.thumbnail
+    );
+  }
+
+  if (typeof value !== 'string') return [];
+
+  let candidate = value.trim();
+  if (!candidate) return [];
+
+  candidate = candidate.replace(/\\\//g, '/').replace(/^['\"]+|['\"]+$/g, '');
+
+  if (candidate.startsWith('[') || candidate.startsWith('{')) {
+    try {
+      return extractImageUrls(JSON.parse(candidate));
+    } catch {
+      // Fall back to URL extraction.
+    }
+  }
+
+  const matchedUrl = candidate.match(/https?:\/\/[^\s\"'\],}]+/i);
+  if (matchedUrl?.[0]) {
+    candidate = matchedUrl[0];
+  }
+
+  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
+  if (candidate.startsWith('www.')) candidate = `https://${candidate}`;
+
+  return /^https?:\/\//i.test(candidate) ? [candidate] : [];
+}
+
+function getInterestedListingImages(listing) {
+  const images = [
+    ...extractImageUrls(listing?.images),
+    ...extractImageUrls(listing?.image_urls),
+    ...extractImageUrls(listing?.image_url),
+    ...extractImageUrls(listing?.thumbnail_url),
+    ...extractImageUrls(listing?.photo_url),
+  ];
+
+  const uniqueImages = Array.from(new Set(images));
+  return uniqueImages.length ? uniqueImages : [INTERESTED_LISTING_FALLBACK_IMAGE];
+}
+
+function getInterestedListingImage(listing) {
+  return (
+    normalizeImageUrl(listing?.images) ||
+    normalizeImageUrl(listing?.image_urls) ||
+    normalizeImageUrl(listing?.image_url) ||
+    normalizeImageUrl(listing?.thumbnail_url) ||
+    normalizeImageUrl(listing?.photo_url) ||
+    INTERESTED_LISTING_FALLBACK_IMAGE
+  );
+}
+
+function InterestedListingCard({ listing, onRemove }) {
+  const images = getInterestedListingImages(listing);
+  const [imageIndex, setImageIndex] = useState(0);
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [listing.id, listing.listing_id]);
+
+  useEffect(() => {
+    if (images.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setImageIndex((prev) => (prev + 1) % images.length);
+    }, 3200);
+
+    return () => clearInterval(timer);
+  }, [images.length]);
+
+  const title = listing.title || 'Listing';
+  const location = [listing.city, listing.state].filter(Boolean).join(', ');
+  const image = images[Math.min(imageIndex, images.length - 1)] || INTERESTED_LISTING_FALLBACK_IMAGE;
+
+  return (
+    <Card withBorder radius="lg" padding="md" style={{ height: '100%' }}>
+      <Card.Section>
+        <Box style={{ position: 'relative', paddingBottom: '62%', backgroundColor: '#f3f4f6', overflow: 'hidden' }}>
+          <ImageWithFallback
+            src={image}
+            alt={title}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }}
+          />
+
+          {images.length > 1 && (
+            <>
+              <ActionIcon
+                variant="filled"
+                color="dark"
+                radius="xl"
+                size="sm"
+                style={{ position: 'absolute', top: '50%', left: 10, transform: 'translateY(-50%)', opacity: 0.85 }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setImageIndex((prev) => (prev - 1 + images.length) % images.length);
+                }}
+                aria-label="Previous image"
+              >
+                <IconChevronLeft size={14} />
+              </ActionIcon>
+
+              <ActionIcon
+                variant="filled"
+                color="dark"
+                radius="xl"
+                size="sm"
+                style={{ position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)', opacity: 0.85 }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setImageIndex((prev) => (prev + 1) % images.length);
+                }}
+                aria-label="Next image"
+              >
+                <IconChevronRight size={14} />
+              </ActionIcon>
+
+              <Badge
+                variant="filled"
+                color="dark"
+                size="xs"
+                radius="sm"
+                style={{ position: 'absolute', bottom: 10, right: 10, fontWeight: 700 }}
+              >
+                {imageIndex + 1} / {images.length}
+              </Badge>
+            </>
+          )}
+        </Box>
+      </Card.Section>
+
+      <Stack gap="sm" mt="md">
+        <Stack gap={4}>
+          <Text fw={600} lineClamp={2}>
+            {title}
+          </Text>
+          {location && (
+            <Group gap={4}>
+              <IconMapPin size={13} color="#868e96" />
+              <Text size="sm" c="dimmed" lineClamp={1}>
+                {location}
+              </Text>
+            </Group>
+          )}
+        </Stack>
+
+        {listing.price_per_month != null && (
+          <Text fw={700} size="lg" c="teal.6">
+            ${Number(listing.price_per_month).toLocaleString()}/mo
+          </Text>
+        )}
+
+        <Text size="sm" c="dimmed">
+          {[
+            listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
+            listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
+            listing.area_sqft != null && `${Number(listing.area_sqft).toLocaleString()} sq ft`,
+          ].filter(Boolean).join(' · ')}
+        </Text>
+
+        <Group grow mt="sm">
+          <Button
+            component="a"
+            href={`/listings/${listing.id}`}
+            color="teal"
+            variant="light"
+          >
+            View Details
+          </Button>
+          <Button
+            color="gray"
+            variant="subtle"
+            onClick={() => onRemove(String(listing.id))}
+          >
+            Remove
+          </Button>
+        </Group>
+      </Stack>
+    </Card>
+  );
+}
 
 function AccountTabs() {
   const searchParams = useSearchParams();
@@ -465,89 +714,9 @@ function InterestedListingsPanel() {
 
       <Grid gutter="lg">
         {listings.map((listing) => {
-          const image = (() => {
-            if (Array.isArray(listing.images)) return listing.images[0];
-            if (typeof listing.images === 'string') {
-              try {
-                const parsed = JSON.parse(listing.images);
-                if (Array.isArray(parsed)) return parsed[0];
-              } catch {
-                return listing.images;
-              }
-            }
-            return 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
-          })();
-
-          const title = listing.title || 'Listing';
-          const location = [listing.city, listing.state].filter(Boolean).join(', ');
-
           return (
             <Grid.Col key={listing.id || listing.listing_id} span={{ base: 12, md: 6, xl: 4 }}>
-              <Card withBorder radius="lg" padding="md" style={{ height: '100%' }}>
-                <Card.Section>
-                  <Box style={{ position: 'relative', paddingBottom: '62%', backgroundColor: '#f3f4f6' }}>
-                    <ImageWithFallback
-                      src={image}
-                      alt={title}
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                      }}
-                    />
-                  </Box>
-                </Card.Section>
-
-                <Stack gap="sm" mt="md">
-                  <Stack gap={4}>
-                    <Text fw={600} lineClamp={2}>
-                      {title}
-                    </Text>
-                    {location && (
-                      <Group gap={4}>
-                        <IconMapPin size={13} color="#868e96" />
-                        <Text size="sm" c="dimmed" lineClamp={1}>
-                          {location}
-                        </Text>
-                      </Group>
-                    )}
-                  </Stack>
-
-                  {listing.price_per_month != null && (
-                    <Text fw={700} size="lg" c="teal.6">
-                      ${Number(listing.price_per_month).toLocaleString()}/mo
-                    </Text>
-                  )}
-
-                  <Text size="sm" c="dimmed">
-                    {[
-                      listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} Bed`),
-                      listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} Bath`,
-                      listing.area_sqft != null && `${Number(listing.area_sqft).toLocaleString()} sq ft`,
-                    ].filter(Boolean).join(' · ')}
-                  </Text>
-
-                  <Group grow mt="sm">
-                    <Button
-                      component="a"
-                      href={`/listings/${listing.id}`}
-                      color="teal"
-                      variant="light"
-                    >
-                      View Details
-                    </Button>
-                    <Button
-                      color="gray"
-                      variant="subtle"
-                      onClick={() => handleRemove(String(listing.id))}
-                    >
-                      Remove
-                    </Button>
-                  </Group>
-                </Stack>
-              </Card>
+              <InterestedListingCard listing={listing} onRemove={handleRemove} />
             </Grid.Col>
           );
         })}

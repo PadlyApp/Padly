@@ -19,6 +19,7 @@ from app.services.behavior_features import (
     build_user_behavior_vector,
     get_swipe_health_summary,
 )
+from app.services.listing_payloads import hydrate_listing_images
 
 router = APIRouter(prefix="/api/interactions", tags=["interactions"])
 
@@ -1053,11 +1054,14 @@ async def get_my_interested_listings(token: str = Depends(require_user_token)):
 
         listings_resp = (
             supabase.table("listings")
-            .select("*")
+            .select("*,listing_photos(photo_url,sort_order)")
             .in_("id", listing_ids)
             .execute()
         )
-        listing_map = {str(item["id"]): item for item in (listings_resp.data or [])}
+        listing_map = {
+            str(item["id"]): hydrate_listing_images(item)
+            for item in (listings_resp.data or [])
+        }
 
         data = []
         for row in rows:
