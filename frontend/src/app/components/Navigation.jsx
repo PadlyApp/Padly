@@ -76,7 +76,7 @@ export function Navigation() {
                   </Link>
                   <Link href="/matches" style={{ textDecoration: 'none' }} data-tour="nav-matches">
                     <UnstyledButton className={`nav-link ${pathname === '/matches' ? 'active' : ''}`}>
-                      Recommendations
+                      Matches
                     </UnstyledButton>
                   </Link>
                   <Link href="/account" style={{ textDecoration: 'none' }} data-tour="nav-account">
