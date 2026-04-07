@@ -13,6 +13,7 @@ import {
   NumberInput,
   Select,
   Stack,
+  Switch,
   Text,
 } from '@mantine/core';
 import { RangeSlider } from '@mantine/core';
@@ -95,6 +96,12 @@ function normalizeIntInput(value) {
   const parsed = normalizeNumericInput(value);
   if (parsed == null) return null;
   return Math.trunc(parsed);
+}
+
+function normalizeBathroomsPreference(value) {
+  const parsed = normalizeNumericInput(value);
+  if (parsed == null) return null;
+  return parsed < 1 ? 1 : Math.round(parsed);
 }
 
 function normalizeOptionText(value) {
@@ -204,6 +211,7 @@ export function PreferencesForm() {
   const [priceRange, setPriceRange] = useState([0, 0]);
   const [priceSliderActive, setPriceSliderActive] = useState(false);
   const [loadingPrices, setLoadingPrices] = useState(false);
+  const [allowLargerLayouts, setAllowLargerLayouts] = useState(false);
 
   const [prefs, setPrefs] = useState({
     target_country: 'US',
@@ -217,6 +225,7 @@ export function PreferencesForm() {
     move_in_date: null,
     target_lease_type: null,
     target_lease_duration_months: null,
+    lifestyle_preferences: null,
   });
 
   const updatePref = (key, value) => setPrefs((prev) => ({ ...prev, [key]: value }));
@@ -232,11 +241,13 @@ export function PreferencesForm() {
       target_country: shadowPrefs.target_country || prev.target_country,
       target_state_province: shadowPrefs.target_state_province || null,
       target_city: shadowPrefs.target_city || null,
+      target_bathrooms: normalizeBathroomsPreference(shadowPrefs.target_bathrooms),
     }));
     setStateOptions((prev) => withSelectedOption(prev, shadowPrefs.target_state_province));
     if (shadowPrefs.target_city) {
       setCityOptions((prev) => withSelectedOption(prev, shadowPrefs.target_city));
     }
+    setAllowLargerLayouts(Boolean(shadowPrefs?.lifestyle_preferences?.allow_larger_layouts));
     appliedShadowRef.current = true;
   }, [userId]);
 
@@ -287,14 +298,16 @@ export function PreferencesForm() {
       target_state_province: savedPrefs.target_state_province || null,
       target_city: savedPrefs.target_city || null,
       required_bedrooms: savedPrefs.required_bedrooms ?? null,
-      target_bathrooms: savedPrefs.target_bathrooms ?? null,
+      target_bathrooms: normalizeBathroomsPreference(savedPrefs.target_bathrooms),
       target_deposit_amount: savedPrefs.target_deposit_amount ?? null,
       furnished_preference: savedPrefs.furnished_preference || 'no_preference',
       gender_policy: savedPrefs.gender_policy || 'mixed_ok',
       move_in_date: savedPrefs.move_in_date || null,
       target_lease_type: savedPrefs.target_lease_type || null,
       target_lease_duration_months: savedPrefs.target_lease_duration_months ?? null,
+      lifestyle_preferences: savedPrefs.lifestyle_preferences || null,
     });
+    setAllowLargerLayouts(Boolean(savedPrefs?.lifestyle_preferences?.allow_larger_layouts));
 
     if (savedPrefs.budget_min != null || savedPrefs.budget_max != null) {
       setPriceRange([savedPrefs.budget_min ?? 0, savedPrefs.budget_max ?? 5000]);
@@ -445,11 +458,16 @@ export function PreferencesForm() {
       const normalizedPrefs = pickPreferenceFields(prefs);
       const payload = {
         ...normalizedPrefs,
+        target_bathrooms: normalizeBathroomsPreference(normalizedPrefs.target_bathrooms),
         budget_min: priceSliderActive ? priceRange[0] : null,
         budget_max: priceSliderActive ? priceRange[1] : null,
         target_deposit_amount: normalizeNumericInput(prefs.target_deposit_amount),
         target_lease_duration_months: normalizeIntInput(prefs.target_lease_duration_months),
         target_lease_type: prefs.target_lease_type || 'any',
+        lifestyle_preferences: {
+          ...(prefs.lifestyle_preferences || {}),
+          allow_larger_layouts: allowLargerLayouts,
+        },
         move_in_date: prefs.move_in_date instanceof Date
           ? prefs.move_in_date.toISOString().split('T')[0]
           : prefs.move_in_date,
@@ -547,14 +565,14 @@ export function PreferencesForm() {
     }, 0);
   }, [histogram.bins, priceRange]);
 
-  // Bathroom counter: null=Any, 1=0.5 (share), 2+=own
+  // Bathroom counter: null=Any, 1+=exact bathroom count
   const bathroomCounterValue = prefs.target_bathrooms == null
     ? null
-    : prefs.target_bathrooms < 1 ? 1 : Math.round(prefs.target_bathrooms);
+    : Math.max(1, Math.round(prefs.target_bathrooms));
 
   const handleBathroomChange = (counterVal) => {
     if (counterVal === null) { updatePref('target_bathrooms', null); return; }
-    updatePref('target_bathrooms', counterVal === 1 ? 0.5 : counterVal);
+    updatePref('target_bathrooms', counterVal);
   };
 
   // ── Loading ───────────────────────────────────────────────────────────────
@@ -737,6 +755,13 @@ export function PreferencesForm() {
             />
           </Box>
         </Stack>
+
+        <Switch
+          label="Allow larger listings"
+          description="Off = exact bed/bath match. On = show listings with more beds/baths than selected."
+          checked={allowLargerLayouts}
+          onChange={(event) => setAllowLargerLayouts(event.currentTarget.checked)}
+        />
 
         <Select
           label="Furnished preference"

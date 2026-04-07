@@ -432,6 +432,7 @@ function DiscoverContent() {
       gender_policy: prefs.gender_policy ?? undefined,
       target_lease_type: prefs.target_lease_type ?? undefined,
       target_lease_duration_months: prefs.target_lease_duration_months ?? undefined,
+      allow_larger_layouts: prefs?.lifestyle_preferences?.allow_larger_layouts ?? undefined,
       move_in_date: prefs.move_in_date ?? undefined,
       target_furnished: prefs.target_furnished ?? undefined,
       wants_furnished:

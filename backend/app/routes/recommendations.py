@@ -40,6 +40,8 @@ class UserPreferences(BaseModel):
     target_bathrooms: Optional[float] = None
     target_deposit_amount: Optional[float] = None
     furnished_preference: Optional[str] = None  # required | preferred | no_preference
+    allow_larger_layouts: Optional[bool] = None
+    lifestyle_preferences: Optional[Dict[str, Any]] = None
     gender_policy: Optional[str] = None         # same_gender_only | mixed_ok
     target_lease_type: Optional[str] = None     # fixed | month_to_month | sublet | any
     target_lease_duration_months: Optional[int] = None

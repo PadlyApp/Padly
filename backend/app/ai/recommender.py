@@ -589,16 +589,32 @@ def _passes_hard_constraints(user: Dict, listing: Dict) -> bool:
     if budget_max > 0 and price > budget_max:
         return False
 
-    # Beds / baths minimum hard constraints
+    # Beds / baths hard constraints.
+    # Default behavior is exact matching; toggle allows at-least matching.
+    allow_larger_layouts = user.get("allow_larger_layouts")
+    if allow_larger_layouts is None:
+        lifestyle = user.get("lifestyle_preferences")
+        if isinstance(lifestyle, dict):
+            allow_larger_layouts = lifestyle.get("allow_larger_layouts")
+    allow_larger_layouts = _as_bool(allow_larger_layouts)
+
     required_bedrooms = _safe_float(user.get("required_bedrooms") or user.get("desired_beds"))
     listing_bedrooms = _safe_float(listing.get("number_of_bedrooms"))
-    if required_bedrooms > 0 and listing_bedrooms > 0 and listing_bedrooms < required_bedrooms:
-        return False
+    if required_bedrooms > 0 and listing_bedrooms > 0:
+        if allow_larger_layouts:
+            if listing_bedrooms < required_bedrooms:
+                return False
+        elif abs(listing_bedrooms - required_bedrooms) > 1e-6:
+            return False
 
     target_bathrooms = _safe_float(user.get("target_bathrooms") or user.get("desired_baths"))
     listing_bathrooms = _safe_float(listing.get("number_of_bathrooms"))
-    if target_bathrooms > 0 and listing_bathrooms > 0 and listing_bathrooms < target_bathrooms:
-        return False
+    if target_bathrooms > 0 and listing_bathrooms > 0:
+        if allow_larger_layouts:
+            if listing_bathrooms < target_bathrooms:
+                return False
+        elif abs(listing_bathrooms - target_bathrooms) > 1e-6:
+            return False
 
     # Deposit hard cap only when an explicit deposit is known.
     target_deposit = _safe_float(user.get("target_deposit_amount"))

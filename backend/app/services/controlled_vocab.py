@@ -403,7 +403,6 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
     cc = (country_code or "").upper().strip()
     state_input = (state_code or "").strip()
     sc = state_input.upper()
-    cnorm = _norm(city_name)
 
     if cc not in {"US", "CA"}:
         raise ValueError("country_code must be one of: US, CA")
@@ -432,12 +431,12 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
             raise ValueError(
                 f"city '{city_name}' is not valid for state '{sc}', country '{cc}'"
             )
-        return cc, sc, selected_metro["value"]
+        submitted_city = city_name.strip()
+        return cc, sc, submitted_city or selected_metro["value"]
 
     city_map = cache["city_name_index"].get((cc, sc), {})
-    canonical_city = city_map.get(cnorm)
+    canonical_city = city_map.get(_norm(city_name))
     if not canonical_city:
-        # Accept metro-subcity aliases that belong to the selected region (e.g. Emeryville -> Bay Area).
         metro_id = metro_for_city(city_name)
         if metro_id:
             allowed_metros = {
@@ -452,7 +451,6 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
             if metro_display in allowed_metros:
                 return cc, sc, city_name.strip()
 
-        # Fallback to active listings inventory so city validation matches the options endpoint behavior.
         try:
             listing_city = _city_from_active_listings(cc, sc, city_name)
             if listing_city:
@@ -471,7 +469,7 @@ def validate_city_name(value: str) -> str:
         raise ValueError("target_city is required")
     selected_metro = metro_option(text)
     if selected_metro:
-        return selected_metro["value"]
+        return text
     mapped = _build_vocab_cache()["city_global_map"].get(_norm(text))
     if not mapped:
         raise ValueError("target_city must be selected from predefined city options")
