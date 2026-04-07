@@ -5,7 +5,7 @@ CRUD operations for users table
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
-from app.dependencies.auth import get_user_token, require_user_token
+from app.dependencies.auth import get_user_token, require_user_token, resolve_auth_user
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import UserCreate, UserUpdate, UserResponse
 from app.services.controlled_vocab import (
@@ -61,8 +61,8 @@ async def list_users(
             from app.dependencies.supabase import get_admin_client
 
             admin_client = get_admin_client()
-            user_response = admin_client.auth.get_user(token)
-            auth_user_id = user_response.user.id if user_response and user_response.user else None
+            auth_user = resolve_auth_user(admin_client, token)
+            auth_user_id = auth_user.id
             if auth_user_id:
                 me = (
                     admin_client.table("users")
@@ -168,12 +168,10 @@ async def update_user(
     
     # First verify the token and get the auth user
     admin_client = get_admin_client()
-    user_response = admin_client.auth.get_user(token)
+    auth_user = resolve_auth_user(admin_client, token)
     
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Try to find user by id first, then by auth_id
     user_record = admin_client.table('users').select('id, auth_id').eq('id', user_id).execute()

@@ -7,7 +7,7 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.dependencies.auth import require_user_token
+from app.dependencies.auth import require_user_token, resolve_auth_user
 from app.dependencies.supabase import get_admin_client
 from app.services import roommate_intros as intro_svc
 
@@ -16,10 +16,8 @@ router = APIRouter(prefix="/api/roommate-intros", tags=["roommate-intros"])
 
 def _resolve_profile_user_id(token: str) -> str:
     supabase = get_admin_client()
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    auth_user_id = user_response.user.id
+    auth_user = resolve_auth_user(supabase, token)
+    auth_user_id = auth_user.id
     user_record = supabase.table("users").select("id").eq("auth_id", auth_user_id).execute()
     if not user_record.data:
         raise HTTPException(status_code=404, detail="User profile not found")

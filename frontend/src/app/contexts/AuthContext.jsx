@@ -12,6 +12,7 @@ import { AuthService } from '../../../lib/authService';
  *   signup: (email: string, password: string, fullName: string) => Promise<void>,
  *   signin: (email: string, password: string) => Promise<void>,
  *   signout: () => Promise<void>,
+ *   signInWithGoogle: () => Promise<void>,
  *   getValidToken: () => Promise<string | null>,
  * }} AuthContextValue
  */
@@ -167,8 +168,14 @@ export function AuthProvider({ children }) {
   const signup = async (email, password, fullName) => {
     try {
       const response = await AuthService.signup(email, password, fullName);
+      // saveAuthState persists tokens; then loadCurrentUser overwrites the user
+      // with the canonical /me shape (user.profile.id etc.) that the rest of
+      // the app expects — the raw /signup response has a different structure.
       saveAuthState(response);
-      setUser(response.user);
+      if (response.access_token) {
+        await loadCurrentUser(response.access_token);
+      }
+      return response;
     } catch (error) {
       throw error;
     }
@@ -179,9 +186,16 @@ export function AuthProvider({ children }) {
       const response = await AuthService.signin(email, password);
       saveAuthState(response);
       setUser(response.user);
+      return response;
     } catch (error) {
       throw error;
     }
+  };
+
+  const signInWithGoogle = async () => {
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    await AuthService.signInWithGoogle(redirectTo);
+    // No state change here — the /auth/callback page handles session persistence after the redirect
   };
 
   const signout = async () => {
@@ -205,9 +219,10 @@ export function AuthProvider({ children }) {
     signup,
     signin,
     signout,
+    signInWithGoogle,
     isAuthenticated,
     getValidToken,
-  }), [user, authState, isLoading, isAuthenticated, getValidToken]); // eslint-disable-line react-hooks/exhaustive-deps -- signup/signin/signout are stable non-memoized helpers
+  }), [user, authState, isLoading, isAuthenticated, getValidToken]); // eslint-disable-line react-hooks/exhaustive-deps -- signup/signin/signout/signInWithGoogle are stable non-memoized helpers
 
   return (
     <AuthContext.Provider value={contextValue}>

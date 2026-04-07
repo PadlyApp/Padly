@@ -4,6 +4,7 @@ import {
   normalizeAuthErrorMessage,
   parseApiErrorResponse,
 } from './errorHandling';
+import { supabase } from './supabaseClient';
 
 export class AuthService {
   static API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth`;
@@ -129,6 +130,14 @@ export class AuthService {
         isNetworkError: true,
       });
     }
+  }
+
+  static async signInWithGoogle(redirectTo) {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    });
+    if (error) throw createAppError(error.message, { isNetworkError: false });
   }
 
   static async refreshToken(refreshToken) {

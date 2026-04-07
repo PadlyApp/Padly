@@ -5,7 +5,7 @@ CRUD operations for roommate groups and member management
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List, Dict, Any
-from app.dependencies.auth import get_user_token, require_user_token
+from app.dependencies.auth import get_user_token, require_user_token, resolve_auth_user
 from app.dependencies.supabase import get_admin_client
 from app.models import RoommateGroupCreate, RoommateGroupUpdate, RoommateGroupResponse
 from app.services.controlled_vocab import validate_city_name, validate_neighborhoods
@@ -309,9 +309,9 @@ async def list_groups(
     # If my_groups is requested, filter by membership
     if my_groups and token:
         # Get current user from token
-        user_response = supabase.auth.get_user(token)
+        auth_user = resolve_auth_user(supabase, token)
         if user_response:
-            auth_user_id = user_response.user.id
+            auth_user_id = auth_user.id
             
             # Look up the user in the users table by auth_id
             user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -376,11 +376,9 @@ async def get_my_pending_requests(token: str = Depends(require_user_token)):
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -437,11 +435,9 @@ async def discover_groups(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    user_id = user_response.user.id
+    user_id = auth_user.id
     
     # Get user from database
     user_db_response = supabase.table("users").select("*").eq("id", user_id).single().execute()
@@ -507,11 +503,9 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -628,11 +622,9 @@ async def create_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -711,11 +703,9 @@ async def update_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -816,11 +806,9 @@ async def delete_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -935,11 +923,9 @@ async def invite_to_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
 
     # Resolve auth UUID → app profile UUID
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1053,11 +1039,9 @@ async def request_join_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1181,11 +1165,9 @@ async def join_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    user_id = user_response.user.id
+    user_id = auth_user.id
     
     # Check if group exists
     group_response = supabase.table('roommate_groups')\
@@ -1283,11 +1265,9 @@ async def reject_invitation(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1334,11 +1314,9 @@ async def accept_join_request(
     supabase = get_admin_client()
     
     # Get current user (group creator)
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1442,11 +1420,9 @@ async def reject_join_request(
     supabase = get_admin_client()
     
     # Get current user (group creator)
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1527,11 +1503,9 @@ async def leave_group(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1690,11 +1664,9 @@ async def remove_member(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the current user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -1799,11 +1771,9 @@ def _safe_int(value: Any, default: int = 0) -> int:
 def _resolve_current_user_id(token: str) -> str:
     """Resolve authenticated user to internal users.id UUID."""
     supabase = get_admin_client()
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
 
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     user_record = supabase.table("users").select("id").eq("auth_id", auth_user_id).limit(1).execute()
     if user_record.data:
         return user_record.data[0]["id"]
@@ -2416,11 +2386,9 @@ async def get_compatible_users(
     supabase = get_admin_client()
     
     # Get current user
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Look up the user in the users table by auth_id
     user_record = supabase.table('users').select('id').eq('auth_id', auth_user_id).execute()
@@ -2561,3 +2529,4 @@ async def get_compatible_users(
     }
 
 # =============================================================================
+

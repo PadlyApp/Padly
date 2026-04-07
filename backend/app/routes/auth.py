@@ -6,7 +6,7 @@ Handles user signup, login, and JWT token management with Supabase Auth
 from fastapi import APIRouter, HTTPException, Depends, Response
 from pydantic import BaseModel, EmailStr
 from app.db import supabase_anon
-from app.dependencies.auth import get_user_token
+from app.dependencies.auth import get_user_token, resolve_auth_user
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
@@ -308,41 +308,96 @@ async def get_current_user(token: str = Depends(get_user_token)):
         )
     
     try:
-        # Get user from JWT token
-        user_response = supabase_anon.auth.get_user(token)
-        
-        if not user_response.user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token"
-            )
-        
-        # Get user profile — must use the admin client so that Row Level Security
-        # on the users table does not block the lookup.
-        from app.db import supabase_admin
-        profile_response = supabase_admin.table("users").select("*").eq("auth_id", user_response.user.id).execute()
+        # Validate the JWT and get the Supabase auth user.
+        # resolve_auth_user handles invalidated sessions (e.g. after sign-out)
+        # with a clean 401 instead of an unhandled 500.
+        from app.dependencies.supabase import get_admin_client
+
+        admin = get_admin_client()
+        auth_user = resolve_auth_user(supabase_anon, token)
+
+        profile_response = admin.table("users").select("*").eq("auth_id", auth_user.id).execute()
         
         # If profile doesn't exist, create it
         if not profile_response.data:
             
             # Get user metadata from auth
-            user_metadata = user_response.user.user_metadata or {}
-            full_name = user_metadata.get("full_name", user_response.user.email.split("@")[0])
-            
+            user_metadata = auth_user.user_metadata or {}
+            full_name = (
+                user_metadata.get("full_name")
+                or user_metadata.get("name")
+                or auth_user.email.split("@")[0]
+            )
+            profile_picture_url = user_metadata.get("avatar_url") or user_metadata.get("picture")
+
             # Create profile
             new_profile = {
-                "auth_id": user_response.user.id,
-                "email": user_response.user.email,
+                "auth_id": auth_user.id,
+                "email": auth_user.email,
                 "full_name": full_name,
             }
-            
-            profile_response = supabase_admin.table("users").insert(new_profile).execute()
-        
+            if profile_picture_url:
+                new_profile["profile_picture_url"] = profile_picture_url
+
+            profile_response = admin.table("users").insert(new_profile).execute()
+
+            # Auto-create solo group for new users (same as /signup)
+            if profile_response.data:
+                profile_id = profile_response.data[0].get("id")
+                if profile_id:
+                    existing_groups = admin.table("group_members")\
+                        .select("group_id")\
+                        .eq("user_id", profile_id)\
+                        .eq("status", "accepted")\
+                        .execute()
+
+                    if not existing_groups.data:
+                        solo_group_data = {
+                            "creator_user_id": profile_id,
+                            "group_name": f"{full_name}'s Housing Search",
+                            "description": "Solo housing search",
+                            "target_city": "San Francisco",
+                            "target_group_size": 1,
+                            "is_solo": True,
+                            "status": "active"
+                        }
+                        group_response = admin.table("roommate_groups")\
+                            .insert(solo_group_data)\
+                            .execute()
+
+                        if group_response.data:
+                            solo_group = group_response.data[0]
+                            member_data = {
+                                "group_id": solo_group["id"],
+                                "user_id": profile_id,
+                                "is_creator": True,
+                                "status": "accepted"
+                            }
+                            admin.table("group_members").insert(member_data).execute()
+
+        profile = profile_response.data[0] if profile_response.data else None
+        profile_id = profile.get("id") if profile else None
+
+        # Check whether the user has ever saved housing preferences so the
+        # frontend can decide to send them to /preferences-setup or /discover.
+        has_preferences = False
+        if profile_id:
+            try:
+                prefs_response = admin.table("personal_preferences")\
+                    .select("user_id")\
+                    .eq("user_id", profile_id)\
+                    .limit(1)\
+                    .execute()
+                has_preferences = bool(prefs_response.data)
+            except Exception:
+                pass
+
         return {
             "user": {
-                "id": user_response.user.id,
-                "email": user_response.user.email,
-                "profile": profile_response.data[0] if profile_response.data else None
+                "id": auth_user.id,
+                "email": auth_user.email,
+                "profile": profile,
+                "has_preferences": has_preferences,
             }
         }
         
