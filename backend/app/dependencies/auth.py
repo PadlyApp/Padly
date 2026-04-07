@@ -112,10 +112,21 @@ async def require_user_token(
 
 def resolve_auth_user(supabase_client: Any, token: str) -> Any:
     """
-    Call supabase_client.auth.get_user(token) and return the user object.
+    Validate ``token`` with Supabase Auth and return the auth user object.
 
-    Converts AuthApiError (e.g. invalidated session after sign-out) and any
-    other auth exception into a clean HTTP 401 instead of an unhandled 500.
+    Always uses the module-level ``supabase_anon`` client for the actual
+    ``auth.get_user(token)`` call, regardless of the ``supabase_client``
+    argument.  This is intentional: supabase-py 2.x dispatches an internal
+    auth-state-change event after ``get_user(jwt)``, which can overwrite the
+    PostgREST Authorization header on whatever client was used.  If we let
+    that happen on the ``supabase_admin`` singleton the very next
+    ``admin.table(...).execute()`` call would run with the user's JWT instead
+    of the service-role key, causing RLS failures (→ unhandled exception →
+    HTTP 500).  Using ``supabase_anon`` is safe because that client is never
+    used for PostgREST DB queries, so its header state does not matter.
+
+    The ``supabase_client`` parameter is kept for backward-compatibility but
+    is no longer forwarded to ``auth.get_user``.
 
     Usage:
         supabase = get_admin_client()
@@ -127,8 +138,15 @@ def resolve_auth_user(supabase_client: Any, token: str) -> Any:
     except ImportError:
         AuthApiError = None  # type: ignore[assignment,misc]
 
+    # Import here to avoid circular imports at module load time.
     try:
-        response = supabase_client.auth.get_user(token)
+        from app.db import supabase_anon as _validator
+    except Exception:
+        # Fallback – should never happen in normal operation.
+        _validator = supabase_client  # type: ignore[assignment]
+
+    try:
+        response = _validator.auth.get_user(token)
     except Exception as exc:
         if AuthApiError and isinstance(exc, AuthApiError):
             raise HTTPException(status_code=401, detail=str(exc)) from exc

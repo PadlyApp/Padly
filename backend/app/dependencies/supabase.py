@@ -72,10 +72,27 @@ def get_admin_client() -> Client:
         
         # Can access any data regardless of RLS
         response = client.table('users').select('*').execute()
+
+    Implementation note — singleton safety
+    ----------------------------------------
+    ``supabase_admin`` is a module-level singleton shared across all requests.
+    supabase-py 2.x dispatches internal auth-state-change events that can
+    overwrite ``postgrest.auth()`` when certain auth methods are called on the
+    client.  ``resolve_auth_user`` now always uses ``supabase_anon`` for
+    ``auth.get_user(token)`` to prevent this, but we still reset the header
+    here as a belt-and-suspenders guard before every DB interaction.
     """
-    # Always reset the PostgREST Authorization header to the service role key.
-    # supabase-py 2.x can mutate the singleton's auth headers when auth.get_user()
-    # is called with a user JWT, which would cause subsequent PostgREST calls to
-    # run as the user (subject to RLS) instead of as the service role (bypasses RLS).
     supabase_admin.postgrest.auth(SUPABASE_SERVICE_KEY)
     return supabase_admin
+
+
+def reset_admin_postgrest_auth() -> None:
+    """
+    Explicitly reset the supabase_admin PostgREST Authorization header back
+    to the service-role key.
+
+    Call this immediately after any ``auth.*`` operation performed on the
+    ``supabase_admin`` singleton to prevent a stale user JWT from leaking
+    into subsequent PostgREST queries.
+    """
+    supabase_admin.postgrest.auth(SUPABASE_SERVICE_KEY)

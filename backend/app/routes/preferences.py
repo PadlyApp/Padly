@@ -159,9 +159,15 @@ async def get_user_preferences(
     Users can only retrieve their own preferences.
     """
     # Verify the caller owns the requested user_id
-    admin = get_admin_client()
-    auth_user = resolve_auth_user(admin, token)
-    record = admin.table("users").select("id").eq("auth_id", auth_user.id).limit(1).execute()
+    try:
+        admin = get_admin_client()
+        auth_user = resolve_auth_user(admin, token)
+        record = admin.table("users").select("id").eq("auth_id", auth_user.id).limit(1).execute()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Authentication check failed. Please try again.") from e
+
     if not record.data or record.data[0]["id"] != user_id:
         raise HTTPException(status_code=403, detail="You can only view your own preferences")
 
