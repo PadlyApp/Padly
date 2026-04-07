@@ -29,7 +29,7 @@ import {
   IconCalendar,
 } from '@tabler/icons-react';
 
-export function InvitationsPanel({ user, authState }) {
+export function InvitationsPanel({ user, authState, onBrowseGroups }) {
   const router = useRouter();
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -187,7 +187,13 @@ export function InvitationsPanel({ user, authState }) {
           </Text>
           <Button
             mt="md"
-            onClick={() => router.push('/groups')}
+            onClick={() => {
+              if (typeof onBrowseGroups === 'function') {
+                onBrowseGroups();
+                return;
+              }
+              router.push('/groups');
+            }}
           >
             Browse Groups
           </Button>
