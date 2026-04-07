@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.dependencies.auth import require_user_token
+from app.dependencies.auth import require_user_token, get_user_token, resolve_auth_user
 from app.dependencies.supabase import get_admin_client
 from app.services.behavior_features import (
     build_group_behavior_vector,
@@ -94,12 +94,8 @@ def _resolve_current_user_id(token: str) -> str:
     Resolve authenticated user to internal users.id UUID.
     """
     supabase = get_admin_client()
-
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-
-    auth_user_id = user_response.user.id
+    auth_user = resolve_auth_user(supabase, token)
+    auth_user_id = auth_user.id
 
     # Preferred mapping: users.auth_id == auth user id.
     user_record = supabase.table("users").select("id").eq("auth_id", auth_user_id).limit(1).execute()
@@ -1228,7 +1224,7 @@ class SearchQueryEventCreate(BaseModel):
 @router.post("/swipe-context")
 async def create_swipe_context_event(
     payload: SwipeContextEventCreate,
-    token: str = Depends(require_user_token),
+    token: Optional[str] = Depends(get_user_token),
 ):
     """
     Persist filter + device context alongside a swipe.
@@ -1236,9 +1232,15 @@ async def create_swipe_context_event(
     Companion to POST /swipes — writes to swipe_context_events without
     touching the existing swipe_interactions table. Join the two tables on
     (actor_user_id, listing_id, session_id) to get the full swipe picture.
+    Uses optional auth — silently no-ops when there is no valid session.
     """
+    if not token:
+        return {"status": "skipped"}
     supabase = get_admin_client()
-    user_id = _resolve_current_user_id(token)
+    try:
+        user_id = _resolve_current_user_id(token)
+    except HTTPException:
+        return {"status": "skipped"}
 
     try:
         insert_data = {
@@ -1268,16 +1270,22 @@ async def create_swipe_context_event(
 @router.post("/listing-views")
 async def create_listing_view_event(
     payload: ListingViewEventCreate,
-    token: str = Depends(require_user_token),
+    token: Optional[str] = Depends(get_user_token),
 ):
     """
     Persist a listing view duration event.
 
     Fire on card mount (discover stack, matches grid) and on listing detail
     page unmount. Best-effort — callers should not block on this response.
+    Uses optional auth — silently no-ops when there is no valid session.
     """
+    if not token:
+        return {"status": "skipped"}
     supabase = get_admin_client()
-    user_id = _resolve_current_user_id(token)
+    try:
+        user_id = _resolve_current_user_id(token)
+    except HTTPException:
+        return {"status": "skipped"}
 
     try:
         insert_data = {
@@ -1308,15 +1316,22 @@ async def create_listing_view_event(
 @router.post("/page-views")
 async def create_page_view_event(
     payload: PageViewEventCreate,
-    token: str = Depends(require_user_token),
+    token: Optional[str] = Depends(get_user_token),
 ):
     """
     Persist a page view event for funnel analytics.
 
     Fire on page component mount; send duration_ms on unmount via keepalive fetch.
+    Uses optional auth — silently no-ops when the user has no valid session so
+    that analytics never block or error during the pre-setup / sign-in flow.
     """
+    if not token:
+        return {"status": "skipped"}
     supabase = get_admin_client()
-    user_id = _resolve_current_user_id(token)
+    try:
+        user_id = _resolve_current_user_id(token)
+    except HTTPException:
+        return {"status": "skipped"}
 
     try:
         insert_data = {
@@ -1345,16 +1360,23 @@ async def create_page_view_event(
 @router.post("/search-queries")
 async def create_search_query_event(
     payload: SearchQueryEventCreate,
-    token: str = Depends(require_user_token),
+    token: Optional[str] = Depends(get_user_token),
 ):
     """
     Persist a search/filter event for demand intelligence.
 
     Fire each time the discover feed calls /api/recommendations, capturing
     the full filter state and how many results were returned.
+    Uses optional auth — silently no-ops when the user has no valid session so
+    that analytics never block or error during the pre-setup / sign-in flow.
     """
+    if not token:
+        return {"status": "skipped"}
     supabase = get_admin_client()
-    user_id = _resolve_current_user_id(token)
+    try:
+        user_id = _resolve_current_user_id(token)
+    except HTTPException:
+        return {"status": "skipped"}
 
     try:
         insert_data = {

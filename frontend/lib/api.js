@@ -108,8 +108,10 @@ export const api = {
   },
 
   // Users endpoints
-  async getUsers(limit = 100, offset = 0) {
-    const response = await fetch(`${API_BASE_URL}/api/users?limit=${limit}&offset=${offset}`);
+  async getUsers(token, limit = 100, offset = 0) {
+    const response = await fetch(`${API_BASE_URL}/api/users?limit=${limit}&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!response.ok) {
       await throwApiError(response, 'Failed to fetch users');
     }
@@ -133,8 +135,10 @@ export const api = {
     return response.json();
   },
 
-  async getUser(id) {
-    const response = await fetch(`${API_BASE_URL}/api/users/${id}`);
+  async getUser(id, token) {
+    const response = await fetch(`${API_BASE_URL}/api/users/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!response.ok) {
       await throwApiError(response, 'Failed to fetch user');
     }

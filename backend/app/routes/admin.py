@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from typing import Any, Optional
-from app.dependencies.auth import require_admin_key, require_user_token
+from app.dependencies.auth import require_admin_key, require_user_token, resolve_auth_user
 from app.dependencies.supabase import get_admin_client
 from app.services.supabase_client import SupabaseHTTPClient
 
@@ -324,11 +324,9 @@ def _build_summary_export_csv(summary: dict[str, Any]) -> str:
 
 def _require_admin_user(token: str) -> dict[str, Any]:
     supabase = get_admin_client()
-    user_response = supabase.auth.get_user(token)
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    auth_user = resolve_auth_user(supabase, token)
 
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     profile_response = (
         supabase.table("users")
         .select("id,email,full_name,role")

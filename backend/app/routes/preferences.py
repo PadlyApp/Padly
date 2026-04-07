@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse
 from typing import Optional, Any
 from datetime import date, datetime
 from decimal import Decimal
-from app.dependencies.auth import get_user_token, require_user_token
+from app.dependencies.auth import get_user_token, require_user_token, resolve_auth_user
+from app.dependencies.supabase import get_admin_client
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import (
     PersonalPreferencesUpdate,
@@ -151,13 +152,19 @@ def deserialize_preferences(db_data: dict) -> dict:
 @router.get("/{user_id}")
 async def get_user_preferences(
     user_id: str,
-    token: Optional[str] = Depends(get_user_token)
+    token: str = Depends(require_user_token)
 ):
     """
-    Get personal preferences for a user.
-    
-    Returns housing and roommate preferences used for matching algorithm.
+    Get personal preferences for the authenticated user.
+    Users can only retrieve their own preferences.
     """
+    # Verify the caller owns the requested user_id
+    admin = get_admin_client()
+    auth_user = resolve_auth_user(admin, token)
+    record = admin.table("users").select("id").eq("auth_id", auth_user.id).limit(1).execute()
+    if not record.data or record.data[0]["id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only view your own preferences")
+
     client = SupabaseHTTPClient(token=token)
     
     prefs = await client.select_one(
@@ -340,20 +347,17 @@ async def update_user_preferences(
         return JSONResponse(content=make_json_serializable(response_data))
     
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        # Log the actual error for debugging
         import traceback
         print(f"\n❌ ERROR in update_user_preferences:")
         print(f"Error type: {type(e).__name__}")
         print(f"Error message: {str(e)}")
         traceback.print_exc()
-        print()
-        
+
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update preferences: {str(e)}"
+            detail="Failed to update preferences. Please try again."
         )
 
 

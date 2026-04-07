@@ -37,6 +37,7 @@ import { IconPlus, IconSearch, IconUsers, IconMapPin, IconCalendar, IconCurrency
 import { notifications } from '@mantine/notifications';
 import { useAuth } from '../contexts/AuthContext';
 import { Navigation } from '../components/Navigation';
+import { ProtectedRoute } from '../components/ProtectedRoute';
 import { InvitationsPanel } from '../components/InvitationsPanel';
 import { api } from '../../../lib/api';
 
@@ -551,6 +552,7 @@ function GroupsPageContent() {
   }
 
   return (
+    <ProtectedRoute>
     <>
       <Navigation />
       <Container size="lg" py="xl">
@@ -1218,5 +1220,6 @@ function GroupsPageContent() {
       </Stack>
     </Container>
     </>
+    </ProtectedRoute>
   );
 }

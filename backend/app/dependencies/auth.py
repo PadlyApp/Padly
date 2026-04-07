@@ -5,7 +5,7 @@ Handles JWT token extraction from request headers
 
 import os
 from fastapi import Header, HTTPException
-from typing import Optional
+from typing import Optional, Any
 
 
 async def require_admin_key(
@@ -108,3 +108,33 @@ async def require_user_token(
         )
     
     return token
+
+
+def resolve_auth_user(supabase_client: Any, token: str) -> Any:
+    """
+    Call supabase_client.auth.get_user(token) and return the user object.
+
+    Converts AuthApiError (e.g. invalidated session after sign-out) and any
+    other auth exception into a clean HTTP 401 instead of an unhandled 500.
+
+    Usage:
+        supabase = get_admin_client()
+        auth_user = resolve_auth_user(supabase, token)
+        auth_user_id = auth_user.id
+    """
+    try:
+        from supabase_auth.errors import AuthApiError
+    except ImportError:
+        AuthApiError = None  # type: ignore[assignment,misc]
+
+    try:
+        response = supabase_client.auth.get_user(token)
+    except Exception as exc:
+        if AuthApiError and isinstance(exc, AuthApiError):
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise HTTPException(status_code=401, detail="Invalid authentication token") from exc
+
+    if not response or not response.user:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+    return response.user

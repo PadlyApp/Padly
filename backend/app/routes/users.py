@@ -5,7 +5,7 @@ CRUD operations for users table
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional, List
-from app.dependencies.auth import get_user_token, require_user_token
+from app.dependencies.auth import get_user_token, require_user_token, resolve_auth_user
 from app.services.supabase_client import SupabaseHTTPClient
 from app.models import UserCreate, UserUpdate, UserResponse
 from app.services.controlled_vocab import (
@@ -32,17 +32,13 @@ def _validate_profile_catalog_fields(data: dict) -> dict:
 
 @router.get("/users")
 async def list_users(
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     limit: Optional[int] = 100,
     offset: Optional[int] = 0,
     q: Optional[str] = Query(None, description="Case-insensitive search over full_name and email"),
 ):
     """
-    List all users.
-    
-    - With JWT: Returns users visible to authenticated user (RLS when enabled)
-    - Without JWT: Returns publicly visible users (RLS when enabled)
-    - RLS disabled: Returns all users
+    List users. Requires authentication.
     """
     client = SupabaseHTTPClient(token=token)
     filters = {}
@@ -61,8 +57,8 @@ async def list_users(
             from app.dependencies.supabase import get_admin_client
 
             admin_client = get_admin_client()
-            user_response = admin_client.auth.get_user(token)
-            auth_user_id = user_response.user.id if user_response and user_response.user else None
+            auth_user = resolve_auth_user(admin_client, token)
+            auth_user_id = auth_user.id
             if auth_user_id:
                 me = (
                     admin_client.table("users")
@@ -95,13 +91,10 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user(
     user_id: str,
-    token: Optional[str] = Depends(get_user_token)
+    token: str = Depends(require_user_token)
 ):
     """
-    Get a single user by ID.
-    
-    - With JWT: User must have permission to view (RLS when enabled)
-    - Without JWT: User must be publicly visible (RLS when enabled)
+    Get a single user by ID. Requires authentication.
     """
     client = SupabaseHTTPClient(token=token)
     
@@ -168,12 +161,10 @@ async def update_user(
     
     # First verify the token and get the auth user
     admin_client = get_admin_client()
-    user_response = admin_client.auth.get_user(token)
+    auth_user = resolve_auth_user(admin_client, token)
     
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
     
-    auth_user_id = user_response.user.id
+    auth_user_id = auth_user.id
     
     # Try to find user by id first, then by auth_id
     user_record = admin_client.table('users').select('id, auth_id').eq('id', user_id).execute()
@@ -219,19 +210,25 @@ async def delete_user(
     token: str = Depends(require_user_token)
 ):
     """
-    Delete a user.
-    
-    Requires authentication.
-    - With RLS enabled: User can only delete their own record
-    - With RLS disabled: User can delete any record (for testing)
+    Delete a user. Users can only delete their own account.
     """
+    from app.dependencies.supabase import get_admin_client
+
+    admin_client = get_admin_client()
+    auth_user = resolve_auth_user(admin_client, token)
+
+    user_record = admin_client.table("users").select("id, auth_id").eq("id", user_id).limit(1).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user_record.data[0].get("auth_id") != auth_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own account")
+
     client = SupabaseHTTPClient(token=token)
-    
     await client.delete(
         table="users",
         id_value=user_id
     )
-    
+
     return {
         "status": "success",
         "message": "User deleted successfully"

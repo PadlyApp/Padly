@@ -25,6 +25,7 @@ import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Navigation } from '../../../components/Navigation';
+import { ProtectedRoute } from '../../../components/ProtectedRoute';
 
 export default function EditGroupPage() {
   const router = useRouter();
@@ -240,6 +241,7 @@ export default function EditGroupPage() {
   }
 
   return (
+    <ProtectedRoute>
     <>
       <Navigation />
       <Container size="md" py="xl">
@@ -360,5 +362,6 @@ export default function EditGroupPage() {
         </Stack>
       </Container>
     </>
+    </ProtectedRoute>
   );
 }
