@@ -5,7 +5,7 @@ import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, Tooltip
 import { SkeletonListingDetail } from '../../components/Skeletons';
 import { IconBookmark, IconBookmarkFilled, IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { useAuth } from '../../contexts/AuthContext';
@@ -14,6 +14,7 @@ import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
 import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
+import { notifications } from '@mantine/notifications';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -58,6 +59,7 @@ export default function ListingDetailPage() {
   const searchParams = useSearchParams();
   const listingId = params.id;
   const { getValidToken, authState } = useAuth();
+  const queryClient = useQueryClient();
   const recommendationSessionId = searchParams.get('recommendationSessionId');
   const recommendationSource = searchParams.get('source');
   const trackedPosition = searchParams.get('position');
@@ -189,7 +191,8 @@ export default function ListingDetailPage() {
         if (!token || cancelled) return;
         const response = await api.getInterestedListingIds(token);
         if (!cancelled) {
-          setIsInterested((response.interested_listing_ids || []).includes(listingId));
+          const ids = (response.interested_listing_ids || []).map((id) => String(id));
+          setIsInterested(ids.includes(String(listingId)));
         }
       } catch {
         // Interest state is non-critical.
@@ -237,16 +240,38 @@ export default function ListingDetailPage() {
       const token = await getValidToken();
       if (!token) {
         setIsInterested(!nextInterested);
+        notifications.show({
+          title: 'Session expired',
+          message: 'Please log in again to update interested listings.',
+          color: 'red',
+        });
         return;
       }
 
       if (nextInterested) {
         await api.markInterestedListing(token, listingId, recommendationSource || 'listing_detail');
+        notifications.show({
+          title: 'Saved to Interested Listings',
+          message: 'You can find this listing in Account > Interested Listings.',
+          color: 'teal',
+        });
       } else {
         await api.unmarkInterestedListing(token, listingId);
+        notifications.show({
+          title: 'Removed from Interested Listings',
+          message: 'This listing is no longer in your interested list.',
+          color: 'gray',
+        });
       }
+
+      await queryClient.invalidateQueries({ queryKey: ['interested-listings'] });
     } catch {
       setIsInterested(!nextInterested);
+      notifications.show({
+        title: 'Could not update interested listing',
+        message: 'Please try again in a moment.',
+        color: 'red',
+      });
     } finally {
       setInterestLoading(false);
     }
