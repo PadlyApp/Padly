@@ -300,6 +300,10 @@ export default function ListingDetailPage() {
   }
 
   const { street, location } = parseTitle(listing.title);
+  const cityState = [listing.city, listing.state_province || listing.state]
+    .filter(Boolean)
+    .join(', ');
+  const locationText = cityState || location;
 
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
@@ -410,10 +414,10 @@ export default function ListingDetailPage() {
                 <Title order={1} style={{ color: '#111', fontSize: '1.75rem', lineHeight: 1.3 }}>
                   {street || listing.title}
                 </Title>
-                {location && (
+                {locationText && (
                   <Group gap={6} align="center">
                     <IconMapPin size={15} color="#868e96" style={{ flexShrink: 0 }} />
-                    <Text size="sm" c="dimmed">{location}</Text>
+                    <Text size="sm" c="dimmed">{locationText}</Text>
                   </Group>
                 )}
               </Stack>
@@ -456,6 +460,10 @@ export default function ListingDetailPage() {
                   Details
                 </Title>
                 <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Text c="dimmed">Location:</Text>
+                    <Text fw={500}>{locationText || 'N/A'}</Text>
+                  </Group>
                   <Group justify="space-between">
                     <Text c="dimmed">Property Type:</Text>
                     <Text fw={500}>{formatEnum(listing.property_type)}</Text>

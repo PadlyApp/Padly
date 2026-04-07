@@ -67,6 +67,7 @@ function MatchesPageContent() {
   const [missingCorePreferences, setMissingCorePreferences] = useState(false);
   const [userGroup, setUserGroup] = useState(null);
   const [savedListingIds, setSavedListingIds] = useState(new Set());
+  const [targetStateFallback, setTargetStateFallback] = useState(null);
   const [rankingContext, setRankingContext] = useState(null);
   const [feedbackSessionId, setFeedbackSessionId] = useState(null);
   const [promptAllowed, setPromptAllowed] = useState(false);
@@ -212,7 +213,7 @@ function MatchesPageContent() {
     }
 
     if (!hasCorePreferences) {
-      return { listings: [], missingCorePreferences: true };
+      return { listings: [], missingCorePreferences: true, targetState: prefs.target_state_province ?? null };
     }
 
     try {
@@ -288,6 +289,7 @@ function MatchesPageContent() {
     return {
       listings: data.recommendations || [],
       missingCorePreferences: false,
+      targetState: prefs.target_state_province ?? null,
       rankingContext: deriveRankingContext(data),
     };
   }, [deriveRankingContext, getValidToken, userId]);
@@ -312,6 +314,7 @@ function MatchesPageContent() {
     prevFeedDataRef.current = feedData;
     setListings(feedData.listings);
     setMissingCorePreferences(feedData.missingCorePreferences);
+    setTargetStateFallback(feedData.targetState ?? null);
     setRankingContext(feedData.rankingContext ?? null);
     setFeedbackSessionId(null);
     setPromptAllowed(false);
@@ -816,6 +819,10 @@ function MatchesPageContent() {
                   'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
 
                 const { street, location } = parseListingTitle(listing.title);
+                const cityState = [listing.city, listing.state_province || listing.state || targetStateFallback]
+                  .filter(Boolean)
+                  .join(', ');
+                const locationText = cityState || location;
                 const amenityBadges = listing.amenities && typeof listing.amenities === 'object'
                   ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 2).map(([key]) => key)
                   : [];
@@ -874,11 +881,11 @@ function MatchesPageContent() {
                           >
                             {street || listing.title}
                           </Text>
-                          {location && (
-                            <Group gap={4} mt={2}>
+                          {locationText && (
+                            <Group gap={4} mt={8} mb={2}>
                               <IconMapPin size={12} color="#868e96" style={{ flexShrink: 0 }} />
-                              <Text size="xs" c="dimmed" lineClamp={1} style={{ flex: 1 }}>
-                                {location}
+                              <Text size="sm" fw={500} c="dimmed" lineClamp={1} style={{ flex: 1 }}>
+                                {locationText}
                               </Text>
                             </Group>
                           )}
