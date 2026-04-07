@@ -18,7 +18,7 @@ import {
 } from '@mantine/core';
 import { RangeSlider } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { IconAlertCircle, IconCheck, IconMinus, IconPlus } from '@tabler/icons-react';
+import { IconAlertCircle, IconCheck, IconMinus, IconPlus, IconX } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
 import { parseApiErrorResponse } from '../../../lib/errorHandling';
@@ -650,6 +650,23 @@ export function PreferencesForm() {
           searchValue={citySearch}
           onSearchChange={setCitySearch}
           disabled={!prefs.target_state_province || loadingCities}
+          rightSection={prefs.target_city ? (
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              radius="xl"
+              size="sm"
+              aria-label="Clear selected city"
+              onClick={(event) => {
+                event.stopPropagation();
+                updatePref('target_city', null);
+                setCitySearch('');
+              }}
+            >
+              <IconX size={14} />
+            </ActionIcon>
+          ) : null}
+          rightSectionPointerEvents={prefs.target_city ? 'all' : 'none'}
           required
         />
       </Stack>
