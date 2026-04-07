@@ -16,6 +16,7 @@ import geonamescache
 from app.services.location_matching import (
     get_metro_options,
     metro_option,
+    metro_for_city,
     normalize_city_name,
     normalize_country,
     normalize_state,
@@ -308,6 +309,51 @@ def _neighborhood_city_key(city_name: str) -> str:
     return _norm(normalize_city_name(city_name))
 
 
+def _city_from_active_listings(country_code: str, state_code: str, city_name: str) -> Optional[str]:
+    """Resolve a city from active listings when controlled vocab misses it."""
+    from app.dependencies.supabase import get_admin_client
+
+    city_norm = normalize_city_name(city_name)
+    if not city_norm:
+        return None
+
+    target_country = normalize_country(country_code)
+    target_state = normalize_state(state_code)
+    supabase = get_admin_client()
+
+    rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            supabase.table("listings")
+            .select("city, state_province, country")
+            .eq("status", "active")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        page = resp.data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    for row in rows:
+        if normalize_country(row.get("country", "")) != target_country:
+            continue
+        if normalize_state(row.get("state_province", "")) != target_state:
+            continue
+        raw_city = (row.get("city") or "").strip()
+        if not raw_city:
+            continue
+        # Keep label consistent with dropdown options.
+        db_city = raw_city.split(" (")[0].strip() if " (" in raw_city else raw_city
+        if normalize_city_name(db_city) == city_norm:
+            return db_city
+
+    return None
+
+
 def search_neighborhoods(city_name: str, query: str = "", limit: int = 200) -> List[Dict[str, str]]:
     city_key = _neighborhood_city_key(city_name)
     q = _norm(query)
@@ -391,6 +437,29 @@ def validate_location(country_code: str, state_code: str, city_name: str) -> Tup
     city_map = cache["city_name_index"].get((cc, sc), {})
     canonical_city = city_map.get(cnorm)
     if not canonical_city:
+        # Accept metro-subcity aliases that belong to the selected region (e.g. Emeryville -> Bay Area).
+        metro_id = metro_for_city(city_name)
+        if metro_id:
+            allowed_metros = {
+                metro_option_data["value"]
+                for metro_option_data in get_metro_options(country_code=cc, state_code=sc)
+            }
+            metro_display = {
+                "gta": "GTA",
+                "nyc": "NYC",
+                "bay_area": "Bay Area",
+            }.get(metro_id)
+            if metro_display in allowed_metros:
+                return cc, sc, city_name.strip()
+
+        # Fallback to active listings inventory so city validation matches the options endpoint behavior.
+        try:
+            listing_city = _city_from_active_listings(cc, sc, city_name)
+            if listing_city:
+                return cc, sc, listing_city
+        except Exception:
+            pass
+
         raise ValueError(f"city '{city_name}' is not valid for state '{sc}', country '{cc}'")
 
     return cc, sc, canonical_city

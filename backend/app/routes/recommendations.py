@@ -94,6 +94,7 @@ class RecommendedListing(BaseModel):
     area_sqft: Optional[int] = None
     furnished: Optional[bool] = None
     city: Optional[str] = None
+    state_province: Optional[str] = None
     property_type: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -216,6 +217,7 @@ async def get_recommendations(preferences: UserPreferences):
             area_sqft=item.get("area_sqft"),
             furnished=item.get("furnished"),
             city=item.get("city"),
+            state_province=item.get("state_province"),
             property_type=item.get("property_type"),
             latitude=float(item["latitude"]) if item.get("latitude") else None,
             longitude=float(item["longitude"]) if item.get("longitude") else None,
