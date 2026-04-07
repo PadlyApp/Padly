@@ -11,6 +11,7 @@ import {
   NumberInput,
   Select,
   Stack,
+  Switch,
   Text,
   Title,
   ActionIcon,
@@ -129,6 +130,7 @@ export default function PreferencesSetupPage() {
   // Rooms state
   const [bedrooms, setBedrooms] = useState(null);
   const [bathrooms, setBathrooms] = useState(null);
+  const [allowLargerLayouts, setAllowLargerLayouts] = useState(false);
 
   // More filters state
   const [showMoreFilters, setShowMoreFilters] = useState(false);
@@ -251,6 +253,7 @@ export default function PreferencesSetupPage() {
 
       if (bedrooms !== null) body.required_bedrooms = bedrooms;
       if (bathrooms !== null) body.target_bathrooms = bathrooms;
+      body.lifestyle_preferences = { allow_larger_layouts: allowLargerLayouts };
 
       if (moveInDate) body.move_in_date = moveInDate instanceof Date ? moveInDate.toISOString().split('T')[0] : moveInDate;
       if (leaseType) body.target_lease_type = leaseType;
@@ -287,7 +290,7 @@ export default function PreferencesSetupPage() {
     } finally {
       setSaving(false);
     }
-  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, getValidToken, router]);
+  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, allowLargerLayouts, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, getValidToken, router]);
 
   const maxBinCount = histogram.bins.length > 0
     ? Math.max(...histogram.bins.map((b) => b.count))
@@ -462,6 +465,13 @@ export default function PreferencesSetupPage() {
                 <RoomCounter label="Bathrooms" value={bathrooms} onChange={setBathrooms} />
               </Box>
             </Stack>
+
+            <Switch
+              label="Allow larger listings"
+              description="Off = exact bed/bath match. On = show listings with more beds/baths than selected."
+              checked={allowLargerLayouts}
+              onChange={(event) => setAllowLargerLayouts(event.currentTarget.checked)}
+            />
           </Stack>
 
           <Divider />
