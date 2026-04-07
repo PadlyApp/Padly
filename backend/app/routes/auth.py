@@ -36,6 +36,8 @@ async def signup(user_data: SignUpRequest):
     ALWAYS creates the user profile in public.users table.
     Also auto-creates a solo group for immediate housing search.
     """
+    created_auth_user_id = None
+
     try:
         # Sign up with Supabase Auth
         auth_response = supabase_anon.auth.sign_up({
@@ -53,6 +55,8 @@ async def signup(user_data: SignUpRequest):
                 status_code=400,
                 detail="Failed to create user account"
             )
+
+        created_auth_user_id = auth_response.user.id
         
         # ALWAYS create user profile in users table (regardless of email confirmation)
         from app.db import supabase_admin
@@ -137,7 +141,29 @@ async def signup(user_data: SignUpRequest):
     except HTTPException:
         raise
     except Exception as e:
-        if hasattr(e, 'message') and "already registered" in str(e.message):
+        error_text = str(e)
+        is_already_registered = (
+            (hasattr(e, 'message') and "already registered" in str(e.message))
+            or "already registered" in error_text.lower()
+        )
+
+        # Best-effort rollback so a partial signup doesn't leave a ghost auth user.
+        if created_auth_user_id and not is_already_registered:
+            try:
+                from app.db import supabase_admin
+                supabase_admin.auth.admin.delete_user(created_auth_user_id)
+            except Exception:
+                pass
+
+        if 'row-level security policy' in error_text and 'table "users"' in error_text:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    'Registration failed due to backend Supabase configuration. '
+                    'Service role access for users table insert is not active.'
+                )
+            )
+        if is_already_registered:
             raise HTTPException(
                 status_code=409,
                 detail="User with this email already exists"
@@ -202,6 +228,8 @@ async def signin(credentials: SignInRequest):
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=401,
