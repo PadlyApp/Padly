@@ -62,6 +62,7 @@ import {
 } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
+import { ProtectedRoute } from '../../components/ProtectedRoute';
 
 export default function GroupDetailPage() {
   const router = useRouter();
@@ -633,6 +634,7 @@ export default function GroupDetailPage() {
   }[group.status] || 'gray';
 
   return (
+    <ProtectedRoute>
     <>
       <Navigation />
       <Container size="xl" py="xl">
@@ -1353,5 +1355,6 @@ export default function GroupDetailPage() {
       </Modal>
     </Container>
     </>
+    </ProtectedRoute>
   );
 }

@@ -6,13 +6,14 @@ Returns a ranked list of listings with match scores for a given user.
 Frontend just sends user preferences, gets back sorted listings with scores.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
 from app.ai.recommender import score_listings
 from app.services.listing_payloads import hydrate_listing_image_collection
 from app.services.location_matching import filter_listings_for_location
+from app.dependencies.auth import require_user_token
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
 
@@ -125,7 +126,10 @@ class RecommendationsResponse(BaseModel):
 # ── endpoint ───────────────────────────────────────────────────────────────
 
 @router.post("/recommendations", response_model=RecommendationsResponse)
-async def get_recommendations(preferences: UserPreferences):
+async def get_recommendations(
+    preferences: UserPreferences,
+    _token: str = Depends(require_user_token),
+):
     """
     Get ranked listing recommendations for a user.
 
@@ -168,7 +172,7 @@ async def get_recommendations(preferences: UserPreferences):
         listings = hydrate_listing_image_collection(all_listings)
     except Exception as e:
         print(f"[recommendations] listings fetch error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch listings: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch listings. Please try again.")
 
     if not listings:
         return RecommendationsResponse(
@@ -196,7 +200,7 @@ async def get_recommendations(preferences: UserPreferences):
         scored = score_listings(user, listings, top_n=len(listings))
     except Exception as e:
         print(f"[recommendations] scoring error: {e}")
-        raise HTTPException(status_code=500, detail=f"Scoring failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Recommendation scoring failed. Please try again.")
 
     paged = scored[offset:offset + top_n]
 

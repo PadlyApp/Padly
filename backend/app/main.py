@@ -7,6 +7,8 @@ to find housing and compatible roommates.
 import os
 
 from fastapi import FastAPI
+
+_is_dev = os.getenv("ENVIRONMENT", "development").lower() in ("development", "dev", "local")
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import (
     users_router,
@@ -29,8 +31,8 @@ app = FastAPI(
     title="Padly API",
     version="1.0.0",
     description="Backend API for Padly - Housing and Roommate Matching Platform",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
 )
 
 # Configure CORS (Starlette returns 400 on failed preflight — usually wrong Origin)

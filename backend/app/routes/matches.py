@@ -198,21 +198,19 @@ async def roommate_suggestions(
 @router.get("/{user_id}")
 async def get_user_group_status(
     user_id: str,
-    token: Optional[str] = Depends(get_user_token)
+    token: str = Depends(require_user_token)
 ):
     """
     Get the user's current group and their group's listing matches.
-    
-    This endpoint helps users understand:
-    1. Which group(s) they belong to
-    2. Where to fetch their current ranked listing feed
-
-    For individual user→listing matches, users should:
-    1. Create or join a roommate group
-    2. Use /api/roommate-groups/{group_id}/matches for ranked recommendations
-    3. Use /api/roommate-groups/{group_id}/eligible-listings for browsing
+    Requires authentication. Users can only query their own group status.
     """
     supabase = get_admin_client()
+
+    # Verify the caller owns the requested user_id
+    auth_user = resolve_auth_user(supabase, token)
+    user_record = supabase.table("users").select("id").eq("auth_id", auth_user.id).limit(1).execute()
+    if not user_record.data or user_record.data[0]["id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only view your own group status")
     
     # Get user's groups
     member_response = supabase.table('group_members')\

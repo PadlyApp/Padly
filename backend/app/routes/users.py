@@ -32,17 +32,13 @@ def _validate_profile_catalog_fields(data: dict) -> dict:
 
 @router.get("/users")
 async def list_users(
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     limit: Optional[int] = 100,
     offset: Optional[int] = 0,
     q: Optional[str] = Query(None, description="Case-insensitive search over full_name and email"),
 ):
     """
-    List all users.
-    
-    - With JWT: Returns users visible to authenticated user (RLS when enabled)
-    - Without JWT: Returns publicly visible users (RLS when enabled)
-    - RLS disabled: Returns all users
+    List users. Requires authentication.
     """
     client = SupabaseHTTPClient(token=token)
     filters = {}
@@ -95,13 +91,10 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user(
     user_id: str,
-    token: Optional[str] = Depends(get_user_token)
+    token: str = Depends(require_user_token)
 ):
     """
-    Get a single user by ID.
-    
-    - With JWT: User must have permission to view (RLS when enabled)
-    - Without JWT: User must be publicly visible (RLS when enabled)
+    Get a single user by ID. Requires authentication.
     """
     client = SupabaseHTTPClient(token=token)
     
@@ -217,19 +210,25 @@ async def delete_user(
     token: str = Depends(require_user_token)
 ):
     """
-    Delete a user.
-    
-    Requires authentication.
-    - With RLS enabled: User can only delete their own record
-    - With RLS disabled: User can delete any record (for testing)
+    Delete a user. Users can only delete their own account.
     """
+    from app.dependencies.supabase import get_admin_client
+
+    admin_client = get_admin_client()
+    auth_user = resolve_auth_user(admin_client, token)
+
+    user_record = admin_client.table("users").select("id, auth_id").eq("id", user_id).limit(1).execute()
+    if not user_record.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user_record.data[0].get("auth_id") != auth_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own account")
+
     client = SupabaseHTTPClient(token=token)
-    
     await client.delete(
         table="users",
         id_value=user_id
     )
-    
+
     return {
         "status": "success",
         "message": "User deleted successfully"

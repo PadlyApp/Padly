@@ -26,6 +26,7 @@ import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconCheck } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
+import { ProtectedRoute } from '../../components/ProtectedRoute';
 
 export default function CreateGroupPage() {
   const router = useRouter();
@@ -179,6 +180,7 @@ export default function CreateGroupPage() {
   const prevStep = () => setActive((current) => (current > 0 ? current - 1 : current));
 
   return (
+    <ProtectedRoute>
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
       <Container size="md" py="xl">
@@ -384,5 +386,6 @@ export default function CreateGroupPage() {
       </Stack>
     </Container>
     </Box>
+    </ProtectedRoute>
   );
 }

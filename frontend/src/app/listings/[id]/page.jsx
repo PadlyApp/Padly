@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { useAuth } from '../../contexts/AuthContext';
+import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel } from '../../../../lib/formatters';
@@ -298,6 +299,7 @@ export default function ListingDetailPage() {
   const locationText = cityState || location;
 
   return (
+    <ProtectedRoute>
     <Box style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       <Navigation />
 
@@ -515,5 +517,6 @@ export default function ListingDetailPage() {
       </Container>
 
     </Box>
+    </ProtectedRoute>
   );
 }

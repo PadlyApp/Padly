@@ -87,7 +87,11 @@ export function AuthProvider({ children }) {
     
     setAuthState(newAuthState);
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newAuthState));
-    
+
+    // Set a lightweight session cookie so Next.js middleware can detect auth
+    // without touching the actual JWT. SameSite=Lax blocks cross-site POSTs.
+    document.cookie = `padly_session=1; path=/; SameSite=Lax`;
+
     // Save user data if present
     if (authData.user) {
       setUser(authData.user);
@@ -101,6 +105,8 @@ export function AuthProvider({ children }) {
     setAuthState(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
+    // Clear the session cookie
+    document.cookie = 'padly_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
   };
 
   const loadCurrentUser = async (token) => {
