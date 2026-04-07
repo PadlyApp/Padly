@@ -76,6 +76,10 @@ export default function ListingDetailPage() {
   const [imageIndex, setImageIndex] = useState(0);
 
   const viewStartRef = useRef(Date.now());
+  const recommendationSurface =
+    recommendationSource === 'matches' || recommendationSource === 'discover'
+      ? recommendationSource
+      : null;
   useEffect(() => {
     if (!authState?.accessToken || !listingId) return;
     viewStartRef.current = Date.now();
@@ -262,6 +266,27 @@ export default function ListingDetailPage() {
           message: 'This listing is no longer in your interested list.',
           color: 'gray',
         });
+      }
+
+      if (recommendationSessionId && recommendationSurface) {
+        fetch(`${API_BASE}/api/interactions/recommendation-events`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            recommendation_session_id: recommendationSessionId,
+            client_event_id: createRecommendationEventId(nextInterested ? 'save' : 'unsave'),
+            surface: recommendationSurface,
+            event_type: nextInterested ? 'save' : 'unsave',
+            listing_id: listingId,
+            position_in_feed: positionInFeed,
+            metadata: {
+              source: 'listing_detail_interest_toggle',
+            },
+          }),
+        }).catch(() => {});
       }
 
       await queryClient.invalidateQueries({ queryKey: ['interested-listings'] });
