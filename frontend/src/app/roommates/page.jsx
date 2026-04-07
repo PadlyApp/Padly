@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 export default function RoommatesPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace('/groups?tab=people');
+    router.replace('/discover');
   }, [router]);
   return null;
 }

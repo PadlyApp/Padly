@@ -6,9 +6,9 @@ const MATCHES_TOP_RETURN_PX = 120;
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Group, Tooltip } from '@mantine/core';
+import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Group } from '@mantine/core';
 import { SkeletonListingCard } from '../components/Skeletons';
-import { IconSparkles, IconBookmark, IconBookmarkFilled, IconMapPin } from '@tabler/icons-react';
+import { IconSparkles, IconMapPin } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -89,8 +89,6 @@ function MatchesPageContent() {
 
   const [listings, setListings] = useState([]);
   const [missingCorePreferences, setMissingCorePreferences] = useState(false);
-  const [userGroup, setUserGroup] = useState(null);
-  const [savedListingIds, setSavedListingIds] = useState(new Set());
   const [targetStateFallback, setTargetStateFallback] = useState(null);
   const [rankingContext, setRankingContext] = useState(null);
   const [feedbackSessionId, setFeedbackSessionId] = useState(null);
@@ -375,37 +373,6 @@ function MatchesPageContent() {
   const loading = feedLoading && !feedData;
   const error = feedQueryError ? normalizeRecommendationsError(feedQueryError) : null;
 
-  // ── group + saved listings (cheap; runs once per auth session) ────────────
-
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    const fetchGroup = async () => {
-      try {
-        const token = await getValidToken();
-        if (!token || cancelled) return;
-        const res = await fetch(`${API_BASE}/api/roommate-groups?my_groups=true&limit=1`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        const group = data.data?.[0] || null;
-        if (!group || cancelled) return;
-        setUserGroup(group);
-
-        const savedRes = await fetch(
-          `${API_BASE}/api/interactions/swipes/groups/${group.id}/saved`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const savedData = await savedRes.json();
-        if (!cancelled) setSavedListingIds(new Set(savedData.saved_listing_ids || []));
-      } catch (e) {
-        console.error('[recommendations] fetchGroup error:', e);
-      }
-    };
-    fetchGroup();
-    return () => { cancelled = true; };
-  }, [userId, getValidToken]);
-
   useEffect(() => {
     latestTokenRef.current = authState?.accessToken ?? null;
   }, [authState?.accessToken]);
@@ -644,52 +611,6 @@ function MatchesPageContent() {
     router.push(href);
   }, [feedbackSessionId, findListingPosition, persistRecommendationEvent, router]);
 
-  const handleGroupSave = async (e, listing) => {
-    e.stopPropagation();
-    if (!userGroup) return;
-    const token = await getValidToken();
-    if (!token) return;
-    const lid = listing.listing_id || listing.id;
-    const isSaved = savedListingIds.has(lid);
-
-    setSavedListingIds(prev => {
-      const next = new Set(prev);
-      isSaved ? next.delete(lid) : next.add(lid);
-      return next;
-    });
-
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/interactions/swipes/groups/${userGroup.id}/save/${lid}`,
-        {
-          method: isSaved ? 'DELETE' : 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.detail || 'Interest update failed');
-      const position = findListingPosition(lid);
-      void persistRecommendationEvent({
-        eventType: isSaved ? 'unsave' : 'save',
-        listingId: lid,
-        positionInFeed: position,
-        metadata: {
-          group_id: userGroup.id,
-        },
-      });
-      if (!isSaved) {
-        sessionMetricsRef.current.savesCount += 1;
-      }
-    } catch (e) {
-      console.error('[recommendations] interest error:', e);
-      setSavedListingIds(prev => {
-        const next = new Set(prev);
-        isSaved ? next.add(lid) : next.delete(lid);
-        return next;
-      });
-    }
-  };
-
   return (
     <Box style={{ minHeight: '100vh', backgroundColor: '#f8f9fa' }}>
       <Navigation />
@@ -870,9 +791,6 @@ function MatchesPageContent() {
                   ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 2).map(([key]) => key)
                   : [];
 
-                const lid = listing.listing_id || listing.id;
-                const saved = savedListingIds.has(lid);
-
                 return (
                   <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
                     <Card
@@ -974,24 +892,6 @@ function MatchesPageContent() {
                           >
                             View Details
                           </Button>
-                          {userGroup && (
-                            <Tooltip
-                              label={saved ? `Remove interest from ${userGroup.group_name}` : `Mark interested for ${userGroup.group_name}`}
-                              withArrow
-                            >
-                              <Button
-                                fullWidth
-                                radius="md"
-                                size="sm"
-                                variant={saved ? 'filled' : 'light'}
-                                color="teal"
-                                onClick={(e) => handleGroupSave(e, listing)}
-                                leftSection={saved ? <IconBookmarkFilled size={15} /> : <IconBookmark size={15} />}
-                              >
-                                {saved ? 'Interested for Group' : 'Mark Interested for Group'}
-                              </Button>
-                            </Tooltip>
-                          )}
                         </Stack>
                       </Stack>
                     </Card>

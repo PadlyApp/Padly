@@ -6,7 +6,7 @@ const TOUR_STORAGE_KEY = 'padly_tour_state';
 
 const TourContext = createContext(undefined);
 
-const TOUR_PHASES = ['welcome', 'nav', 'preferences', 'discover', 'groups', 'matches', 'finishing', 'complete'];
+const TOUR_PHASES = ['welcome', 'nav', 'preferences', 'discover', 'matches', 'finishing', 'complete'];
 
 export function PadlyTourProvider({ children }) {
   const [tourPhase, setTourPhaseState] = useState(null);
@@ -19,7 +19,8 @@ export function PadlyTourProvider({ children }) {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed.phase && parsed.phase !== 'complete') {
-          setTourPhaseState(parsed.phase);
+          const normalizedPhase = parsed.phase === 'groups' ? 'matches' : parsed.phase;
+          setTourPhaseState(normalizedPhase);
           setTourPaused(parsed.paused === true);
         }
       }

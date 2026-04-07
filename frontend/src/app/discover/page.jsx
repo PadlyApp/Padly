@@ -31,6 +31,7 @@ import {
   createRecommendationClientSessionId,
   createRecommendationEventId,
 } from '../../../lib/recommendationFeedback';
+import { GROUPS_FEATURE_ENABLED } from '../../../lib/featureFlags';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
 
@@ -176,6 +177,9 @@ function DiscoverContent() {
   });
   const prefCity = prefsData?.target_city ?? null;
   usePageTracking('discover', authState?.accessToken);
+
+  /** Bumps React Query cache key so a refetch always reapplies stack state (refetch alone can reuse the same data reference). */
+  const [feedReloadNonce, setFeedReloadNonce] = useState(0);
 
   const [listings, setListings] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -498,15 +502,21 @@ function DiscoverContent() {
     data: feedData,
     isLoading: feedLoading,
     error: feedQueryError,
-    refetch: refetchFeed,
   } = useQuery({
-    queryKey: ['discover-feed', userId, prefCity],
+    queryKey: ['discover-feed', userId, prefCity, feedReloadNonce],
     queryFn: () => fetchFeedPage({ offset: 0 }),
     enabled: !!userId && prefCity !== null,
     staleTime: 0,
     gcTime:    10 * 60 * 1000,
     retry: false,
   });
+
+  const handleDiscoverFeedReload = useCallback(() => {
+    if (!userId) return;
+    clearDiscoverProgress(userId);
+    prevFeedDataRef.current = null;
+    setFeedReloadNonce((n) => n + 1);
+  }, [userId]);
 
   useLayoutEffect(() => {
     if (!userId) return;
@@ -1184,7 +1194,7 @@ function DiscoverContent() {
           {!loading && error && (
             <Stack align="center" gap="md" style={{ height: 520, justifyContent: 'center' }}>
               <Text c="red">{error}</Text>
-              <Button onClick={refetchFeed} variant="light" color="teal">
+              <Button onClick={handleDiscoverFeedReload} variant="light" color="teal">
                 Try again
               </Button>
             </Stack>
@@ -1216,7 +1226,7 @@ function DiscoverContent() {
                 </Button>
                 <Button
                   leftSection={<IconRefresh size={16} />}
-                  onClick={refetchFeed}
+                  onClick={handleDiscoverFeedReload}
                   color="teal"
                 >
                   Retry
@@ -1241,7 +1251,7 @@ function DiscoverContent() {
               <Group gap="md" justify="center">
                 <Button
                   leftSection={<IconRefresh size={16} />}
-                  onClick={refetchFeed}
+                  onClick={handleDiscoverFeedReload}
                   color="teal"
                 >
                   Reload
@@ -1249,9 +1259,11 @@ function DiscoverContent() {
                 <Button variant="light" color="teal" onClick={() => router.push('/matches')}>
                   View Matches
                 </Button>
-                <Button variant="outline" color="teal" onClick={() => router.push('/roommates')}>
-                  Find roommate matches
-                </Button>
+                {GROUPS_FEATURE_ENABLED && (
+                  <Button variant="outline" color="teal" onClick={() => router.push('/roommates')}>
+                    Find roommate matches
+                  </Button>
+                )}
               </Group>
             </Stack>
           )}

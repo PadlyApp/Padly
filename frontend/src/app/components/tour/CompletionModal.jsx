@@ -15,7 +15,7 @@ import {
   IconCheck,
   IconSettings,
   IconSwipe,
-  IconUsers,
+  IconSparkles,
 } from '@tabler/icons-react';
 
 const NEXT_STEPS = [
@@ -34,11 +34,11 @@ const NEXT_STEPS = [
     path: '/discover',
   },
   {
-    icon: IconUsers,
-    color: 'blue',
-    label: 'Find a Group',
-    desc: 'Browse roommate groups',
-    path: '/groups',
+    icon: IconSparkles,
+    color: 'green',
+    label: 'View Recommendations',
+    desc: 'See your top listing matches',
+    path: '/matches',
   },
 ];
 

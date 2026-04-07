@@ -11,7 +11,6 @@ import {
   NAV_TOUR_STEPS,
   PREFERENCES_TOUR_STEPS,
   DISCOVER_TOUR_STEPS,
-  GROUPS_TOUR_STEPS,
   MATCHES_TOUR_STEPS,
 } from './tourSteps';
 
@@ -185,8 +184,8 @@ export function AppTour() {
       const onNext = (i) => {
         if (i === DISCOVER_TOUR_STEPS.length - 1) {
           setIsOpen(false);
-          setTourPhase('groups');
-          router.push('/groups');
+          setTourPhase('matches');
+          router.push('/matches');
         } else {
           setCurrentStep(i + 1);
           discoverStepRef.current = i + 1;
@@ -235,39 +234,6 @@ export function AppTour() {
     window.addEventListener('padly-tour-swipe', handler);
     return () => window.removeEventListener('padly-tour-swipe', handler);
   }, [tourPhase, setCurrentStep]);
-
-  // ── Groups phase ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isReady || tourPhase !== 'groups' || pathname !== '/groups') return;
-    if (phaseInitRef.current === 'groups') return;
-    phaseInitRef.current = 'groups';
-    let cancelled = false;
-
-    waitForSelector(GROUPS_TOUR_STEPS[0].selector).then(() => {
-      if (cancelled) return;
-      const onNext = (i) => {
-        if (i === GROUPS_TOUR_STEPS.length - 1) {
-          setIsOpen(false);
-          setTourPhase('matches');
-          router.push('/matches');
-        } else {
-          setCurrentStep(i + 1);
-        }
-      };
-      const onPrev = (i) => {
-        if (i > 0) setCurrentStep(i - 1);
-      };
-
-      setSteps(buildReactourSteps(GROUPS_TOUR_STEPS, {
-        onNext, onPrev, onClose: closeTour,
-        totalSteps: GROUPS_TOUR_STEPS.length,
-      }));
-      setCurrentStep(0);
-      setIsOpen(true);
-    }).catch(() => {});
-
-    return () => { cancelled = true; };
-  }, [isReady, tourPhase, pathname, setSteps, setCurrentStep, setIsOpen, setTourPhase, router, closeTour]);
 
   // ── Matches phase ─────────────────────────────────────────────────────
   useEffect(() => {
