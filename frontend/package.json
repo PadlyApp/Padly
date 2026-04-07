@@ -22,7 +22,7 @@
     "@vercel/analytics": "^2.0.1",
     "dayjs": "^1.11.18",
     "i": "^0.3.7",
-    "next": "15.5.9",
+    "next": "15.5.14",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
     "react": "^19.1.0",
@@ -34,7 +34,42 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.4",
+    "eslint-config-next": "15.5.14",
     "typescript": "^5"
+  },
+  "overrides": {
+    "ajv": "6.14.0",
+    "flatted": "3.4.2",
+    "js-yaml": "4.1.1",
+    "@eslint/config-array": {
+      "minimatch": "3.1.4"
+    },
+    "@eslint/eslintrc": {
+      "minimatch": "3.1.4"
+    },
+    "eslint-plugin-import": {
+      "minimatch": "3.1.4"
+    },
+    "eslint-plugin-jsx-a11y": {
+      "minimatch": "3.1.4"
+    },
+    "eslint-plugin-react": {
+      "minimatch": "3.1.4"
+    },
+    "eslint": {
+      "minimatch": "3.1.4"
+    },
+    "minimatch@3.1.4": {
+      "brace-expansion": "1.1.13"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "9.0.7"
+    },
+    "micromatch": {
+      "picomatch": "2.3.2"
+    },
+    "tinyglobby": {
+      "picomatch": "4.0.4"
+    }
   }
 }
