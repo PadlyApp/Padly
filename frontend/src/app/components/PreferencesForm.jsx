@@ -24,6 +24,62 @@ import { parseApiErrorResponse } from '../../../lib/errorHandling';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
+const PREFS_SHADOW_TTL_MS = 60 * 1000;
+const PREFERENCE_PAYLOAD_KEYS = [
+  'target_country',
+  'target_state_province',
+  'target_city',
+  'required_bedrooms',
+  'target_bathrooms',
+  'target_deposit_amount',
+  'furnished_preference',
+  'gender_policy',
+  'move_in_date',
+  'target_lease_type',
+  'target_lease_duration_months',
+];
+
+function pickPreferenceFields(source) {
+  const out = {};
+  for (const key of PREFERENCE_PAYLOAD_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(source || {}, key)) {
+      out[key] = source[key];
+    }
+  }
+  return out;
+}
+
+function prefsShadowKey(userId) {
+  return userId ? `padly:prefs-shadow:${userId}` : null;
+}
+
+function readPrefsShadow(userId) {
+  const key = prefsShadowKey(userId);
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.savedAt || !parsed?.prefs) return null;
+    if (Date.now() - parsed.savedAt > PREFS_SHADOW_TTL_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePrefsShadow(userId, prefs) {
+  const key = prefsShadowKey(userId);
+  if (!key || typeof window === 'undefined' || !prefs) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), prefs }));
+  } catch {
+    // Ignore storage failures silently.
+  }
+}
 
 function formatPrice(val) {
   return `$${Math.round(val).toLocaleString()}`;
@@ -39,6 +95,27 @@ function normalizeIntInput(value) {
   const parsed = normalizeNumericInput(value);
   if (parsed == null) return null;
   return Math.trunc(parsed);
+}
+
+function normalizeOptionText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function findMatchingOption(options, selectedValue) {
+  if (!selectedValue) return null;
+  const selectedNorm = normalizeOptionText(selectedValue);
+  return options.find((opt) => {
+    const valueNorm = normalizeOptionText(opt?.value);
+    const labelNorm = normalizeOptionText(opt?.label);
+    return selectedNorm === valueNorm || selectedNorm === labelNorm;
+  }) || null;
+}
+
+function withSelectedOption(options, selectedValue) {
+  if (!selectedValue) return options;
+  const exists = options.some((opt) => (opt?.value ?? null) === selectedValue);
+  if (exists) return options;
+  return [{ value: selectedValue, label: selectedValue }, ...options];
 }
 
 function RoomCounter({ label, value, onChange }) {
@@ -108,6 +185,7 @@ export function PreferencesForm() {
   const userId = user?.profile?.id;
   const queryClient = useQueryClient();
   const prevPrefsRef = useRef(null);
+  const appliedShadowRef = useRef(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -118,6 +196,8 @@ export function PreferencesForm() {
   const [stateOptions, setStateOptions] = useState([]);
   const [cityOptions, setCityOptions] = useState([]);
   const [citySearch, setCitySearch] = useState('');
+  const [loadingStates, setLoadingStates] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(false);
 
   // Price histogram state
   const [histogram, setHistogram] = useState({ bins: [], global_min: 0, global_max: 0 });
@@ -141,6 +221,25 @@ export function PreferencesForm() {
 
   const updatePref = (key, value) => setPrefs((prev) => ({ ...prev, [key]: value }));
 
+  useEffect(() => {
+    if (!userId || appliedShadowRef.current) return;
+    const shadow = readPrefsShadow(userId);
+    if (!shadow?.prefs) return;
+    const shadowPrefs = pickPreferenceFields(shadow.prefs);
+    setPrefs((prev) => ({
+      ...prev,
+      ...shadowPrefs,
+      target_country: shadowPrefs.target_country || prev.target_country,
+      target_state_province: shadowPrefs.target_state_province || null,
+      target_city: shadowPrefs.target_city || null,
+    }));
+    setStateOptions((prev) => withSelectedOption(prev, shadowPrefs.target_state_province));
+    if (shadowPrefs.target_city) {
+      setCityOptions((prev) => withSelectedOption(prev, shadowPrefs.target_city));
+    }
+    appliedShadowRef.current = true;
+  }, [userId]);
+
   // ── Cached preferences fetch ──────────────────────────────────────────────
 
   const { data: savedPrefs, isLoading: prefsLoading } = useQuery({
@@ -160,7 +259,24 @@ export function PreferencesForm() {
   // Sync query data → controlled form state exactly once per new result
   useLayoutEffect(() => {
     if (!savedPrefs || savedPrefs === prevPrefsRef.current) return;
+
+    const shadow = readPrefsShadow(userId);
+    if (shadow?.prefs) {
+      const shadowPrefs = shadow.prefs;
+      const locationMismatch =
+        (savedPrefs.target_country || null) !== (shadowPrefs.target_country || null) ||
+        (savedPrefs.target_state_province || null) !== (shadowPrefs.target_state_province || null) ||
+        (savedPrefs.target_city || null) !== (shadowPrefs.target_city || null);
+      if (locationMismatch) {
+        return;
+      }
+    }
+
     prevPrefsRef.current = savedPrefs;
+
+    if (savedPrefs.target_state_province) {
+      setStateOptions((prev) => withSelectedOption(prev, savedPrefs.target_state_province));
+    }
 
     if (savedPrefs.target_city) {
       setCityOptions([{ value: savedPrefs.target_city, label: savedPrefs.target_city }]);
@@ -184,7 +300,7 @@ export function PreferencesForm() {
       setPriceRange([savedPrefs.budget_min ?? 0, savedPrefs.budget_max ?? 5000]);
       setPriceSliderActive(true);
     }
-  }, [savedPrefs]);
+  }, [savedPrefs, userId]);
 
   // Only show the loading skeleton on the very first fetch (no cached data yet)
   const loading = prefsLoading && !savedPrefs;
@@ -200,22 +316,75 @@ export function PreferencesForm() {
 
   useEffect(() => {
     const country = prefs.target_country;
-    if (!country) { setStateOptions([]); return; }
-    fetch(`${API_BASE}/api/options/states?country_code=${encodeURIComponent(country)}`)
+    if (!country) {
+      setStateOptions([]);
+      setLoadingStates(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingStates(true);
+
+    fetch(`${API_BASE}/api/options/states?country_code=${encodeURIComponent(country)}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => d && setStateOptions(d.data || []))
-      .catch(() => {});
-  }, [prefs.target_country]);
+      .then((d) => {
+        if (!d) return;
+        const apiOptions = d.data || [];
+        const current = prefs.target_state_province;
+        setStateOptions(withSelectedOption(apiOptions, current));
+
+        if (!current) return;
+        const matched = findMatchingOption(apiOptions, current);
+        if (matched && matched.value !== current) {
+          updatePref('target_state_province', matched.value);
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== 'AbortError') {
+          setStateOptions([]);
+        }
+      })
+      .finally(() => setLoadingStates(false));
+
+    return () => controller.abort();
+  }, [prefs.target_country, prefs.target_state_province]);
 
   useEffect(() => {
     const { target_country, target_state_province } = prefs;
-    if (!target_country || !target_state_province) { setCityOptions([]); return; }
+    if (!target_country || !target_state_province) {
+      setCityOptions([]);
+      setLoadingCities(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingCities(true);
+
     fetch(
-      `${API_BASE}/api/options/cities?country_code=${encodeURIComponent(target_country)}&state_code=${encodeURIComponent(target_state_province)}&q=${encodeURIComponent(citySearch)}&limit=250`
+      `${API_BASE}/api/options/cities?country_code=${encodeURIComponent(target_country)}&state_code=${encodeURIComponent(target_state_province)}&q=${encodeURIComponent(citySearch)}&limit=250`,
+      { signal: controller.signal }
     )
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => d && setCityOptions(d.data || []))
-      .catch(() => {});
+      .then((d) => {
+        if (!d) return;
+        const apiOptions = d.data || [];
+        const currentCity = prefs.target_city;
+        setCityOptions(withSelectedOption(apiOptions, currentCity));
+
+        if (!currentCity) return;
+        const matched = findMatchingOption(apiOptions, currentCity);
+        if (matched && matched.value !== currentCity) {
+          updatePref('target_city', matched.value);
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== 'AbortError') {
+          setCityOptions([]);
+        }
+      })
+      .finally(() => setLoadingCities(false));
+
+    return () => controller.abort();
   }, [prefs.target_country, prefs.target_state_province, citySearch]);
 
   // Fetch price histogram whenever city changes
@@ -273,8 +442,9 @@ export function PreferencesForm() {
     setSuccess(false);
 
     try {
+      const normalizedPrefs = pickPreferenceFields(prefs);
       const payload = {
-        ...prefs,
+        ...normalizedPrefs,
         budget_min: priceSliderActive ? priceRange[0] : null,
         budget_max: priceSliderActive ? priceRange[1] : null,
         target_deposit_amount: normalizeNumericInput(prefs.target_deposit_amount),
@@ -296,9 +466,26 @@ export function PreferencesForm() {
         throw new Error(parsedError.message);
       }
 
+      const saveResult = await response.json();
+      const persistedPrefs = saveResult?.data || payload;
+
+      queryClient.setQueryData(['preferences', userId], persistedPrefs);
+      writePrefsShadow(userId, persistedPrefs);
+      prevPrefsRef.current = persistedPrefs;
+      setPrefs((prev) => ({
+        ...prev,
+        target_country: persistedPrefs.target_country || prev.target_country,
+        target_state_province: persistedPrefs.target_state_province || null,
+        target_city: persistedPrefs.target_city || null,
+      }));
+      setStateOptions((prev) => withSelectedOption(prev, persistedPrefs.target_state_province));
+      if (persistedPrefs.target_city) {
+        setCityOptions((prev) => withSelectedOption(prev, persistedPrefs.target_city));
+      }
+
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-      queryClient.invalidateQueries({ queryKey: ['preferences', userId] });
+      queryClient.invalidateQueries({ queryKey: ['preferences', userId], refetchType: 'inactive' });
       queryClient.invalidateQueries({ queryKey: ['user-prefs', userId] });
       queryClient.invalidateQueries({ queryKey: ['discover-feed', userId] });
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -385,6 +572,8 @@ export function PreferencesForm() {
             updatePref('target_country', v);
             updatePref('target_state_province', null);
             updatePref('target_city', null);
+            setStateOptions([]);
+            setCityOptions([]);
             setCitySearch('');
           }}
           required
@@ -398,9 +587,11 @@ export function PreferencesForm() {
           onChange={(v) => {
             updatePref('target_state_province', v);
             updatePref('target_city', null);
+            setCityOptions([]);
             setCitySearch('');
           }}
           searchable
+          disabled={!prefs.target_country || loadingStates}
           required
         />
 
@@ -414,7 +605,7 @@ export function PreferencesForm() {
           searchable
           searchValue={citySearch}
           onSearchChange={setCitySearch}
-          disabled={!prefs.target_state_province}
+          disabled={!prefs.target_state_province || loadingCities}
           required
         />
       </Stack>
