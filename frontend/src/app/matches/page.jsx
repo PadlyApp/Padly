@@ -377,8 +377,8 @@ function MatchesPageContent() {
   const error = feedQueryError ? normalizeRecommendationsError(feedQueryError) : null;
 
   useEffect(() => {
-    latestTokenRef.current = authState?.accessToken ?? null;
-  }, [authState?.accessToken]);
+    latestTokenRef.current = getValidToken;
+  }, [getValidToken]);
 
   useEffect(() => {
     latestSessionIdRef.current = feedbackSessionId;
@@ -494,9 +494,9 @@ function MatchesPageContent() {
 
   useEffect(() => {
     return () => {
-      const token = latestTokenRef.current;
+      const getToken = latestTokenRef.current;
       const sessionId = latestSessionIdRef.current;
-      if (!token || !sessionId) return;
+      if (!getToken || !sessionId) return;
 
       const recommendations = latestListingsRef.current || [];
       const context = latestRankingContextRef.current;
@@ -504,26 +504,31 @@ function MatchesPageContent() {
         .map((listing) => listing?.listing_id)
         .filter(Boolean)
         .slice(0, 20);
+      const dwellMs = Math.max(0, Date.now() - surfaceStartedAtRef.current);
+      const metrics = { ...sessionMetricsRef.current };
 
-      fetch(`${API_BASE}/api/interactions/recommendation-sessions/${sessionId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          mark_ended: true,
-          surface_dwell_ms: Math.max(0, Date.now() - surfaceStartedAtRef.current),
-          detail_opens_count: sessionMetricsRef.current.detailOpensCount,
-          saves_count: sessionMetricsRef.current.savesCount,
-          recommendation_count_shown: recommendations.length,
-          top_listing_ids_shown: topListingIds,
-          algorithm_version: context?.algorithm_version ?? recommendations[0]?.algorithm_version ?? null,
-          model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
-          experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'matches_ranker_v1' : null),
-          experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
-        }),
-        keepalive: true,
+      getToken().then((token) => {
+        if (!token) return;
+        fetch(`${API_BASE}/api/interactions/recommendation-sessions/${sessionId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            mark_ended: true,
+            surface_dwell_ms: dwellMs,
+            detail_opens_count: metrics.detailOpensCount,
+            saves_count: metrics.savesCount,
+            recommendation_count_shown: recommendations.length,
+            top_listing_ids_shown: topListingIds,
+            algorithm_version: context?.algorithm_version ?? recommendations[0]?.algorithm_version ?? null,
+            model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
+            experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'matches_ranker_v1' : null),
+            experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
+          }),
+          keepalive: true,
+        }).catch(() => {});
       }).catch(() => {});
     };
   }, []);
