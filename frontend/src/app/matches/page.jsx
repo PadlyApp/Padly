@@ -51,6 +51,30 @@ function MatchesPageContent() {
   const router = useRouter();
   const { user, getValidToken, authState } = useAuth();
   const userId = user?.profile?.id;
+
+  // Keep feed cache keyed to current preference location so changing
+  // preferences forces a fresh recommendations fetch.
+  const { data: prefsData } = useQuery({
+    queryKey: ['user-prefs', userId],
+    queryFn: async () => {
+      const token = await getValidToken();
+      if (!token || !userId) return null;
+      const res = await fetch(`${API_BASE}/api/preferences/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.data || data || null;
+    },
+    enabled: !!userId,
+    staleTime: 0,
+  });
+
+  const prefCountry = prefsData?.target_country ?? null;
+  const prefState = prefsData?.target_state_province ?? null;
+  const prefCity = prefsData?.target_city ?? null;
+  const preferenceLocationKey = `${prefCountry || ''}|${prefState || ''}|${prefCity || ''}`;
+
   const clientSessionIdRef = useRef(null);
   const surfaceStartedAtRef = useRef(Date.now());
   const promptShownRef = useRef(false);
@@ -300,13 +324,32 @@ function MatchesPageContent() {
     error: feedQueryError,
     refetch: refetchFeed,
   } = useQuery({
-    queryKey: ['matches-feed', userId],
+    queryKey: ['matches-feed', userId, preferenceLocationKey],
     queryFn: fetchMatchesFeed,
     enabled: !!userId,
     staleTime: 5 * 60 * 1000,
     gcTime:    10 * 60 * 1000,
     retry: false,
   });
+
+  useEffect(() => {
+    prevFeedDataRef.current = null;
+    setListings([]);
+    setMissingCorePreferences(false);
+    setTargetStateFallback(null);
+    setRankingContext(null);
+    setFeedbackSessionId(null);
+    setPromptAllowed(false);
+    setShowFeedbackPrompt(false);
+    setFeedbackStep('question');
+    setPendingFeedbackLabel(null);
+    setFeedbackAcknowledged(false);
+    sessionMetricsRef.current = { detailOpensCount: 0, savesCount: 0 };
+    surfaceStartedAtRef.current = Date.now();
+    clientSessionIdRef.current = createRecommendationClientSessionId('matches');
+    promptShownRef.current = false;
+    hasScrolledDeepRef.current = false;
+  }, [preferenceLocationKey]);
 
   // Sync query data → state without a visible flash on cache-hit remounts
   useLayoutEffect(() => {
