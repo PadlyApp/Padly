@@ -797,7 +797,15 @@ function GroupsPageContent() {
             </Group>
 
             {myGroupsSubTab === 'invitations' ? (
-              <InvitationsPanel user={user} authState={authState} />
+              <InvitationsPanel
+                user={user}
+                authState={authState}
+                onBrowseGroups={() => {
+                  setMyGroupsSubTab('groups');
+                  setActiveTab('all');
+                  router.push('/groups?tab=all');
+                }}
+              />
             ) : (
               <>{/* Search and Filters */}
                 <Card withBorder={false} style={{ backgroundColor: '#f8f9fa' }} data-tour="groups-search">
