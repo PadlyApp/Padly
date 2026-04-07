@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, Tooltip, ActionIcon } from '@mantine/core';
+import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, ActionIcon } from '@mantine/core';
 import { SkeletonListingDetail } from '../../components/Skeletons';
-import { IconBookmark, IconBookmarkFilled, IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
@@ -68,9 +68,6 @@ export default function ListingDetailPage() {
 
   usePageTracking('listing_detail', authState?.accessToken);
 
-  const [userGroup, setUserGroup] = useState(null);
-  const [isSaved, setIsSaved] = useState(false);
-  const [saveLoading, setSaveLoading] = useState(false);
   const [isInterested, setIsInterested] = useState(false);
   const [interestLoading, setInterestLoading] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
@@ -155,36 +152,6 @@ export default function ListingDetailPage() {
   })();
   const listing = rawListing ? { ...rawListing, images: parsedImages } : null;
 
-  // Fetch user's group and whether this listing is saved to it.
-  useEffect(() => {
-    if (!listingId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await getValidToken();
-        if (!token || cancelled) return;
-
-        const res = await fetch(`${API_BASE}/api/roommate-groups?my_groups=true&limit=1`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        const group = data.data?.[0] || null;
-        if (!group || cancelled) return;
-        setUserGroup(group);
-
-        const savedRes = await fetch(
-          `${API_BASE}/api/interactions/swipes/groups/${group.id}/saved`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        const savedData = await savedRes.json();
-        if (!cancelled) setIsSaved((savedData.saved_listing_ids || []).includes(listingId));
-      } catch {
-        // Group/saved state is non-critical.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [listingId, getValidToken]);
-
   useEffect(() => {
     if (!listingId || !authState?.accessToken) return;
     let cancelled = false;
@@ -207,31 +174,6 @@ export default function ListingDetailPage() {
       cancelled = true;
     };
   }, [authState?.accessToken, getValidToken, listingId]);
-
-  const handleGroupSave = async () => {
-    if (!userGroup || saveLoading) return;
-    setSaveLoading(true);
-    const wasSaved = isSaved;
-    setIsSaved(!wasSaved);
-    try {
-      const token = await getValidToken();
-      if (!token) { setIsSaved(wasSaved); return; }
-      const res = await fetch(
-        `${API_BASE}/api/interactions/swipes/groups/${userGroup.id}/save/${listingId}`,
-        {
-          method: wasSaved ? 'DELETE' : 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (!res.ok) {
-        setIsSaved(wasSaved);
-      }
-    } catch {
-      setIsSaved(wasSaved);
-    } finally {
-      setSaveLoading(false);
-    }
-  };
 
   const handleInterestedToggle = async () => {
     if (interestLoading) return;
@@ -555,25 +497,6 @@ export default function ListingDetailPage() {
               )}
 
               <Stack gap="sm" mt="md">
-                {userGroup && (
-                  <Tooltip
-                    label={isSaved ? `Remove interest from ${userGroup.group_name}` : `Mark interested for ${userGroup.group_name}`}
-                    withArrow
-                  >
-                    <Button
-                      fullWidth
-                      size="lg"
-                      radius="md"
-                      variant={isSaved ? 'filled' : 'light'}
-                      color="teal"
-                      loading={saveLoading}
-                      onClick={handleGroupSave}
-                      leftSection={isSaved ? <IconBookmarkFilled size={18} /> : <IconBookmark size={18} />}
-                    >
-                      {isSaved ? 'Interested for Group' : 'Mark Interested for Group'}
-                    </Button>
-                  </Tooltip>
-                )}
                 <Button
                   fullWidth
                   size="lg"

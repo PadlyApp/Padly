@@ -69,11 +69,6 @@ export function Navigation() {
                       Home
                     </UnstyledButton>
                   </Link>
-                  <Link href="/groups" style={{ textDecoration: 'none' }} data-tour="nav-groups">
-                    <UnstyledButton className={`nav-link ${pathname === '/groups' ? 'active' : ''}`}>
-                      Groups
-                    </UnstyledButton>
-                  </Link>
                   <Link href="/discover" style={{ textDecoration: 'none' }} data-tour="nav-discover">
                     <UnstyledButton className={`nav-link ${pathname === '/discover' ? 'active' : ''}`}>
                       Discover
@@ -81,7 +76,7 @@ export function Navigation() {
                   </Link>
                   <Link href="/matches" style={{ textDecoration: 'none' }} data-tour="nav-matches">
                     <UnstyledButton className={`nav-link ${pathname === '/matches' ? 'active' : ''}`}>
-                      Recommendations
+                      Matches
                     </UnstyledButton>
                   </Link>
                   <Link href="/account" style={{ textDecoration: 'none' }} data-tour="nav-account">
@@ -162,13 +157,6 @@ export function Navigation() {
                   <UnstyledButton style={{ width: '100%' }}>
                     <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
                       Home
-                    </Text>
-                  </UnstyledButton>
-                </Link>
-                <Link href="/groups" style={{ textDecoration: 'none' }} onClick={handleLinkClick}>
-                  <UnstyledButton style={{ width: '100%' }}>
-                    <Text size="lg" c="#666" style={{ padding: '0.5rem 0' }}>
-                      Groups
                     </Text>
                   </UnstyledButton>
                 </Link>

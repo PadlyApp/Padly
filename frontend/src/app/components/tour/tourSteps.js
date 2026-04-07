@@ -1,13 +1,5 @@
 export const NAV_TOUR_STEPS = [
   {
-    selector: '[data-tour="nav-groups"]',
-    icon: '👥',
-    title: 'Groups',
-    description:
-      'Browse and join roommate groups that match your criteria. ' +
-      'Group invitations also live here under the Invitations tab.',
-  },
-  {
     selector: '[data-tour="nav-discover"]',
     icon: '🔍',
     title: 'Discover',
@@ -95,43 +87,7 @@ export const DISCOVER_TOUR_STEPS = [
     title: 'You\'ve Got the Hang of It!',
     description:
       'You passed on one and liked another — that\'s all it takes. ' +
-      'Now let\'s look at how roommate groups work.',
-    nextLabel: 'See groups →',
-  },
-];
-
-export const GROUPS_TOUR_STEPS = [
-  {
-    selector: '[data-tour="groups-header"]',
-    icon: '👥',
-    title: 'Roommate Groups',
-    description:
-      'This is where you find people to live with. Groups pool everyone\'s preferences ' +
-      'to get better listing recommendations together.',
-  },
-  {
-    selector: '[data-tour="groups-tabs"]',
-    icon: '⭐',
-    title: 'Browse or Get Matched',
-    description:
-      '"Recommended For You" shows groups ranked by compatibility with your preferences. ' +
-      '"All Groups" lets you browse freely, and "My Groups" shows groups you\'ve joined.',
-  },
-  {
-    selector: '[data-tour="groups-search"]',
-    icon: '🔍',
-    title: 'Search & Filter',
-    description:
-      'Filter groups by city or status. Looking for groups in a specific area? Search here.',
-  },
-  {
-    selector: '[data-tour="groups-list"]',
-    icon: '📋',
-    title: 'Group Cards',
-    description:
-      'Each card shows the group\'s city, budget range, move-in date, and size. ' +
-      'Click "Join" to send a request — the group admin will accept or decline. ' +
-      'You can also create your own group!',
+      'Now let\'s look at your personalized recommendations.',
     nextLabel: 'See recommendations →',
   },
 ];

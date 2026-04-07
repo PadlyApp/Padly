@@ -28,14 +28,14 @@ const STEPS = [
   {
     icon: IconUsers,
     color: 'blue',
-    title: 'Find your roommate group',
-    desc: 'Browse compatible groups and request to join. Your group pools preferences for better results.',
+    title: 'Discover compatible people',
+    desc: 'Explore listings and compare fit signals to find people and places that match your lifestyle.',
   },
   {
     icon: IconHome,
     color: 'violet',
     title: 'Get matched to listings',
-    desc: 'Your group receives personalized listing recommendations ranked by compatibility.',
+    desc: 'Receive personalized listing recommendations ranked by compatibility.',
   },
   {
     icon: IconSwipe,

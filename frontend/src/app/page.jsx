@@ -246,9 +246,6 @@ export default function Home() {
                       <Button size="lg" color="teal" component={Link} href="/discover">
                         Continue Discovering
                       </Button>
-                      <Button size="lg" variant="outline" color="teal" component={Link} href="/groups">
-                        My Groups
-                      </Button>
                     </Group>
                   ) : (
                     <Group gap="md">
