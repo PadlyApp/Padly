@@ -40,6 +40,8 @@ _cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://[::1]:3000",
+    "https://padly.tech",
+    "https://www.padly.tech",
 ]
 _extra = os.getenv("CORS_ORIGINS", "").strip()
 if _extra:
