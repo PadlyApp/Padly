@@ -45,6 +45,12 @@ export default function AuthCallbackPage() {
         const authState = { accessToken: access_token, refreshToken: refresh_token, expiresAt };
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
 
+        // Set the session cookie so Next.js middleware recognises the user as
+        // authenticated and allows the redirect to /discover or /preferences-setup.
+        // AuthContext normally sets this via saveAuthState(), but the callback
+        // page writes directly to localStorage so we must set it here explicitly.
+        document.cookie = 'padly_session=1; path=/; SameSite=Lax';
+
         // Fetch / upsert the user profile from FastAPI.
         // /me auto-creates public.users + solo group for brand-new Google users.
         const meResponse = await fetch(`${API_BASE}/api/auth/me`, {
