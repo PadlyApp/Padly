@@ -32,6 +32,15 @@ CITY_BUCKET_ALIASES = {
     "downtown_toronto": "toronto",
     "north_york": "toronto",
     "mississauga": "toronto",
+    "vancouver": "vancouver",
+    "van": "vancouver",
+    "burnaby": "vancouver",
+    "richmond_bc": "vancouver",
+    "surrey": "vancouver",
+    "new_westminster": "vancouver",
+    "coquitlam": "vancouver",
+    "north_vancouver": "vancouver",
+    "west_vancouver": "vancouver",
     "nyc": "new_york",
     "new_york": "new_york",
     "brooklyn": "new_york",
@@ -42,6 +51,15 @@ CITY_BUCKET_ALIASES = {
     "lower_east_side": "new_york",
     "sf": "san_francisco",
     "san_francisco": "san_francisco",
+    "bay_area": "san_francisco",
+    "south_bay": "san_francisco",
+    "sunnyvale": "san_francisco",
+    "mountain_view": "san_francisco",
+    "santa_clara": "san_francisco",
+    "san_jose": "san_francisco",
+    "palo_alto": "san_francisco",
+    "cupertino": "san_francisco",
+    "redwood_city": "san_francisco",
     "berkeley": "san_francisco",
     "soma": "san_francisco",
     "mission": "san_francisco",
@@ -49,6 +67,7 @@ CITY_BUCKET_ALIASES = {
 
 BUCKET_DEFAULTS = {
     "toronto": {"city": "Toronto", "state_province": "Ontario", "country": "Canada"},
+    "vancouver": {"city": "Vancouver", "state_province": "British Columbia", "country": "Canada"},
     "new_york": {"city": "New York", "state_province": "New York", "country": "USA"},
     "san_francisco": {"city": "San Francisco", "state_province": "California", "country": "USA"},
 }
@@ -118,6 +137,21 @@ def _to_float(value: Any) -> Optional[float]:
     return None
 
 
+def _to_float_compact(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().upper().replace("$", "")
+    match = re.match(r"^([0-9]+(?:\.[0-9]+)?)([KMB]?)$", text)
+    if not match:
+        return None
+    base = float(match.group(1))
+    suffix = match.group(2)
+    multiplier = {"": 1, "K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[suffix]
+    return base * multiplier
+
+
 def _to_int(value: Any) -> Optional[int]:
     number = _to_float(value)
     if number is None:
@@ -167,11 +201,26 @@ def _first_non_empty(*values: Any) -> Any:
 
 
 def _deep_get(data: Any, *path: str) -> Any:
+    if not isinstance(data, dict):
+        return None
+
+    # Support flattened keys like "Property.Address.AddressText" in addition
+    # to nested object shapes.
+    joined = ".".join(path)
+    if joined in data:
+        return data.get(joined)
+
     current = data
-    for key in path:
+    for index, key in enumerate(path):
         if not isinstance(current, dict):
             return None
-        current = current.get(key)
+        if key in current:
+            current = current.get(key)
+            continue
+        remaining = ".".join(path[index:])
+        if remaining in current:
+            return current.get(remaining)
+        return None
     return current
 
 
@@ -195,6 +244,9 @@ def _load_records(path: Path) -> List[Dict[str, Any]]:
 def _infer_bucket(path: Path, raw: Dict[str, Any]) -> Optional[str]:
     candidates = [
         path.stem.lower(),
+        _clean_text(raw.get("addressCity")) or "",
+        _clean_text(_deep_get(raw, "hdpData", "homeInfo", "city")) or "",
+        _clean_text(raw.get("address")) or "",
         _clean_text(_deep_get(raw, "address", "city")) or "",
         _clean_text(raw.get("city")) or "",
         _clean_text(_deep_get(raw, "location", "city")) or "",
@@ -216,8 +268,11 @@ def _extract_title(raw: Dict[str, Any]) -> Optional[str]:
             raw.get("name"),
             raw.get("title"),
             raw.get("headline"),
+            raw.get("address"),
+            raw.get("addressStreet"),
             _deep_get(raw, "listing", "name"),
             _deep_get(raw, "address", "streetAddress"),
+            _deep_get(raw, "hdpData", "homeInfo", "streetAddress"),
             _deep_get(raw, "Property", "Address", "AddressText"),
         )
     )
@@ -228,10 +283,13 @@ def _extract_description(raw: Dict[str, Any]) -> Optional[str]:
     for candidate in (
         raw.get("description"),
         raw.get("summary"),
+        raw.get("statusText"),
+        raw.get("brokerName"),
         raw.get("PublicRemarks"),
         raw.get("descriptionHtml"),
         _deep_get(raw, "description", "html"),
         _deep_get(raw, "description", "text"),
+        _deep_get(raw, "hdpData", "homeInfo", "homeStatus"),
         _deep_get(raw, "listing", "description"),
     ):
         if candidate is None:
@@ -295,11 +353,15 @@ def _extract_price(raw: Dict[str, Any]) -> Optional[float]:
         _deep_get(raw, "pricing", "rate", "amount"),
         _deep_get(raw, "pricing", "price", "amount"),
         _deep_get(raw, "pricing", "monthly", "amount"),
+        _deep_get(raw, "hdpData", "homeInfo", "price"),
         _deep_get(raw, "price", "amount"),
         _deep_get(raw, "price", "value"),
         _deep_get(raw, "rental", "baseRent"),
         _deep_get(raw, "hdpView", "price"),
         _deep_get(raw, "Property", "LeaseRentUnformattedValue"),
+        _deep_get(raw, "Property", "PriceUnformattedValue"),
+        _deep_get(raw, "Property", "Price"),
+        raw.get("unformattedPrice"),
         raw.get("price"),
         raw.get("pricePerMonth"),
         raw.get("monthlyPrice"),
@@ -308,13 +370,25 @@ def _extract_price(raw: Dict[str, Any]) -> Optional[float]:
         value = _to_float(candidate)
         if value and value > 0:
             return value
+
+    compact_candidates = [
+        _deep_get(raw, "Property", "ShortValue"),
+        raw.get("Property.ShortValue"),
+        raw.get("ShortValue"),
+    ]
+    for candidate in compact_candidates:
+        value = _to_float_compact(candidate)
+        if value and value > 0:
+            return value
     return None
 
 
 def _extract_bedrooms(raw: Dict[str, Any]) -> Optional[int]:
     for candidate in (
         raw.get("bedrooms"),
+        raw.get("beds"),
         raw.get("bedroomCount"),
+        _deep_get(raw, "hdpData", "homeInfo", "bedrooms"),
         _deep_get(raw, "Building", "Bedrooms"),
         _deep_get(raw, "details", "bedrooms"),
         _deep_get(raw, "rooms", "bedrooms"),
@@ -328,7 +402,9 @@ def _extract_bedrooms(raw: Dict[str, Any]) -> Optional[int]:
 def _extract_bathrooms(raw: Dict[str, Any]) -> Optional[float]:
     for candidate in (
         raw.get("bathrooms"),
+        raw.get("baths"),
         raw.get("bathroomCount"),
+        _deep_get(raw, "hdpData", "homeInfo", "bathrooms"),
         _deep_get(raw, "Building", "BathroomTotal"),
         _deep_get(raw, "details", "bathrooms"),
         _deep_get(raw, "rooms", "bathrooms"),
@@ -344,6 +420,7 @@ def _extract_area(raw: Dict[str, Any]) -> Optional[int]:
         raw.get("areaSqft"),
         raw.get("squareFeet"),
         raw.get("area"),
+        _deep_get(raw, "hdpData", "homeInfo", "livingArea"),
         _deep_get(raw, "Building", "SizeInterior"),
         _deep_get(raw, "details", "areaSqft"),
     ):
@@ -417,8 +494,19 @@ def _extract_house_rules(raw: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_images(raw: Dict[str, Any]) -> List[str]:
+    def _normalize_url(value: Any) -> Optional[str]:
+        text = _clean_text(value)
+        if not text:
+            return None
+        # Some Zillow exports wrap URLs in angle brackets: <https://...>
+        if text.startswith("<") and text.endswith(">"):
+            text = text[1:-1].strip()
+        return text if text.startswith("http") else None
+
     urls: List[str] = []
     for candidate in (
+        raw.get("imgSrc"),
+        raw.get("detailUrl"),
         raw.get("images"),
         raw.get("photos"),
         raw.get("pictures"),
@@ -426,10 +514,16 @@ def _extract_images(raw: Dict[str, Any]) -> List[str]:
         _deep_get(raw, "media", "allPropertyPhotos", "highResolution"),
         _deep_get(raw, "listing", "images"),
     ):
-        if isinstance(candidate, list):
+        if isinstance(candidate, str):
+            url = _normalize_url(candidate)
+            if url:
+                urls.append(url)
+        elif isinstance(candidate, list):
             for item in candidate:
                 if isinstance(item, str):
-                    urls.append(item)
+                    url = _normalize_url(item)
+                    if url:
+                        urls.append(url)
                 elif isinstance(item, dict):
                     url = _first_non_empty(
                         item.get("url"),
@@ -440,16 +534,18 @@ def _extract_images(raw: Dict[str, Any]) -> List[str]:
                         item.get("original"),
                         item.get("src"),
                     )
-                    if url:
-                        urls.append(str(url))
+                    normalized = _normalize_url(url)
+                    if normalized:
+                        urls.append(normalized)
         elif isinstance(candidate, dict):
             url = _first_non_empty(
                 candidate.get("highResolutionLink"),
                 candidate.get("url"),
             )
-            if url:
-                urls.append(str(url))
-    return list(dict.fromkeys([url for url in urls if url]))
+            normalized = _normalize_url(url)
+            if normalized:
+                urls.append(normalized)
+    return list(dict.fromkeys(urls))
 
 
 def _parse_realtor_address(raw: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -490,6 +586,8 @@ def _extract_location(raw: Dict[str, Any], bucket: str) -> Dict[str, Optional[st
     city = _clean_text(
         _first_non_empty(
             _deep_get(raw, "address", "city"),
+            raw.get("addressCity"),
+            _deep_get(raw, "hdpData", "homeInfo", "city"),
             _parse_realtor_address(raw).get("city"),
             raw.get("city"),
             _deep_get(raw, "location", "city"),
@@ -499,6 +597,8 @@ def _extract_location(raw: Dict[str, Any], bucket: str) -> Dict[str, Optional[st
     state = _clean_text(
         _first_non_empty(
             _deep_get(raw, "address", "state"),
+            raw.get("addressState"),
+            _deep_get(raw, "hdpData", "homeInfo", "state"),
             _parse_realtor_address(raw).get("state_province"),
             raw.get("state"),
             _deep_get(raw, "location", "state"),
@@ -508,6 +608,7 @@ def _extract_location(raw: Dict[str, Any], bucket: str) -> Dict[str, Optional[st
     country = _clean_text(
         _first_non_empty(
                 _deep_get(raw, "address", "country"),
+                _deep_get(raw, "hdpData", "homeInfo", "country"),
                 raw.get("country"),
                 _deep_get(raw, "location", "country"),
             )
@@ -523,6 +624,8 @@ def _extract_location(raw: Dict[str, Any], bucket: str) -> Dict[str, Optional[st
             _first_non_empty(
                 _deep_get(raw, "address", "street"),
                 _deep_get(raw, "address", "streetAddress"),
+                raw.get("addressStreet"),
+                _deep_get(raw, "hdpData", "homeInfo", "streetAddress"),
                 realtor_address.get("address_line_1"),
                 raw.get("address"),
             )
@@ -531,6 +634,8 @@ def _extract_location(raw: Dict[str, Any], bucket: str) -> Dict[str, Optional[st
             _first_non_empty(
                 _deep_get(raw, "address", "postalCode"),
                 _deep_get(raw, "address", "zipcode"),
+                raw.get("addressZipcode"),
+                _deep_get(raw, "hdpData", "homeInfo", "zipcode"),
                 realtor_address.get("postal_code"),
                 raw.get("postalCode"),
             )
@@ -542,6 +647,8 @@ def _extract_coordinates(raw: Dict[str, Any]) -> Tuple[Optional[float], Optional
     lat = _to_float(
         _first_non_empty(
             raw.get("latitude"),
+            _deep_get(raw, "latLong", "latitude"),
+            _deep_get(raw, "hdpData", "homeInfo", "latitude"),
             _deep_get(raw, "location", "lat"),
             _deep_get(raw, "location", "latitude"),
             _deep_get(raw, "coordinates", "lat"),
@@ -551,6 +658,8 @@ def _extract_coordinates(raw: Dict[str, Any]) -> Tuple[Optional[float], Optional
     lon = _to_float(
         _first_non_empty(
             raw.get("longitude"),
+            _deep_get(raw, "latLong", "longitude"),
+            _deep_get(raw, "hdpData", "homeInfo", "longitude"),
             _deep_get(raw, "location", "lng"),
             _deep_get(raw, "location", "longitude"),
             _deep_get(raw, "coordinates", "lng"),
@@ -566,6 +675,7 @@ def _synthesize_title(raw: Dict[str, Any], bedrooms: int, location: Dict[str, Op
     property_type = _clean_text(
         _first_non_empty(
             raw.get("propertyType"),
+            _deep_get(raw, "hdpData", "homeInfo", "homeType"),
             _deep_get(raw, "Property", "Type"),
             _deep_get(raw, "Building", "Type"),
         )
@@ -628,12 +738,19 @@ def _description_says_furnished(description: Optional[str]) -> bool:
     return any(kw in text for kw in _FURNISHED_KEYWORDS)
 
 
-def _prepare_listing(raw: Dict[str, Any], bucket: str, host_user_id: str) -> Optional[PreparedListing]:
+def _prepare_listing(
+    raw: Dict[str, Any],
+    bucket: str,
+    host_user_id: str,
+    *,
+    min_bedrooms: int,
+    max_bedrooms: int,
+) -> Optional[PreparedListing]:
     price = _extract_price(raw)
     bedrooms = _extract_bedrooms(raw)
     if not price or bedrooms is None:
         return None
-    if bedrooms < 2 or bedrooms > 5:
+    if bedrooms < min_bedrooms or bedrooms > max_bedrooms:
         return None
 
     location = _extract_location(raw, bucket)
@@ -787,9 +904,16 @@ def main() -> int:
     parser.add_argument("inputs", nargs="+", help="One or more exported JSON/JSONL dataset files.")
     parser.add_argument("--host-user-id", help="users.id to assign as the host for imported listings.")
     parser.add_argument("--limit-per-city", type=int, default=135, help="Max listings to keep per metro bucket.")
+    parser.add_argument("--min-bedrooms", type=int, default=2, help="Minimum bedrooms to accept.")
+    parser.add_argument("--max-bedrooms", type=int, default=5, help="Maximum bedrooms to accept.")
     parser.add_argument("--wipe-existing", action="store_true", help="Delete existing listings and listing_photos before import.")
     parser.add_argument("--dry-run", action="store_true", help="Parse and summarise without writing to Supabase.")
     args = parser.parse_args()
+
+    if args.min_bedrooms < 0:
+        raise SystemExit("--min-bedrooms must be >= 0")
+    if args.max_bedrooms < args.min_bedrooms:
+        raise SystemExit("--max-bedrooms must be >= --min-bedrooms")
 
     host_user_id = _resolve_host_user_id(args.host_user_id)
     by_bucket: Dict[str, List[PreparedListing]] = defaultdict(list)
@@ -804,7 +928,13 @@ def main() -> int:
                 skipped_unknown_bucket += 1
                 continue
 
-            prepared = _prepare_listing(raw, bucket=bucket, host_user_id=host_user_id)
+            prepared = _prepare_listing(
+                raw,
+                bucket=bucket,
+                host_user_id=host_user_id,
+                min_bedrooms=args.min_bedrooms,
+                max_bedrooms=args.max_bedrooms,
+            )
             if prepared is None:
                 skipped_invalid += 1
                 continue
@@ -819,13 +949,14 @@ def main() -> int:
             by_bucket[bucket].append(prepared)
 
     ordered: List[PreparedListing] = []
-    for bucket in ("toronto", "new_york", "san_francisco"):
+    for bucket in ("toronto", "vancouver", "new_york", "san_francisco"):
         ordered.extend(by_bucket.get(bucket, []))
 
     summary = {
         "host_user_id": host_user_id,
         "prepared_total": len(ordered),
         "by_bucket": {bucket: len(rows) for bucket, rows in by_bucket.items()},
+        "bedroom_range": {"min": args.min_bedrooms, "max": args.max_bedrooms},
         "skipped_invalid": skipped_invalid,
         "skipped_unknown_bucket": skipped_unknown_bucket,
         "dry_run": args.dry_run,

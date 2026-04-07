@@ -15,6 +15,8 @@ from typing import Any, Dict, Iterable, List, Optional
 _STATE_ALIASES = {
     "on": "ontario",
     "ontario": "ontario",
+    "bc": "british columbia",
+    "british columbia": "british columbia",
     "ny": "new york",
     "new york": "new york",
     "ca": "california",
@@ -174,6 +176,10 @@ _METRO_DISPLAY_NAMES = {
     "nyc": "nyc",
     "new york city metro": "nyc",
     "bay area": "bay_area",
+    "south bay": "bay_area",
+    "south bay area": "bay_area",
+    "silicon valley": "bay_area",
+    "silicon valley metro": "bay_area",
     "sf bay area": "bay_area",
     "san francisco bay area": "bay_area",
 }

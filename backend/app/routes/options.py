@@ -22,6 +22,11 @@ from app.services.location_matching import get_metro_options
 
 router = APIRouter(prefix="/api/options", tags=["options"])
 
+_CA_PRIORITY_CITY_OPTIONS = [
+    {"value": "Sunnyvale", "label": "Sunnyvale"},
+    {"value": "Mountain View", "label": "Mountain View"},
+]
+
 
 def _norm(value: str | None) -> str:
     return " ".join((value or "").strip().lower().split())
@@ -172,6 +177,23 @@ async def get_cities(
         metro_options.append({"value": "NYC", "label": "NYC (New York City Metro)"})
     if country_code.upper() == "US" and normalize_state(state_code) == "california":
         metro_options.append({"value": "Bay Area", "label": "Bay Area (San Francisco Metro)"})
+        metro_options.append({"value": "South Bay", "label": "South Bay (Silicon Valley)"})
+
+        # Keep core South Bay cities visible at the top as explicit city options,
+        # even when already present in DB-derived results.
+        priority_norm = {opt["label"].strip().lower() for opt in _CA_PRIORITY_CITY_OPTIONS}
+        filtered_cities = [
+            city_option
+            for city_option in cities
+            if city_option.get("label", "").strip().lower() not in priority_norm
+        ]
+        priority_cities = []
+        for option in _CA_PRIORITY_CITY_OPTIONS:
+            label = option["label"].strip().lower()
+            if q and q.lower() not in label:
+                continue
+            priority_cities.append(option)
+        cities = priority_cities + filtered_cities
 
     if q:
         metro_options = [m for m in metro_options if q.lower() in m["label"].lower()]
