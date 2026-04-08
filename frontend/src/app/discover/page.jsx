@@ -204,6 +204,7 @@ function DiscoverContent() {
 
   const guestSwipeCountRef = useRef(0);
   const guestNudgeShownRef = useRef(false);
+  const guestSignupModalShownRef = useRef(false); // only show the signup modal once per session
   const [guestNudgeShown, setGuestNudgeShown] = useState(false);
   const [showGuestSignupModal, setShowGuestSignupModal] = useState(false);
   const [pendingGuestLike, setPendingGuestLike] = useState(null);
@@ -990,10 +991,17 @@ function DiscoverContent() {
       guestSwipeCountRef.current += 1;
 
       if (action === 'like') {
-        // Show signup modal instead of saving — don't advance the card
-        setPendingGuestLike(listing);
-        setShowGuestSignupModal(true);
-        void logGuestEvent({ event_type: 'signup_prompt_shown', listing_id: listing?.listing_id ?? null });
+        // First like only: pause and show the signup modal.
+        // After that, likes just advance the card silently — don't interrupt every time.
+        if (!guestSignupModalShownRef.current) {
+          guestSignupModalShownRef.current = true;
+          setPendingGuestLike(listing);
+          setShowGuestSignupModal(true);
+          void logGuestEvent({ event_type: 'signup_prompt_shown', listing_id: listing?.listing_id ?? null });
+          return; // don't advance until modal is dismissed
+        }
+        // Subsequent likes: just advance
+        setCurrentIndex(prev => prev + 1);
         return;
       }
 
