@@ -401,7 +401,7 @@ function DiscoverContent() {
         budget_max: localGuestPrefs.budget_max || undefined,
         required_bedrooms: localGuestPrefs.required_bedrooms || undefined,
         target_bathrooms: localGuestPrefs.target_bathrooms || undefined,
-        top_n: 5,
+        top_n: 20,
         offset: 0,
       };
       activeFilterBodyRef.current = body;
@@ -1001,7 +1001,7 @@ function DiscoverContent() {
       setCurrentIndex(prev => prev + 1);
 
       // Show nudge after 5 swipes
-      if (guestSwipeCountRef.current >= 5 && !guestNudgeShownRef.current) {
+      if (guestSwipeCountRef.current >= 15 && !guestNudgeShownRef.current) {
         guestNudgeShownRef.current = true;
         setGuestNudgeShown(true);
       }

@@ -126,7 +126,7 @@ class RecommendationsResponse(BaseModel):
 
 # ── endpoint ───────────────────────────────────────────────────────────────
 
-GUEST_MAX_RESULTS = 5  # guests see fewer results to discourage scraping
+GUEST_MAX_RESULTS = 20  # guests see a meaningful sample before hitting a signup prompt
 
 
 @router.post("/recommendations", response_model=RecommendationsResponse)
