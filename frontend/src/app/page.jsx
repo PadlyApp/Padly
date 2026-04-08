@@ -252,7 +252,7 @@ export default function Home() {
                       <Button size="lg" color="teal" component={Link} href="/signup">
                         Find Your Place
                       </Button>
-                      <Button size="lg" variant="outline" color="teal" component={Link} href="/discover">
+                      <Button size="lg" variant="outline" color="teal" component={Link} href="/preferences-setup">
                         Browse Listings
                       </Button>
                     </Group>

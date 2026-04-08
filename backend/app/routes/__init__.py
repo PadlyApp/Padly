@@ -12,6 +12,7 @@ from .auth import router as auth_router
 from .matches import router as matches_router
 from .recommendations import router as recommendations_router
 from .interactions import router as interactions_router
+from .guest_interactions import router as guest_interactions_router
 from .options import router as options_router
 from .roommate_intros import router as roommate_intros_router
 
@@ -26,6 +27,7 @@ __all__ = [
     "matches_router",
     "recommendations_router",
     "interactions_router",
+    "guest_interactions_router",
     "options_router",
     "roommate_intros_router",
 ]

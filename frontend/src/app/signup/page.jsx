@@ -84,12 +84,20 @@ export default function SignupPage() {
 
     try {
       await signup(values.email, values.password, values.fullName);
+      // If the user had guest preferences, they'll be pre-filled on preferences-setup
+      // because that page reads sessionStorage.guest_preferences on mount.
+      const hasGuestPrefs = (() => {
+        try { return !!JSON.parse(sessionStorage.getItem('guest_preferences') || '{}')?.target_city; }
+        catch { return false; }
+      })();
+
       notifications.show({
         title: 'Success!',
-        message: 'Account created successfully',
+        message: hasGuestPrefs
+          ? 'Account created! Your browsing preferences have been pre-filled.'
+          : 'Account created successfully',
         color: 'green',
       });
-      // Redirect to onboarding to complete profile
       router.push('/preferences-setup');
     } catch (err) {
       if (err?.code === 'EMAIL_CONFIRMATION_REQUIRED') {
