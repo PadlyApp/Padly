@@ -43,16 +43,83 @@ const AMENITY_LABEL_OVERRIDES = {
   comes_furnished: 'Furnished',
   single_family: 'House',
   single_family_home: 'House',
+  hasairconditioning: 'Air Conditioning',
+  hasfireplace: 'Fireplace',
+  haspool: 'Pool',
+  hasspa: 'Spa',
 };
+
+function isNumericToken(value) {
+  return /^\d+$/.test(String(value || '').trim());
+}
+
+function normalizeAmenityToken(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw || isNumericToken(raw)) return null;
+  return raw
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+}
+
+/**
+ * Returns normalized amenity keys that are actually active for a listing.
+ * Handles object, array, and mixed payloads while filtering out numeric IDs.
+ */
+export function getActiveAmenityKeys(amenities) {
+  if (!amenities || typeof amenities !== 'object') return [];
+
+  const keys = [];
+  const seen = new Set();
+
+  const add = (candidate) => {
+    const normalized = normalizeAmenityToken(candidate);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    keys.push(normalized);
+  };
+
+  if (Array.isArray(amenities)) {
+    amenities.forEach((item) => {
+      if (typeof item === 'string' || typeof item === 'number') {
+        add(item);
+      }
+    });
+    return keys;
+  }
+
+  Object.entries(amenities).forEach(([key, value]) => {
+    if (!value) return;
+    if (isNumericToken(key)) {
+      if (typeof value === 'string' || typeof value === 'number') {
+        add(value);
+      }
+      return;
+    }
+    add(key);
+  });
+
+  return keys;
+}
+
+/** Formats enum-like values (e.g., `for_rent`) for user-facing UI text. */
+export function formatEnumLabel(value) {
+  if (value == null) return '';
+  return String(value)
+    .trim()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 /**
  * Converts a snake_case amenity key into a human-readable label.
  * Uses a curated override map first; falls back to title-casing each word.
  */
 export function formatAmenityLabel(key) {
-  if (!key) return '';
-  if (AMENITY_LABEL_OVERRIDES[key]) return AMENITY_LABEL_OVERRIDES[key];
-  return key
+  const normalized = normalizeAmenityToken(key);
+  if (!normalized) return '';
+  if (AMENITY_LABEL_OVERRIDES[normalized]) return AMENITY_LABEL_OVERRIDES[normalized];
+  return normalized
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
