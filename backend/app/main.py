@@ -34,6 +34,7 @@ app = FastAPI(
     description="Backend API for Padly - Housing and Roommate Matching Platform",
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
 # Configure CORS (Starlette returns 400 on failed preflight — usually wrong Origin)
@@ -86,7 +87,6 @@ async def root():
     return {
         "message": "Welcome to Padly API",
         "version": "1.0.0",
-        "docs": "/docs",
         "health": "/health"
     }
 
