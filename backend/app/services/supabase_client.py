@@ -1,261 +1,208 @@
 """
-Supabase HTTP Client
-Direct HTTP calls to Supabase PostgREST API using httpx
+Supabase client facade.
+
+Provides an async CRUD helper (``SupabaseHTTPClient``) that delegates to the
+single supabase-py ``Client`` rather than hand-rolling raw httpx requests.
+All existing call-sites keep their ``await client.select(…)`` interface
+unchanged.
 """
 
-import httpx
-from typing import Optional, Dict, Any, List
-from fastapi import HTTPException
-from app.db import SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY
+from __future__ import annotations
 
+import asyncio
+from typing import Any, Dict, List, Optional
+
+from fastapi import HTTPException
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _apply_filters(query: Any, filters: Dict[str, str]) -> Any:
+    """Translate PostgREST query-param style filters to supabase-py calls."""
+    for column, expr in filters.items():
+        if column == "or":
+            value = expr.strip()
+            if value.startswith("(") and value.endswith(")"):
+                value = value[1:-1]
+            query = query.or_(value)
+        else:
+            op, _, value = expr.partition(".")
+            query = query.filter(column, op, value)
+    return query
+
+
+# ---------------------------------------------------------------------------
+# Public facade
+# ---------------------------------------------------------------------------
 
 class SupabaseHTTPClient:
+    """Thin async facade over the supabase-py ``Client``.
+
+    Construction mirrors the original interface:
+
+    * ``SupabaseHTTPClient(is_admin=True)`` — service-role (bypasses RLS)
+    * ``SupabaseHTTPClient(token=jwt)``     — user-scoped (respects RLS)
     """
-    HTTP client for Supabase PostgREST API.
-    
-    Uses httpx for async HTTP requests directly to PostgREST endpoints.
-    Supports both user-scoped (with JWT) and admin (service role) operations.
-    """
-    
-    def __init__(self, token: Optional[str] = None, is_admin: bool = False):
-        """
-        Initialize Supabase HTTP client.
-        
-        Args:
-            token: Optional user JWT token for RLS enforcement
-            is_admin: If True, use service role key (bypasses RLS)
-        """
-        self.base_url = f"{SUPABASE_URL}/rest/v1"
-        
-        # Determine which API key to use
-        api_key = SUPABASE_SERVICE_KEY if is_admin else SUPABASE_ANON_KEY
-        
-        # Set headers
-        self.headers = {
-            "apikey": api_key,
-            "Content-Type": "application/json",
-            "Prefer": "return=representation"  # Return created/updated records
-        }
-        
-        # Set Authorization header
+
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        is_admin: bool = False,
+    ) -> None:
+        from app.dependencies.supabase import get_admin_client, get_user_client
+
         if is_admin:
-            # Admin uses service role key for auth
-            self.headers["Authorization"] = f"Bearer {SUPABASE_SERVICE_KEY}"
-        elif token:
-            # User routes use provided JWT
-            self.headers["Authorization"] = f"Bearer {token}"
+            self._client = get_admin_client()
         else:
-            # Anonymous uses anon key
-            self.headers["Authorization"] = f"Bearer {SUPABASE_ANON_KEY}"
-    
+            self._client = get_user_client(token)
+
+    # -- SELECT --------------------------------------------------------
+
     async def select(
-        self, 
-        table: str, 
+        self,
+        table: str,
         columns: str = "*",
         filters: Optional[Dict[str, Any]] = None,
         order: Optional[str] = None,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        offset: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        SELECT query on a table.
-        
-        Args:
-            table: Table name
-            columns: Columns to select (default: "*")
-            filters: Filter conditions (e.g., {"id": "eq.123", "status": "eq.active"})
-            order: Order by (e.g., "created_at.desc")
-            limit: Limit results
-            offset: Offset results
-        
-        Returns:
-            List of records
-        """
-        url = f"{self.base_url}/{table}"
-        
-        params = {"select": columns}
-        
-        if filters:
-            params.update(filters)
-        
-        if order:
-            params["order"] = order
-        
-        if limit:
-            params["limit"] = limit
-        
-        if offset:
-            params["offset"] = offset
-        
+        def _run() -> List[Dict[str, Any]]:
+            q = self._client.table(table).select(columns)
+            if filters:
+                q = _apply_filters(q, filters)
+            if order:
+                col, _, direction = order.partition(".")
+                q = q.order(col, desc=(direction == "desc"))
+            if limit is not None:
+                q = q.limit(limit)
+            if offset is not None:
+                q = q.offset(offset)
+            return q.execute().data or []
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=self.headers, params=params)
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Supabase error: {e.response.text}"
-            )
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Supabase query failed: {e}"
+            ) from e
+
     async def select_one(
         self,
         table: str,
         id_value: str,
         id_column: str = "id",
-        columns: str = "*"
+        columns: str = "*",
     ) -> Optional[Dict[str, Any]]:
-        """
-        SELECT a single record by ID.
-        
-        Args:
-            table: Table name
-            id_value: ID value
-            id_column: ID column name (default: "id")
-            columns: Columns to select
-        
-        Returns:
-            Single record or None
-        """
-        filters = {id_column: f"eq.{id_value}"}
-        results = await self.select(table, columns=columns, filters=filters, limit=1)
+        results = await self.select(
+            table,
+            columns=columns,
+            filters={id_column: f"eq.{id_value}"},
+            limit=1,
+        )
         return results[0] if results else None
-    
+
+    # -- INSERT --------------------------------------------------------
+
     async def insert(
-        self,
-        table: str,
-        data: Dict[str, Any]
+        self, table: str, data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        INSERT a record.
-        
-        Args:
-            table: Table name
-            data: Record data
-        
-        Returns:
-            Created record
-        """
-        url = f"{self.base_url}/{table}"
-        
+        def _run() -> Dict[str, Any]:
+            result = self._client.table(table).insert(data).execute()
+            rows = result.data or []
+            return rows[0] if rows else {}
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, headers=self.headers, json=data)
-                response.raise_for_status()
-                result = response.json()
-                return result[0] if isinstance(result, list) and result else result
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Supabase error: {e.response.text}"
-            )
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Insert failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Insert failed: {e}"
+            ) from e
+
+    # -- UPDATE --------------------------------------------------------
+
     async def update(
         self,
         table: str,
         id_value: str,
         data: Dict[str, Any],
-        id_column: str = "id"
+        id_column: str = "id",
     ) -> Dict[str, Any]:
-        """
-        UPDATE a record by ID.
-        
-        Args:
-            table: Table name
-            id_value: ID value
-            data: Updated data
-            id_column: ID column name
-        
-        Returns:
-            Updated record
-        """
-        url = f"{self.base_url}/{table}"
-        params = {id_column: f"eq.{id_value}"}
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.patch(url, headers=self.headers, params=params, json=data)
-                response.raise_for_status()
-                result = response.json()
-                return result[0] if isinstance(result, list) and result else result
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Supabase error: {e.response.text}"
+        def _run() -> Dict[str, Any]:
+            result = (
+                self._client.table(table)
+                .update(data)
+                .eq(id_column, id_value)
+                .execute()
             )
+            rows = result.data or []
+            return rows[0] if rows else {}
+
+        try:
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Update failed: {e}"
+            ) from e
+
+    # -- DELETE --------------------------------------------------------
+
     async def delete(
         self,
         table: str,
         id_value: str,
-        id_column: str = "id"
+        id_column: str = "id",
     ) -> bool:
-        """
-        DELETE a record by ID.
-        
-        Args:
-            table: Table name
-            id_value: ID value
-            id_column: ID column name
-        
-        Returns:
-            True if successful
-        """
-        url = f"{self.base_url}/{table}"
-        params = {id_column: f"eq.{id_value}"}
-        
+        def _run() -> bool:
+            self._client.table(table).delete().eq(id_column, id_value).execute()
+            return True
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.delete(url, headers=self.headers, params=params)
-                response.raise_for_status()
-                return True
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail=f"Supabase error: {e.response.text}"
-            )
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
-    
+            raise HTTPException(
+                status_code=500, detail=f"Delete failed: {e}"
+            ) from e
+
+    # -- COUNT ---------------------------------------------------------
+
     async def count(
         self,
         table: str,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
     ) -> int:
-        """
-        COUNT records in a table.
-        
-        Args:
-            table: Table name
-            filters: Optional filter conditions
-        
-        Returns:
-            Count of records
-        """
-        url = f"{self.base_url}/{table}"
-        
-        # Add Prefer header for count
-        headers = {**self.headers, "Prefer": "count=exact"}
-        params = {"select": "id"}  # Minimal select for count
-        
-        if filters:
-            params.update(filters)
-        
+        def _run() -> int:
+            q = self._client.table(table).select("*", count="exact").limit(0)
+            if filters:
+                q = _apply_filters(q, filters)
+            return q.execute().count or 0
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.head(url, headers=headers, params=params)
-                response.raise_for_status()
-                
-                # Get count from Content-Range header
-                content_range = response.headers.get("content-range", "")
-                if "/" in content_range:
-                    return int(content_range.split("/")[1])
-                return 0
+            return await asyncio.to_thread(_run)
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Count failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Count failed: {e}"
+            ) from e
+
+
+# ---------------------------------------------------------------------------
+# Convenience alias expected by group_rematching_service
+# ---------------------------------------------------------------------------
+
+def get_supabase_admin_client():
+    """Return the shared admin supabase-py ``Client``."""
+    from app.dependencies.supabase import get_admin_client
+
+    return get_admin_client()

@@ -17,18 +17,11 @@ from app.services.preferences_contract import (
     target_furnished_from_preference,
 )
 from app.ai.recommender import score_listings
+from app.config import settings
 from pydantic import BaseModel
 from datetime import datetime
-import os
 
 router = APIRouter(prefix="/api/roommate-groups", tags=["Roommate Groups"])
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _fetch_active_listings_for_group_location(supabase: Any, group: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -2172,8 +2165,8 @@ async def get_neural_ranked_listings_for_group(
     from app.services.stable_matching import build_feasible_pairs, get_feasibility_statistics
 
     # Phase 3A controls: default OFF until explicit enable.
-    ranking_enabled = _env_bool("PADLY_GROUP_NEURAL_RANKING_ENABLED", default=False)
-    kill_switch = _env_bool("PADLY_GROUP_NEURAL_KILL_SWITCH", default=False)
+    ranking_enabled = settings.padly_group_neural_ranking_enabled
+    kill_switch = settings.padly_group_neural_kill_switch
 
     if kill_switch:
         raise HTTPException(

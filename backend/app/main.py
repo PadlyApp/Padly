@@ -4,12 +4,10 @@ A trusted platform for students, interns, and early-career professionals
 to find housing and compatible roommates.
 """
 
-import os
-
 from fastapi import FastAPI
-
-_is_dev = os.getenv("ENVIRONMENT", "development").lower() in ("development", "dev", "local")
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
 from app.routes import (
     users_router,
     listings_router,
@@ -22,8 +20,8 @@ from app.routes import (
     recommendations_router,
     interactions_router,
     options_router,
+    roommate_intros_router,
 )
-from app.routes.roommate_intros import router as roommate_intros_router
 from app.routes.groups import router as groups_router
 
 # Initialize FastAPI application
@@ -31,8 +29,8 @@ app = FastAPI(
     title="Padly API",
     version="1.0.0",
     description="Backend API for Padly - Housing and Roommate Matching Platform",
-    docs_url="/docs" if _is_dev else None,
-    redoc_url="/redoc" if _is_dev else None,
+    docs_url="/docs" if settings.is_dev else None,
+    redoc_url="/redoc" if settings.is_dev else None,
 )
 
 # Configure CORS (Starlette returns 400 on failed preflight — usually wrong Origin)
@@ -43,9 +41,10 @@ _cors_origins = [
     "https://padly.tech",
     "https://www.padly.tech",
 ]
-_extra = os.getenv("CORS_ORIGINS", "").strip()
-if _extra:
-    _cors_origins.extend(o.strip() for o in _extra.split(",") if o.strip())
+if settings.cors_origins.strip():
+    _cors_origins.extend(
+        o.strip() for o in settings.cors_origins.split(",") if o.strip()
+    )
 
 app.add_middleware(
     CORSMiddleware,
