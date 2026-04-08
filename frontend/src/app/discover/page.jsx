@@ -24,7 +24,7 @@ import {
   normalizeRecommendationsError,
   parseApiErrorResponse,
 } from '../../../lib/errorHandling';
-import { formatAmenityLabel, parseListingTitle } from '../../../lib/formatters';
+import { formatAmenityLabel, formatEnumLabel, getActiveAmenityKeys, parseListingTitle } from '../../../lib/formatters';
 import {
   MATCHES_FEEDBACK_CHOICES,
   MATCHES_NEGATIVE_REASON_CHOICES,
@@ -1547,9 +1547,7 @@ function DiscoverContent() {
             : modalStreet;
           const modalDisplayLocation = modalLocation || modalCity;
 
-          const amenities = expandedListing.amenities && typeof expandedListing.amenities === 'object'
-            ? expandedListing.amenities
-            : {};
+          const amenityKeys = getActiveAmenityKeys(expandedListing.amenities);
 
           const bedsLabel = expandedListing.number_of_bedrooms === 0
             ? 'Studio'
@@ -1725,7 +1723,7 @@ function DiscoverContent() {
                   )}
                   {expandedListing.property_type && (
                     <Badge variant="light" color="teal" size="md" radius="sm">
-                      {expandedListing.property_type}
+                      {formatEnumLabel(expandedListing.property_type)}
                     </Badge>
                   )}
                 </Group>
@@ -1777,7 +1775,7 @@ function DiscoverContent() {
                   {expandedListing.lease_type && (
                     <>
                       <Text size="xs" c="dimmed" fw={600} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Lease type</Text>
-                      <Text size="sm">{expandedListing.lease_type}</Text>
+                      <Text size="sm">{formatEnumLabel(expandedListing.lease_type)}</Text>
                     </>
                   )}
                   <>
@@ -1793,11 +1791,9 @@ function DiscoverContent() {
                 </Box>
 
                 {/* Row 4: amenities */}
-                {Object.entries(amenities).filter(([, v]) => v).length > 0 && (
+                {amenityKeys.length > 0 && (
                   <Group gap="xs" mb="md" wrap="wrap">
-                    {Object.entries(amenities)
-                      .filter(([, v]) => v)
-                      .map(([key]) => (
+                    {amenityKeys.map((key) => (
                         <Badge key={key} variant="light" color="teal" size="sm" radius="sm">
                           {formatAmenityLabel(key)}
                         </Badge>

@@ -4,7 +4,7 @@ import { useRef, useState, useEffect, memo } from 'react';
 import { Text, Badge, Box, Group, Button, ActionIcon } from '@mantine/core';
 import { IconInfoCircle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { ImageWithFallback } from './ImageWithFallback';
-import { formatAmenityLabel, parseListingTitle } from '../../../lib/formatters';
+import { formatAmenityLabel, getActiveAmenityKeys, parseListingTitle } from '../../../lib/formatters';
 
 const SWIPE_THRESHOLD = 100;
 
@@ -263,9 +263,7 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhoto
           : rawStreet;
         const displayName = street || 'Listing';
         const displayLocation = location || city;
-        const amenityEntries = listing.amenities && typeof listing.amenities === 'object'
-          ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 3)
-          : [];
+        const amenityKeys = getActiveAmenityKeys(listing.amenities).slice(0, 3);
         const stats = [
           listing.number_of_bedrooms != null && (listing.number_of_bedrooms === 0 ? 'Studio' : `${listing.number_of_bedrooms} bed`),
           listing.number_of_bathrooms != null && `${listing.number_of_bathrooms} bath`,
@@ -319,9 +317,9 @@ function SwipeCardBase({ listing, onSwipe, isTop, stackOffset, onExpand, onPhoto
             ) : <Box style={{ marginBottom: 5 }} />}
 
             {/* Amenity badges */}
-            {amenityEntries.length > 0 && (
+            {amenityKeys.length > 0 && (
               <Group gap={4} style={{ marginBottom: 5, flexWrap: 'nowrap', overflow: 'hidden' }}>
-                {amenityEntries.map(([key]) => (
+                {amenityKeys.map((key) => (
                   <Badge key={key} variant="light" color="teal" size="xs" radius="sm" style={{ flexShrink: 0 }}>
                     {formatAmenityLabel(key)}
                   </Badge>
