@@ -51,12 +51,6 @@ Every interaction feeds back into the system. Swipe behavior refines recommendat
 - **Metro-aware location matching** across cities and regions
 - **Row-level security** on all database tables
 
-## Tech Stack
-
-- **Frontend:** Next.js 15, React 19, Mantine UI, TanStack Query
-- **Backend:** FastAPI, Supabase (Postgres + Auth), Pydantic
-- **AI/ML:** TensorFlow two-tower model, behavioral fingerprinting, embedding-based similarity
-- **Infrastructure:** Supabase migrations, Git LFS for model artifacts
 
 ## Who It's For
 

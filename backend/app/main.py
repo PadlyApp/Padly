@@ -21,6 +21,7 @@ from app.routes import (
     matches_router,
     recommendations_router,
     interactions_router,
+    guest_interactions_router,
     options_router,
 )
 from app.routes.roommate_intros import router as roommate_intros_router
@@ -73,6 +74,7 @@ app.include_router(admin_router)
 app.include_router(authenticated_admin_router)
 app.include_router(recommendations_router)
 app.include_router(interactions_router)
+app.include_router(guest_interactions_router)
 app.include_router(options_router)
 app.include_router(roommate_intros_router)
 

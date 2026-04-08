@@ -6,6 +6,10 @@ const PUBLIC_PATHS = new Set([
   '/login',
   '/signup',
   '/auth/callback',
+  // Guest browsing: unauthenticated users can reach these pages.
+  // Rate limiting and result capping are enforced server-side.
+  '/discover',
+  '/preferences-setup',
 ]);
 
 // Prefixes that are always public (static assets, Next internals, API routes)

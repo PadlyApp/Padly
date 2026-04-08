@@ -145,15 +145,13 @@ function collectDeviceContext() {
 // ── page ────────────────────────────────────────────────────────────────────
 
 export default function DiscoverPage() {
-  return (
-    <ProtectedRoute>
-      <DiscoverContent />
-    </ProtectedRoute>
-  );
+  // /discover is intentionally public — guests can browse without logging in.
+  // Rate limiting and result capping for unauthenticated requests are enforced server-side.
+  return <DiscoverContent />;
 }
 
 function DiscoverContent() {
-  const { user, getValidToken, authState } = useAuth();
+  const { user, getValidToken, authState, isAuthenticated, isLoading: authLoading } = useAuth();
   const { tourPhase } = usePadlyTour();
   const userId = user?.profile?.id;
   const router = useRouter();
@@ -177,6 +175,39 @@ function DiscoverContent() {
   });
   const prefCity = prefsData?.target_city ?? null;
   usePageTracking('discover', authState?.accessToken);
+
+  // ── guest mode ─────────────────────────────────────────────────────────────
+  const isGuest = !authLoading && !isAuthenticated;
+
+  // Guest preferences from sessionStorage — read once on mount, never changes
+  const [guestPrefs] = useState(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(sessionStorage.getItem('guest_preferences') || '{}'); } catch { return {}; }
+  });
+  const guestCity = guestPrefs?.target_city ?? null;
+
+  // Stable guest session ID — follows the same ref-init pattern used for
+  // recommendationClientSessionIdRef elsewhere in this file
+  const guestSessionIdRef = useRef(null);
+  if (!guestSessionIdRef.current && typeof window !== 'undefined') {
+    try {
+      const _existing = sessionStorage.getItem('padly_guest_session_id');
+      if (_existing) {
+        guestSessionIdRef.current = _existing;
+      } else {
+        const _newId = crypto.randomUUID?.() ?? `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sessionStorage.setItem('padly_guest_session_id', _newId);
+        guestSessionIdRef.current = _newId;
+      }
+    } catch { /* best-effort */ }
+  }
+
+  const guestSwipeCountRef = useRef(0);
+  const guestNudgeShownRef = useRef(false);
+  const guestLikeCountRef = useRef(0); // tracks total guest likes to throttle the signup modal
+  const [guestNudgeShown, setGuestNudgeShown] = useState(false);
+  const [showGuestSignupModal, setShowGuestSignupModal] = useState(false);
+  const [pendingGuestLike, setPendingGuestLike] = useState(null);
 
   /** Bumps React Query cache key so a refetch always reapplies stack state (refetch alone can reuse the same data reference). */
   const [feedReloadNonce, setFeedReloadNonce] = useState(0);
@@ -356,6 +387,42 @@ function DiscoverContent() {
   // ── shared fetch helper (used by the query AND loadMore) ──────────────────
 
   const fetchFeedPage = useCallback(async ({ offset = 0 } = {}) => {
+    // Guest path — no auth token, preferences come from sessionStorage
+    if (!userId) {
+      let localGuestPrefs = {};
+      try { localGuestPrefs = JSON.parse(sessionStorage.getItem('guest_preferences') || '{}'); } catch {}
+      if (!localGuestPrefs.target_city) {
+        return { listings: [], prefs: localGuestPrefs, hasCorePreferences: false, hasMore: false, nextOffset: 0 };
+      }
+      const body = {
+        target_city: localGuestPrefs.target_city,
+        target_country: localGuestPrefs.target_country || undefined,
+        target_state_province: localGuestPrefs.target_state_province || undefined,
+        budget_min: localGuestPrefs.budget_min || undefined,
+        budget_max: localGuestPrefs.budget_max || undefined,
+        required_bedrooms: localGuestPrefs.required_bedrooms || undefined,
+        target_bathrooms: localGuestPrefs.target_bathrooms || undefined,
+        top_n: 20,
+        offset: 0,
+      };
+      activeFilterBodyRef.current = body;
+      const res = await fetch(`${API_BASE}/api/recommendations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Failed to fetch recommendations');
+      const data = await res.json();
+      return {
+        listings: data.recommendations || [],
+        prefs: localGuestPrefs,
+        hasCorePreferences: true,
+        hasMore: false,
+        nextOffset: 0,
+        rankingContext: deriveRankingContext(data),
+      };
+    }
+
     const token = await getValidToken();
     if (!token) throw new Error('Not authenticated');
 
@@ -507,9 +574,11 @@ function DiscoverContent() {
     isLoading: feedLoading,
     error: feedQueryError,
   } = useQuery({
-    queryKey: ['discover-feed', userId, prefCity, feedReloadNonce],
+    queryKey: isGuest
+      ? ['discover-feed-guest', guestCity, feedReloadNonce]
+      : ['discover-feed', userId, prefCity, feedReloadNonce],
     queryFn: () => fetchFeedPage({ offset: 0 }),
-    enabled: !!userId && prefCity !== null,
+    enabled: isGuest ? !!guestCity : (!!userId && prefCity !== null),
     staleTime: 0,
     gcTime:    10 * 60 * 1000,
     retry: false,
@@ -885,11 +954,69 @@ function DiscoverContent() {
     cardExpandedRef.current = false;
   }, [currentIndex, listings.length]);
 
+  // ── guest event logger ────────────────────────────────────────────────────
+  const logGuestEvent = useCallback(async (eventData) => {
+    if (!isGuest) return;
+    try {
+      let localPrefs = {};
+      try { localPrefs = JSON.parse(sessionStorage.getItem('guest_preferences') || '{}'); } catch {}
+      void fetch(`${API_BASE}/api/interactions/guest-events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guest_session_id: guestSessionIdRef.current ?? 'unknown',
+          guest_prefs_snapshot: localPrefs,
+          device_context: collectDeviceContext(),
+          ...eventData,
+        }),
+      }).catch(() => {});
+    } catch { /* best-effort */ }
+  }, [isGuest]);
+
   // Stable handleSwipe: reads currentIndex/listings from refs so the callback
   // identity doesn't change on every swipe (prevents SwipeCard re-renders).
 
   const handleSwipe = useCallback((direction, listing) => {
     const action = direction === 'right' ? 'like' : 'pass';
+
+    // ── Guest interception ────────────────────────────────────────────────────
+    if (isGuest) {
+      const position = listingsRef.current.findIndex(l => l.listing_id === listing?.listing_id);
+      void logGuestEvent({
+        event_type: action === 'like' ? 'swipe_right' : 'swipe_left',
+        listing_id: listing?.listing_id ?? null,
+        position_in_feed: position >= 0 ? position : currentIndexRef.current,
+      });
+
+      guestSwipeCountRef.current += 1;
+
+      if (action === 'like') {
+        guestLikeCountRef.current += 1;
+        const likeCount = guestLikeCountRef.current;
+        // Show the modal on the 1st like and every 10th after that (1, 10, 20, 30…)
+        if (likeCount === 1 || likeCount % 10 === 0) {
+          setPendingGuestLike(listing);
+          setShowGuestSignupModal(true);
+          void logGuestEvent({ event_type: 'signup_prompt_shown', listing_id: listing?.listing_id ?? null });
+          return; // don't advance until modal is dismissed
+        }
+        // All other likes: just advance
+        setCurrentIndex(prev => prev + 1);
+        return;
+      }
+
+      // Pass — advance card
+      setCurrentIndex(prev => prev + 1);
+
+      // Show nudge after 5 swipes
+      if (guestSwipeCountRef.current >= 15 && !guestNudgeShownRef.current) {
+        guestNudgeShownRef.current = true;
+        setGuestNudgeShown(true);
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (action === 'like') saveLikedListing(listing);
 
     const currentListings = listingsRef.current;
@@ -925,7 +1052,7 @@ function DiscoverContent() {
         detail: { direction },
       }));
     }
-  }, [persistSwipeEvent, persistListingViewEvent, persistSwipeContextEvent, tourPhase]);
+  }, [persistSwipeEvent, persistListingViewEvent, persistSwipeContextEvent, tourPhase, isGuest, logGuestEvent]);
 
   const handleButton = (direction) => {
     if (currentIndexRef.current >= listingsRef.current.length) return;
@@ -1105,7 +1232,42 @@ function DiscoverContent() {
               {remaining} listing{remaining !== 1 ? 's' : ''} left
             </Text>
           )}
+          {isGuest && !guestCity && (
+            <Button size="sm" color="teal" variant="light" onClick={() => router.push('/preferences-setup')}>
+              Set your location to see listings
+            </Button>
+          )}
         </Stack>
+
+        {/* Guest nudge banner — shown after 5 swipes */}
+        {isGuest && guestNudgeShown && (
+          <Box
+            style={{
+              border: '1px solid #96f2d7',
+              background: '#f0fdf9',
+              borderRadius: 12,
+              padding: '0.85rem 1rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <Text size="sm" style={{ color: '#0ca678' }}>
+              Sign up to save your liked listings and get unlimited access.
+            </Text>
+            <Group gap="xs">
+              <Button size="xs" color="teal" onClick={() => router.push('/signup')}>
+                Create free account
+              </Button>
+              <Button size="xs" variant="subtle" color="gray" onClick={() => setGuestNudgeShown(false)}>
+                Not now
+              </Button>
+            </Group>
+          </Box>
+        )}
 
         {showFeedbackPrompt && (
           <Box style={{ width: '100%', maxWidth: 520, margin: '0 auto 1.25rem' }}>
@@ -1765,6 +1927,71 @@ function DiscoverContent() {
           </Modal>
         );
       })()}
+
+      {/* Guest signup modal — shown when a guest tries to like a listing */}
+      <Modal
+        opened={showGuestSignupModal}
+        onClose={() => {
+          setShowGuestSignupModal(false);
+          // Advance past the card the guest tried to like so they can keep browsing
+          setCurrentIndex(prev => prev + 1);
+          void logGuestEvent({ event_type: 'signup_prompt_dismissed', listing_id: pendingGuestLike?.listing_id ?? null });
+          setPendingGuestLike(null);
+        }}
+        size="sm"
+        radius="lg"
+        centered
+        padding="xl"
+        title={null}
+        overlayProps={{ backgroundOpacity: 0.5, blur: 4 }}
+        withCloseButton={false}
+      >
+        <Stack gap="lg" align="center" ta="center">
+          <Box style={{ fontSize: '2.5rem' }}>🏠</Box>
+          <Stack gap={4}>
+            <Title order={3} style={{ color: '#111' }}>Save this listing</Title>
+            <Text size="sm" c="dimmed">
+              Create a free account to like listings, see your matches, and get unlimited access.
+            </Text>
+          </Stack>
+          <Stack gap="sm" style={{ width: '100%' }}>
+            <Button
+              color="teal"
+              size="md"
+              fullWidth
+              onClick={() => {
+                void logGuestEvent({ event_type: 'signup_prompt_clicked', listing_id: pendingGuestLike?.listing_id ?? null });
+                router.push('/signup');
+              }}
+            >
+              Create free account
+            </Button>
+            <Button
+              variant="subtle"
+              color="gray"
+              size="sm"
+              fullWidth
+              onClick={() => {
+                setShowGuestSignupModal(false);
+                setCurrentIndex(prev => prev + 1);
+                void logGuestEvent({ event_type: 'signup_prompt_dismissed', listing_id: pendingGuestLike?.listing_id ?? null });
+                setPendingGuestLike(null);
+              }}
+            >
+              Continue browsing as guest
+            </Button>
+          </Stack>
+          <Text size="xs" c="dimmed">
+            Already have an account?{' '}
+            <span
+              style={{ color: '#0ca678', cursor: 'pointer', fontWeight: 600 }}
+              onClick={() => router.push('/login')}
+            >
+              Sign in
+            </span>
+          </Text>
+        </Stack>
+      </Modal>
 
     </Box>
   );
