@@ -22,6 +22,7 @@ import { IconAlertCircle, IconCheck, IconMinus, IconPlus, IconX } from '@tabler/
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
 import { parseApiErrorResponse } from '../../../lib/errorHandling';
+import { GENDER_IDENTITY_OPTIONS, normalizeGenderIdentity } from '../../../lib/genderIdentity';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
@@ -38,6 +39,7 @@ const PREFERENCE_PAYLOAD_KEYS = [
   'move_in_date',
   'target_lease_type',
   'target_lease_duration_months',
+  'lifestyle_preferences',
 ];
 
 function pickPreferenceFields(source) {
@@ -212,6 +214,7 @@ export function PreferencesForm() {
   const [priceSliderActive, setPriceSliderActive] = useState(false);
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [allowLargerLayouts, setAllowLargerLayouts] = useState(false);
+  const [genderIdentity, setGenderIdentity] = useState(null);
 
   const [prefs, setPrefs] = useState({
     target_country: 'US',
@@ -248,6 +251,7 @@ export function PreferencesForm() {
       setCityOptions((prev) => withSelectedOption(prev, shadowPrefs.target_city));
     }
     setAllowLargerLayouts(Boolean(shadowPrefs?.lifestyle_preferences?.allow_larger_layouts));
+    setGenderIdentity(normalizeGenderIdentity(shadowPrefs?.lifestyle_preferences?.gender_identity));
     appliedShadowRef.current = true;
   }, [userId]);
 
@@ -308,6 +312,7 @@ export function PreferencesForm() {
       lifestyle_preferences: savedPrefs.lifestyle_preferences || null,
     });
     setAllowLargerLayouts(Boolean(savedPrefs?.lifestyle_preferences?.allow_larger_layouts));
+    setGenderIdentity(normalizeGenderIdentity(savedPrefs?.lifestyle_preferences?.gender_identity));
 
     if (savedPrefs.budget_min != null || savedPrefs.budget_max != null) {
       setPriceRange([savedPrefs.budget_min ?? 0, savedPrefs.budget_max ?? 5000]);
@@ -455,6 +460,22 @@ export function PreferencesForm() {
     setSuccess(false);
 
     try {
+      const normalizedGenderIdentity = normalizeGenderIdentity(genderIdentity);
+      if (prefs.gender_policy === 'same_gender_only' && !normalizedGenderIdentity) {
+        setError('Please select your gender when using the "Same gender only" policy.');
+        return;
+      }
+
+      const lifestylePayload = {
+        ...(prefs.lifestyle_preferences || {}),
+        allow_larger_layouts: allowLargerLayouts,
+      };
+      if (normalizedGenderIdentity) {
+        lifestylePayload.gender_identity = normalizedGenderIdentity;
+      } else {
+        delete lifestylePayload.gender_identity;
+      }
+
       const normalizedPrefs = pickPreferenceFields(prefs);
       const payload = {
         ...normalizedPrefs,
@@ -464,10 +485,7 @@ export function PreferencesForm() {
         target_deposit_amount: normalizeNumericInput(prefs.target_deposit_amount),
         target_lease_duration_months: normalizeIntInput(prefs.target_lease_duration_months),
         target_lease_type: prefs.target_lease_type || 'any',
-        lifestyle_preferences: {
-          ...(prefs.lifestyle_preferences || {}),
-          allow_larger_layouts: allowLargerLayouts,
-        },
+        lifestyle_preferences: lifestylePayload,
         move_in_date: prefs.move_in_date instanceof Date
           ? prefs.move_in_date.toISOString().split('T')[0]
           : prefs.move_in_date,
@@ -516,6 +534,7 @@ export function PreferencesForm() {
       if (persistedPrefs.target_city) {
         setCityOptions((prev) => withSelectedOption(prev, persistedPrefs.target_city));
       }
+      setGenderIdentity(normalizeGenderIdentity(persistedPrefs?.lifestyle_preferences?.gender_identity));
 
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -832,6 +851,17 @@ export function PreferencesForm() {
           onChange={(date) => updatePref('move_in_date', date ? date.toISOString().split('T')[0] : null)}
           minDate={new Date()}
           clearable
+        />
+
+        <Select
+          label="Your gender"
+          description="Used to enforce same-gender matching when selected below."
+          placeholder="Select your gender"
+          data={GENDER_IDENTITY_OPTIONS}
+          value={genderIdentity}
+          onChange={setGenderIdentity}
+          clearable
+          withAsterisk={prefs.gender_policy === 'same_gender_only'}
         />
 
         <Select

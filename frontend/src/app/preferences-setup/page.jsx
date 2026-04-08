@@ -30,6 +30,7 @@ import {
   IconChevronUp,
 } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
+import { GENDER_IDENTITY_OPTIONS, normalizeGenderIdentity } from '../../../lib/genderIdentity';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
@@ -140,6 +141,7 @@ export default function PreferencesSetupPage() {
   const [depositAmount, setDepositAmount] = useState(null);
   const [furnishedPref, setFurnishedPref] = useState('no_preference');
   const [genderPolicy, setGenderPolicy] = useState('mixed_ok');
+  const [genderIdentity, setGenderIdentity] = useState(null);
 
   const [saving, setSaving] = useState(false);
 
@@ -221,6 +223,16 @@ export default function PreferencesSetupPage() {
   }, [targetCity]);
 
   const handleSave = useCallback(async () => {
+    const normalizedGenderIdentity = normalizeGenderIdentity(genderIdentity);
+    if (!normalizedGenderIdentity) {
+      notifications.show({
+        title: 'Tell us your gender',
+        message: 'Please select your gender so we can apply gender policy matching correctly.',
+        color: 'red',
+      });
+      return;
+    }
+
     if (!targetCountry || !targetState || !targetCity) {
       setLocationError('Please select a country, state/province, and city to continue.');
       return;
@@ -253,7 +265,10 @@ export default function PreferencesSetupPage() {
 
       if (bedrooms !== null) body.required_bedrooms = bedrooms;
       if (bathrooms !== null) body.target_bathrooms = bathrooms;
-      body.lifestyle_preferences = { allow_larger_layouts: allowLargerLayouts };
+      body.lifestyle_preferences = {
+        allow_larger_layouts: allowLargerLayouts,
+        gender_identity: normalizedGenderIdentity,
+      };
 
       if (moveInDate) body.move_in_date = moveInDate instanceof Date ? moveInDate.toISOString().split('T')[0] : moveInDate;
       if (leaseType) body.target_lease_type = leaseType;
@@ -290,7 +305,7 @@ export default function PreferencesSetupPage() {
     } finally {
       setSaving(false);
     }
-  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, allowLargerLayouts, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, getValidToken, router]);
+  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, allowLargerLayouts, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, genderIdentity, getValidToken, router]);
 
   const maxBinCount = histogram.bins.length > 0
     ? Math.max(...histogram.bins.map((b) => b.count))
@@ -471,6 +486,16 @@ export default function PreferencesSetupPage() {
               description="Off = exact bed/bath match. On = show listings with more beds/baths than selected."
               checked={allowLargerLayouts}
               onChange={(event) => setAllowLargerLayouts(event.currentTarget.checked)}
+            />
+
+            <Select
+              label="Your gender"
+              placeholder="Select your gender"
+              description="Used for roommate compatibility when gender preferences apply."
+              data={GENDER_IDENTITY_OPTIONS}
+              value={genderIdentity}
+              onChange={setGenderIdentity}
+              required
             />
           </Stack>
 
