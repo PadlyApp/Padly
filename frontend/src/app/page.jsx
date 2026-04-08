@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { Box, Container, Grid, Stack, Group, Title, Text, Badge, Button, Card, ActionIcon } from '@mantine/core';
-import { IconHeart, IconX, IconUsers, IconShieldCheck, IconSparkles, IconUser, IconSettings } from '@tabler/icons-react';
+import { IconHeart, IconX, IconUsers, IconShieldCheck, IconSparkles, IconUser, IconSettings, IconArrowRight } from '@tabler/icons-react';
 import Link from 'next/link';
 import { Navigation } from './components/Navigation';
 import { useAuth } from './contexts/AuthContext';
@@ -248,14 +248,32 @@ export default function Home() {
                       </Button>
                     </Group>
                   ) : (
-                    <Group gap="md">
-                      <Button size="lg" color="teal" component={Link} href="/signup">
+                    <Stack gap="sm" style={{ maxWidth: 360 }}>
+                      <Button size="lg" color="teal" component={Link} href="/signup" fullWidth>
                         Find Your Place
                       </Button>
-                      <Button size="lg" variant="outline" color="teal" component={Link} href="/preferences-setup">
-                        Browse Listings
-                      </Button>
-                    </Group>
+                      <Box>
+                        <Button
+                          size="lg"
+                          component={Link}
+                          href="/preferences-setup"
+                          fullWidth
+                          rightSection={<IconArrowRight size={18} />}
+                          style={{
+                            background: 'linear-gradient(135deg, #0ca678 0%, #20c997 100%)',
+                            color: '#fff',
+                            border: '2px solid rgba(255,255,255,0.25)',
+                            boxShadow: '0 0 0 0 rgba(32,201,151,0.5)',
+                            animation: 'pulse-teal 2.2s ease-in-out infinite',
+                          }}
+                        >
+                          Browse Listings
+                        </Button>
+                        <Text size="xs" ta="center" c="dimmed" mt={6}>
+                          No account needed — start browsing instantly
+                        </Text>
+                      </Box>
+                    </Stack>
                   )
                 )}
 
