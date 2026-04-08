@@ -179,24 +179,28 @@ function DiscoverContent() {
   // ── guest mode ─────────────────────────────────────────────────────────────
   const isGuest = !authLoading && !isAuthenticated;
 
-  // Guest preferences from sessionStorage (stable on mount, guests set these via /preferences-setup)
-  const guestPrefs = useMemo(() => {
+  // Guest preferences from sessionStorage — read once on mount, never changes
+  const [guestPrefs] = useState(() => {
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(sessionStorage.getItem('guest_preferences') || '{}'); } catch { return {}; }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  });
   const guestCity = guestPrefs?.target_city ?? null;
 
-  // Stable guest session ID (created once per sessionStorage lifetime)
-  const guestSessionId = useMemo(() => {
-    if (typeof window === 'undefined') return null;
+  // Stable guest session ID — follows the same ref-init pattern used for
+  // recommendationClientSessionIdRef elsewhere in this file
+  const guestSessionIdRef = useRef(null);
+  if (!guestSessionIdRef.current && typeof window !== 'undefined') {
     try {
-      const existing = sessionStorage.getItem('padly_guest_session_id');
-      if (existing) return existing;
-      const newId = crypto.randomUUID?.() ?? `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      sessionStorage.setItem('padly_guest_session_id', newId);
-      return newId;
-    } catch { return null; }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      const _existing = sessionStorage.getItem('padly_guest_session_id');
+      if (_existing) {
+        guestSessionIdRef.current = _existing;
+      } else {
+        const _newId = crypto.randomUUID?.() ?? `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        sessionStorage.setItem('padly_guest_session_id', _newId);
+        guestSessionIdRef.current = _newId;
+      }
+    } catch { /* best-effort */ }
+  }
 
   const guestSwipeCountRef = useRef(0);
   const guestNudgeShownRef = useRef(false);
@@ -959,14 +963,14 @@ function DiscoverContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          guest_session_id: guestSessionId,
+          guest_session_id: guestSessionIdRef.current ?? 'unknown',
           guest_prefs_snapshot: localPrefs,
           device_context: collectDeviceContext(),
           ...eventData,
         }),
       }).catch(() => {});
     } catch { /* best-effort */ }
-  }, [isGuest, guestSessionId]);
+  }, [isGuest]);
 
   // Stable handleSwipe: reads currentIndex/listings from refs so the callback
   // identity doesn't change on every swipe (prevents SwipeCard re-renders).
