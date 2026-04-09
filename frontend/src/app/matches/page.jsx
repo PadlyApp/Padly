@@ -333,7 +333,11 @@ function MatchesPageContent() {
     retry: false,
   });
 
-  useEffect(() => {
+  // Reset session state synchronously when the preference location changes so
+  // the feedData sync below (also useLayoutEffect) can re-apply cache in the
+  // same commit phase — preventing the old useEffect from wiping listings
+  // after the layout effect had already restored them from the RQ cache.
+  useLayoutEffect(() => {
     prevFeedDataRef.current = null;
     setListings([]);
     setMissingCorePreferences(false);
