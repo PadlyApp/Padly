@@ -272,7 +272,7 @@ class GroupWithMembers(BaseModel):
 
 @router.get("", response_model=dict)
 async def list_groups(
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     status: Optional[str] = Query(None, description="Filter by status (active, inactive, matched)"),
     city: Optional[str] = Query(None, description="Filter by target city"),
     my_groups: bool = Query(False, description="Only show groups I'm a member of"),
@@ -557,7 +557,7 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
 @router.get("/{group_id}", response_model=dict)
 async def get_group(
     group_id: str,
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     include_members: bool = Query(True, description="Include member details")
 ):
     """
@@ -596,7 +596,6 @@ async def get_group(
                 'is_creator': member.get('is_creator', False),
                 'status': member.get('status', 'unknown'),
                 'joined_at': member.get('joined_at'),
-                'user_email': user_data.get('email'),
                 'user_name': user_data.get('full_name')
             })
         
@@ -857,7 +856,7 @@ async def delete_group(
 @router.get("/{group_id}/members", response_model=dict)
 async def get_group_members(
     group_id: str,
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     status_filter: Optional[str] = Query(None, description="Filter by member status")
 ):
     """
@@ -897,7 +896,6 @@ async def get_group_members(
             'is_creator': member.get('is_creator', False),
             'status': member.get('status', 'unknown'),
             'joined_at': member.get('joined_at'),
-            'user_email': user_data.get('email'),
             'user_name': user_data.get('full_name'),
             'user_picture': user_data.get('profile_picture_url')
         })

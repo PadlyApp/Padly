@@ -20,8 +20,12 @@ from fastapi import Header, HTTPException, Request
 GUEST_LIMIT = 10          # max requests per window
 GUEST_WINDOW_SECONDS = 60 # sliding window size
 
+AUTH_LIMIT = 30           # authenticated users get a higher but still bounded limit
+AUTH_WINDOW_SECONDS = 60
+
 # ip -> deque of monotonic timestamps within the current window
 _request_log: dict[str, deque] = defaultdict(deque)
+_auth_request_log: dict[str, deque] = defaultdict(deque)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -57,7 +61,7 @@ async def guest_rate_limit(
             _: None = Depends(guest_rate_limit),
         ):
     """
-    # Authenticated users bypass rate limiting entirely
+    # Authenticated users bypass guest rate limiting entirely
     if authorization and authorization.startswith("Bearer "):
         return
 
@@ -79,6 +83,39 @@ async def guest_rate_limit(
                 f"requests per minute. Sign up for unlimited access."
             ),
             headers={"Retry-After": str(GUEST_WINDOW_SECONDS)},
+        )
+
+    log.append(now)
+
+
+async def recommendations_rate_limit(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+) -> None:
+    """
+    Rate limit for the recommendations endpoint — applies to ALL callers.
+
+    Guests: 10 req/min (same as guest_rate_limit).
+    Authenticated: 30 req/min — prevents a single JWT from hammering the
+    expensive DB scan + ML scoring pipeline indefinitely.
+    """
+    ip = _get_client_ip(request)
+    now = time.monotonic()
+
+    is_auth = bool(authorization and authorization.startswith("Bearer "))
+    limit = AUTH_LIMIT if is_auth else GUEST_LIMIT
+    window = AUTH_WINDOW_SECONDS if is_auth else GUEST_WINDOW_SECONDS
+    log = _auth_request_log[ip] if is_auth else _request_log[ip]
+    window_start = now - window
+
+    while log and log[0] < window_start:
+        log.popleft()
+
+    if len(log) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many requests. Recommendations are limited to {limit} per minute.",
+            headers={"Retry-After": str(window)},
         )
 
     log.append(now)
