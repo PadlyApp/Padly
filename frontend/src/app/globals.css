@@ -6,6 +6,11 @@
   box-sizing: border-box;
 }
 
+@keyframes pulse-teal {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(32, 201, 151, 0.45); }
+  50%       { box-shadow: 0 0 0 8px rgba(32, 201, 151, 0); }
+}
+
 * {
   margin: 0;
   padding: 0;

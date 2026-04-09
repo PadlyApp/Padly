@@ -19,11 +19,13 @@ router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
     dependencies=[Depends(require_admin_key)],
+    include_in_schema=False,
 )
 
 authenticated_router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
+    include_in_schema=False,
 )
 
 

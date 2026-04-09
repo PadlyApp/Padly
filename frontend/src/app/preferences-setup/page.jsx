@@ -30,6 +30,7 @@ import {
   IconChevronUp,
 } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
+import { GENDER_IDENTITY_OPTIONS, normalizeGenderIdentity } from '../../../lib/genderIdentity';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
@@ -103,11 +104,24 @@ export default function PreferencesSetupPage() {
   const { authState, isLoading: authLoading, getValidToken } = useAuth();
   const router = useRouter();
 
+  // Guests are allowed on this page — no redirect.
+  const isGuest = !authLoading && !authState?.accessToken;
+
+  // Pre-populate from guest_preferences saved during a prior guest session.
   useEffect(() => {
-    if (!authLoading && !authState?.accessToken) {
-      router.push('/login');
-    }
-  }, [authLoading, authState, router]);
+    if (authLoading) return;
+    try {
+      const raw = sessionStorage.getItem('guest_preferences');
+      if (!raw) return;
+      const gp = JSON.parse(raw);
+      if (gp.target_country) setTargetCountry(gp.target_country);
+      if (gp.target_state_province) setTargetState(gp.target_state_province);
+      if (gp.target_city) setTargetCity(gp.target_city);
+      if (gp.budget_min != null && gp.budget_max != null) setPriceRange([gp.budget_min, gp.budget_max]);
+      if (gp.required_bedrooms != null) setBedrooms(gp.required_bedrooms);
+      if (gp.target_bathrooms != null) setBathrooms(gp.target_bathrooms);
+    } catch { /* best-effort */ }
+  }, [authLoading]);
 
   // Location state
   const [countryOptions, setCountryOptions] = useState([]);
@@ -140,6 +154,7 @@ export default function PreferencesSetupPage() {
   const [depositAmount, setDepositAmount] = useState(null);
   const [furnishedPref, setFurnishedPref] = useState('no_preference');
   const [genderPolicy, setGenderPolicy] = useState('mixed_ok');
+  const [genderIdentity, setGenderIdentity] = useState(null);
 
   const [saving, setSaving] = useState(false);
 
@@ -221,12 +236,38 @@ export default function PreferencesSetupPage() {
   }, [targetCity]);
 
   const handleSave = useCallback(async () => {
+    const normalizedGenderIdentity = normalizeGenderIdentity(genderIdentity);
+    if (!normalizedGenderIdentity) {
+      notifications.show({
+        title: 'Tell us your gender',
+        message: 'Please select your gender so we can apply gender policy matching correctly.',
+        color: 'red',
+      });
+      return;
+    }
+
     if (!targetCountry || !targetState || !targetCity) {
       setLocationError('Please select a country, state/province, and city to continue.');
       return;
     }
     setLocationError(null);
     setSaving(true);
+
+    // Guest mode: save to sessionStorage and head to /discover
+    if (isGuest) {
+      const guestPrefs = {
+        target_country: targetCountry,
+        target_state_province: targetState,
+        target_city: targetCity,
+        ...(priceSliderActive ? { budget_min: priceRange[0], budget_max: priceRange[1] } : {}),
+        ...(bedrooms !== null ? { required_bedrooms: bedrooms } : {}),
+        ...(bathrooms !== null ? { target_bathrooms: bathrooms } : {}),
+      };
+      sessionStorage.setItem('guest_preferences', JSON.stringify(guestPrefs));
+      router.push('/discover');
+      setSaving(false);
+      return;
+    }
 
     try {
       const token = await getValidToken();
@@ -253,7 +294,10 @@ export default function PreferencesSetupPage() {
 
       if (bedrooms !== null) body.required_bedrooms = bedrooms;
       if (bathrooms !== null) body.target_bathrooms = bathrooms;
-      body.lifestyle_preferences = { allow_larger_layouts: allowLargerLayouts };
+      body.lifestyle_preferences = {
+        allow_larger_layouts: allowLargerLayouts,
+        gender_identity: normalizedGenderIdentity,
+      };
 
       if (moveInDate) body.move_in_date = moveInDate instanceof Date ? moveInDate.toISOString().split('T')[0] : moveInDate;
       if (leaseType) body.target_lease_type = leaseType;
@@ -290,7 +334,7 @@ export default function PreferencesSetupPage() {
     } finally {
       setSaving(false);
     }
-  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, allowLargerLayouts, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, getValidToken, router]);
+  }, [targetCountry, targetState, targetCity, priceSliderActive, priceRange, bedrooms, bathrooms, allowLargerLayouts, moveInDate, leaseType, leaseDuration, depositAmount, furnishedPref, genderPolicy, genderIdentity, getValidToken, router, isGuest]);
 
   const maxBinCount = histogram.bins.length > 0
     ? Math.max(...histogram.bins.map((b) => b.count))
@@ -335,6 +379,14 @@ export default function PreferencesSetupPage() {
               Help us find listings that match what you're looking for. You can update these anytime.
             </Text>
           </Stack>
+
+          {isGuest && (
+            <Alert color="teal" variant="light" radius="md" icon={<IconHome size={16} />}>
+              You're browsing as a guest. Your preferences will be saved for this session only.{' '}
+              <a href="/signup" style={{ color: '#0ca678', fontWeight: 600 }}>Create a free account</a>{' '}
+              to save them permanently.
+            </Alert>
+          )}
 
           {/* ── Section 1: Location ── */}
           <Stack gap="md">
@@ -472,6 +524,16 @@ export default function PreferencesSetupPage() {
               checked={allowLargerLayouts}
               onChange={(event) => setAllowLargerLayouts(event.currentTarget.checked)}
             />
+
+            <Select
+              label="Your gender"
+              placeholder="Select your gender"
+              description="Used for roommate compatibility when gender preferences apply."
+              data={GENDER_IDENTITY_OPTIONS}
+              value={genderIdentity}
+              onChange={setGenderIdentity}
+              required
+            />
           </Stack>
 
           <Divider />
@@ -561,8 +623,13 @@ export default function PreferencesSetupPage() {
           {/* ── Actions ── */}
           <Stack gap="sm" mt="md">
             <Button size="lg" color="teal" radius="md" fullWidth loading={saving} onClick={handleSave}>
-              Continue to Discover
+              {isGuest ? 'Browse Listings' : 'Continue to Discover'}
             </Button>
+            {isGuest && (
+              <Button size="sm" variant="subtle" color="gray" radius="md" fullWidth component="a" href="/signup">
+                Or create a free account to save your preferences
+              </Button>
+            )}
           </Stack>
         </Stack>
       </Box>

@@ -19,6 +19,7 @@ from app.routes import (
     matches_router,
     recommendations_router,
     interactions_router,
+    guest_interactions_router,
     options_router,
     roommate_intros_router,
 )
@@ -29,8 +30,9 @@ app = FastAPI(
     title="Padly API",
     version="1.0.0",
     description="Backend API for Padly - Housing and Roommate Matching Platform",
-    docs_url="/docs" if settings.is_dev else None,
-    redoc_url="/redoc" if settings.is_dev else None,
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
 # Configure CORS (Starlette returns 400 on failed preflight — usually wrong Origin)
@@ -72,6 +74,7 @@ app.include_router(admin_router)
 app.include_router(authenticated_admin_router)
 app.include_router(recommendations_router)
 app.include_router(interactions_router)
+app.include_router(guest_interactions_router)
 app.include_router(options_router)
 app.include_router(roommate_intros_router)
 
@@ -83,7 +86,6 @@ async def root():
     return {
         "message": "Welcome to Padly API",
         "version": "1.0.0",
-        "docs": "/docs",
         "health": "/health"
     }
 

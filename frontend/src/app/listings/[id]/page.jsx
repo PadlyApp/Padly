@@ -12,7 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { api } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
-import { formatAmenityLabel } from '../../../../lib/formatters';
+import { formatAmenityLabel, getActiveAmenityKeys } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
 import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 import { notifications } from '@mantine/notifications';
@@ -481,14 +481,14 @@ export default function ListingDetailPage() {
                 </Stack>
               </Stack>
 
-              {listing.amenities && Object.values(listing.amenities).some(Boolean) && (
+              {getActiveAmenityKeys(listing.amenities).length > 0 && (
                 <Stack gap="xs">
                   <Title order={3} size="h4" style={{ color: '#111' }}>
                     Amenities
                   </Title>
                   <Group gap="sm">
-                    {Object.entries(listing.amenities).map(([key, value]) =>
-                      value ? (
+                    {getActiveAmenityKeys(listing.amenities).map((key) =>
+                      key ? (
                         <Badge key={key} size="md" variant="outline" color="gray">
                           {formatAmenityLabel(key)}
                         </Badge>

@@ -85,8 +85,12 @@ async def get_states(
         for row in rows:
             if normalize_country(row.get("country", "")) != target_country:
                 continue
-            code = (row.get("state_province") or "").strip()
-            if not code or code.lower() in seen:
+            raw_code = (row.get("state_province") or "").strip()
+            if not raw_code:
+                continue
+            # Normalize to canonical code so "Ontario" and "ON" don't appear twice
+            code = _resolve_state_code(country_code, raw_code) or raw_code
+            if code.lower() in seen:
                 continue
             seen.add(code.lower())
             label = all_states.get(code, code)

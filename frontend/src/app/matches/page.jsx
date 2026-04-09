@@ -16,7 +16,7 @@ import { ImageWithFallback } from '../components/ImageWithFallback';
 import { useAuth } from '../contexts/AuthContext';
 import { usePageTracking } from '../hooks/usePageTracking';
 import { getLikedListings } from '../discover/likedListings';
-import { formatAmenityLabel } from '../../../lib/formatters';
+import { formatAmenityLabel, getActiveAmenityKeys } from '../../../lib/formatters';
 import {
   createAppError,
   hasCompleteCorePreferences,
@@ -795,9 +795,7 @@ function MatchesPageContent() {
                   .filter(Boolean)
                   .join(', ');
                 const locationText = cityState || location;
-                const amenityBadges = listing.amenities && typeof listing.amenities === 'object'
-                  ? Object.entries(listing.amenities).filter(([, v]) => v).slice(0, 2).map(([key]) => key)
-                  : [];
+                const amenityBadges = getActiveAmenityKeys(listing.amenities).slice(0, 2);
 
                 return (
                   <Grid.Col key={listing.listing_id} span={{ base: 12, sm: 6, lg: 4 }}>
