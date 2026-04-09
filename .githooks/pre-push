@@ -6,7 +6,7 @@ if [[ "${PADLY_SKIP_PREPUSH_CHECKS:-0}" == "1" ]]; then
   exit 0
 fi
 
-if ! exec 3<>/dev/tty 2>/dev/null; then
+if ! { exec 3<>/dev/tty; } 2>/dev/null; then
   exit 0
 fi
 
