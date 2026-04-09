@@ -28,6 +28,7 @@ import {
 } from '@tabler/icons-react';
 import { Navigation } from '../../components/Navigation';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 
 const DAY_OPTIONS = [
@@ -224,6 +225,21 @@ export default function AdminEvaluationPage() {
 function AdminEvaluationPageContent() {
   const { user, isLoading, getValidToken } = useAuth();
   const isAdmin = user?.profile?.role === 'admin';
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && !isAdmin) {
+      router.replace('/');
+    }
+  }, [isLoading, isAdmin, router]);
+
+  if (isLoading || !isAdmin) {
+    return (
+      <Center style={{ minHeight: '100vh' }}>
+        <Loader size="lg" />
+      </Center>
+    );
+  }
   const [days, setDays] = useState('30');
   const [surface, setSurface] = useState('matches');
   const [variant, setVariant] = useState('all');
