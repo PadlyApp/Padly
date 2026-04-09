@@ -229,7 +229,7 @@ function AdminEvaluationPageContent() {
 
   useEffect(() => {
     if (!isLoading && !isAdmin) {
-      router.replace('/');
+      router.replace('/access-denied');
     }
   }, [isLoading, isAdmin, router]);
 

@@ -8,6 +8,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/callback',
   // Guest browsing: unauthenticated users can reach these pages.
   // Rate limiting and result capping are enforced server-side.
+  '/access-denied',
   '/discover',
   '/preferences-setup',
 ]);
