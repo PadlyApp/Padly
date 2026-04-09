@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 from app.ai.recommender import score_listings
 from app.services.listing_payloads import hydrate_listing_image_collection
 from app.services.location_matching import filter_listings_for_location
-from app.dependencies.auth import get_user_token
-from app.dependencies.rate_limit import guest_rate_limit
+from app.dependencies.auth import require_user_token
+from app.dependencies.rate_limit import recommendations_rate_limit
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
 
@@ -126,14 +126,11 @@ class RecommendationsResponse(BaseModel):
 
 # ── endpoint ───────────────────────────────────────────────────────────────
 
-GUEST_MAX_RESULTS = 20  # guests see a meaningful sample before hitting a signup prompt
-
-
 @router.post("/recommendations", response_model=RecommendationsResponse)
 async def get_recommendations(
     preferences: UserPreferences,
-    _: None = Depends(guest_rate_limit),
-    token: Optional[str] = Depends(get_user_token),
+    _: None = Depends(recommendations_rate_limit),
+    token: str = Depends(require_user_token),
 ):
     """
     Get ranked listing recommendations for a user.
@@ -154,10 +151,6 @@ async def get_recommendations(
         "top_n": 20
     }
     """
-    is_guest = token is None
-    if is_guest:
-        preferences.top_n = min(preferences.top_n or GUEST_MAX_RESULTS, GUEST_MAX_RESULTS)
-
     try:
         from app.dependencies.supabase import get_admin_client
         supabase = get_admin_client()

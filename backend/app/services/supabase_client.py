@@ -139,7 +139,7 @@ class SupabaseHTTPClient:
                 self._client.table(table)
                 .update(data)
                 .eq(id_column, id_value)
-                .execute()
+                .execute(
             )
             rows = result.data or []
             return rows[0] if rows else {}

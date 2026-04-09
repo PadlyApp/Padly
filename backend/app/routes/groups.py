@@ -265,7 +265,7 @@ class GroupWithMembers(BaseModel):
 
 @router.get("", response_model=dict)
 async def list_groups(
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     status: Optional[str] = Query(None, description="Filter by status (active, inactive, matched)"),
     city: Optional[str] = Query(None, description="Filter by target city"),
     my_groups: bool = Query(False, description="Only show groups I'm a member of"),
@@ -303,7 +303,7 @@ async def list_groups(
     if my_groups and token:
         # Get current user from token
         auth_user = resolve_auth_user(supabase, token)
-        if user_response:
+        if auth_user:
             auth_user_id = auth_user.id
             
             # Look up the user in the users table by auth_id
@@ -538,7 +538,7 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
         # Calculate compatibility
         compatibility = calculate_user_group_compatibility(user_data, user_prefs, group)
         
-        requests.append({"user_id": user_id, "full_name": user_data.get("full_name"), "email": user_data.get("email"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "profile_picture_url": user_data.get("profile_picture_url"), "requested_at": str(member_data.get("joined_at")) if member_data.get("joined_at") else None, "user_preferences": {"budget_min": user_prefs.get("budget_min"), "budget_max": user_prefs.get("budget_max"), "target_city": user_prefs.get("target_city"), "move_in_date": str(user_prefs.get("move_in_date")) if user_prefs.get("move_in_date") else None, "lifestyle_preferences": user_prefs.get("lifestyle_preferences", {})}, "compatibility": compatibility})
+        requests.append({"user_id": user_id, "full_name": user_data.get("full_name"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "profile_picture_url": user_data.get("profile_picture_url"), "requested_at": str(member_data.get("joined_at")) if member_data.get("joined_at") else None, "user_preferences": {"budget_min": user_prefs.get("budget_min"), "budget_max": user_prefs.get("budget_max"), "target_city": user_prefs.get("target_city"), "move_in_date": str(user_prefs.get("move_in_date")) if user_prefs.get("move_in_date") else None, "lifestyle_preferences": user_prefs.get("lifestyle_preferences", {})}, "compatibility": compatibility})
     
     # Sort by compatibility score (highest first)
     requests.sort(key=lambda r: r["compatibility"]["score"], reverse=True)
@@ -550,7 +550,7 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
 @router.get("/{group_id}", response_model=dict)
 async def get_group(
     group_id: str,
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     include_members: bool = Query(True, description="Include member details")
 ):
     """
@@ -589,10 +589,9 @@ async def get_group(
                 'is_creator': member.get('is_creator', False),
                 'status': member.get('status', 'unknown'),
                 'joined_at': member.get('joined_at'),
-                'user_email': user_data.get('email'),
                 'user_name': user_data.get('full_name')
             })
-        
+
         group['members'] = members
         group['member_count'] = len([m for m in members if m.get('status') == 'accepted'])
     
@@ -850,7 +849,7 @@ async def delete_group(
 @router.get("/{group_id}/members", response_model=dict)
 async def get_group_members(
     group_id: str,
-    token: Optional[str] = Depends(get_user_token),
+    token: str = Depends(require_user_token),
     status_filter: Optional[str] = Query(None, description="Filter by member status")
 ):
     """
@@ -890,7 +889,6 @@ async def get_group_members(
             'is_creator': member.get('is_creator', False),
             'status': member.get('status', 'unknown'),
             'joined_at': member.get('joined_at'),
-            'user_email': user_data.get('email'),
             'user_name': user_data.get('full_name'),
             'user_picture': user_data.get('profile_picture_url')
         })
@@ -1392,7 +1390,6 @@ async def accept_join_request(
             "group_id": group_id,
             "user_id": user_id,
             "user_name": user_info.get('full_name'),
-            "user_email": user_info.get('email'),
             "status": "accepted"
         },
         "matching": matching_result
@@ -1473,7 +1470,6 @@ async def reject_join_request(
             "group_id": group_id,
             "user_id": user_id,
             "user_name": user_info.get('full_name'),
-            "user_email": user_info.get('email'),
             "status": "rejected"
         }
     }
@@ -2487,7 +2483,6 @@ async def get_compatible_users(
         # Add user to compatible list
         compatible_users.append({
             'id': user_id,
-            'email': user_data.get('email'),
             'full_name': user_data.get('full_name'),
             'profile_picture_url': user_data.get('profile_picture_url'),
             'company_name': user_data.get('company_name'),
