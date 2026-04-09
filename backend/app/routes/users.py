@@ -80,11 +80,18 @@ async def list_users(
         offset=offset,
         order="created_at.desc"
     )
-    
+
+    # Strip sensitive fields from public listing
+    SENSITIVE_FIELDS = {"email", "auth_id", "verified_email"}
+    sanitized = [
+        {k: v for k, v in user.items() if k not in SENSITIVE_FIELDS}
+        for user in users
+    ]
+
     return {
         "status": "success",
-        "count": len(users),
-        "data": users
+        "count": len(sanitized),
+        "data": sanitized
     }
 
 
@@ -97,18 +104,22 @@ async def get_user(
     Get a single user by ID. Requires authentication.
     """
     client = SupabaseHTTPClient(token=token)
-    
+
     user = await client.select_one(
         table="users",
         id_value=user_id
     )
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
+    # Strip sensitive fields
+    SENSITIVE_FIELDS = {"auth_id", "verified_email"}
+    sanitized = {k: v for k, v in user.items() if k not in SENSITIVE_FIELDS}
+
     return {
         "status": "success",
-        "data": user
+        "data": sanitized
     }
 
 
@@ -185,7 +196,10 @@ async def update_user(
     
     # Convert Pydantic model to dict, excluding None values
     data = user_data.model_dump(exclude_none=True)
-    
+
+    # Defense-in-depth: never allow self-service role changes
+    data.pop("role", None)
+
     if not data:
         raise HTTPException(status_code=400, detail="No data provided for update")
 

@@ -90,8 +90,6 @@ class UserUpdate(BaseModel):
     company_name: Optional[str] = None
     school_name: Optional[str] = None
     role_title: Optional[str] = None
-    role: Optional[UserRole] = None
-
     model_config = ConfigDict(extra='forbid')
 
 

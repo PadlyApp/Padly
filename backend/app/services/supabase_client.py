@@ -181,7 +181,14 @@ class SupabaseHTTPClient:
                 response = await client.patch(url, headers=self.headers, params=params, json=data)
                 response.raise_for_status()
                 result = response.json()
-                return result[0] if isinstance(result, list) and result else result
+                if isinstance(result, list) and not result:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No matching record found in {table} to update"
+                    )
+                return result[0] if isinstance(result, list) else result
+        except HTTPException:
+            raise
         except httpx.HTTPStatusError as e:
             raise HTTPException(
                 status_code=e.response.status_code,
@@ -214,7 +221,15 @@ class SupabaseHTTPClient:
             async with httpx.AsyncClient() as client:
                 response = await client.delete(url, headers=self.headers, params=params)
                 response.raise_for_status()
+                result = response.json()
+                if isinstance(result, list) and not result:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No matching record found in {table} to delete"
+                    )
                 return True
+        except HTTPException:
+            raise
         except httpx.HTTPStatusError as e:
             raise HTTPException(
                 status_code=e.response.status_code,
