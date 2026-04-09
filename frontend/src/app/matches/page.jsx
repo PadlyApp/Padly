@@ -3,6 +3,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const MATCHES_SCROLL_TRIGGER_PX = 900;
 const MATCHES_TOP_RETURN_PX = 120;
+// How long a cached recommendations result stays fresh in localStorage.
+// Matches the React Query staleTime so the two layers agree on freshness.
+const FEED_CACHE_TTL_MS = 5 * 60 * 1000;
+// Cooldown a user must wait before manually retrying after an error (seconds).
+const RETRY_COOLDOWN_SECONDS = 60;
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -98,6 +103,8 @@ function MatchesPageContent() {
   const [pendingFeedbackLabel, setPendingFeedbackLabel] = useState(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
+  // Countdown seconds remaining before the user can manually retry after an error.
+  const [retrySecondsLeft, setRetrySecondsLeft] = useState(0);
   // Tracks the last feedData object seen so we only sync on a genuine new result
   const prevFeedDataRef = useRef(null);
 
@@ -219,6 +226,24 @@ function MatchesPageContent() {
     const token = await getValidToken();
     if (!token) throw new Error('Not authenticated');
 
+    // Serve from localStorage when the cached result is still fresh.
+    // Key is scoped to the user + their current preference location so any
+    // location change automatically bypasses the cache.
+    const lsCacheKey = `padly_rec_${userId}_${preferenceLocationKey}`;
+    if (typeof window !== 'undefined' && preferenceLocationKey !== '||') {
+      try {
+        const raw = localStorage.getItem(lsCacheKey);
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (cached?.ts && Date.now() - cached.ts < FEED_CACHE_TTL_MS && cached.result) {
+            return cached.result;
+          }
+        }
+      } catch {
+        // localStorage unavailable or corrupt — continue with network fetch.
+      }
+    }
+
     let prefs = {};
     let hasCorePreferences = false;
     let behaviorSampleSize;
@@ -311,13 +336,27 @@ function MatchesPageContent() {
     }
 
     const data = await res.json();
-    return {
+    const result = {
       listings: data.recommendations || [],
       missingCorePreferences: false,
       targetState: prefs.target_state_province ?? null,
       rankingContext: deriveRankingContext(data),
     };
-  }, [deriveRankingContext, getValidToken, userId]);
+
+    // Persist to localStorage so hard reloads within the TTL skip the API.
+    if (typeof window !== 'undefined' && preferenceLocationKey !== '||') {
+      try {
+        localStorage.setItem(
+          `padly_rec_${userId}_${preferenceLocationKey}`,
+          JSON.stringify({ ts: Date.now(), result }),
+        );
+      } catch {
+        // Storage full or unavailable — safe to ignore.
+      }
+    }
+
+    return result;
+  }, [deriveRankingContext, getValidToken, preferenceLocationKey, userId]);
 
   const {
     data: feedData,
@@ -333,7 +372,11 @@ function MatchesPageContent() {
     retry: false,
   });
 
-  useEffect(() => {
+  // Reset session state synchronously when the preference location changes so
+  // the feedData sync below (also useLayoutEffect) can re-apply cache in the
+  // same commit phase — preventing the old useEffect from wiping listings
+  // after the layout effect had already restored them from the RQ cache.
+  useLayoutEffect(() => {
     prevFeedDataRef.current = null;
     setListings([]);
     setMissingCorePreferences(false);
@@ -375,6 +418,18 @@ function MatchesPageContent() {
 
   const loading = feedLoading && !feedData;
   const error = feedQueryError ? normalizeRecommendationsError(feedQueryError) : null;
+
+  // Decrement retry countdown once per second until it reaches zero.
+  useEffect(() => {
+    if (retrySecondsLeft <= 0) return;
+    const id = setTimeout(() => setRetrySecondsLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [retrySecondsLeft]);
+
+  const handleRetry = useCallback(() => {
+    setRetrySecondsLeft(RETRY_COOLDOWN_SECONDS);
+    refetchFeed();
+  }, [refetchFeed]);
 
   useEffect(() => {
     latestTokenRef.current = getValidToken;
@@ -659,8 +714,13 @@ function MatchesPageContent() {
         {!loading && error && (
           <Stack align="center" gap="lg" style={{ paddingTop: '6rem', paddingBottom: '6rem' }}>
             <Text size="md" c="red">{error}</Text>
-            <Button size="md" color="teal" onClick={refetchFeed}>
-              Retry
+            <Button
+              size="md"
+              color="teal"
+              onClick={handleRetry}
+              disabled={retrySecondsLeft > 0}
+            >
+              {retrySecondsLeft > 0 ? `Retry in ${retrySecondsLeft}s` : 'Retry'}
             </Button>
           </Stack>
         )}

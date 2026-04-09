@@ -20,8 +20,14 @@ from fastapi import Header, HTTPException, Request
 GUEST_LIMIT = 10          # max requests per window
 GUEST_WINDOW_SECONDS = 60 # sliding window size
 
-AUTH_LIMIT = 30           # authenticated users get a higher but still bounded limit
+AUTH_LIMIT = 30           # authenticated users — general endpoints
 AUTH_WINDOW_SECONDS = 60
+
+# Recommendations is an expensive DB scan + ML scoring pass; frontend caches
+# results in localStorage for 5 min so legitimate users rarely exceed 1 req/min.
+# Keeping this low prevents any single user from hammering the pipeline.
+RECOMMENDATIONS_AUTH_LIMIT = 5
+RECOMMENDATIONS_GUEST_LIMIT = 3
 
 # ip -> deque of monotonic timestamps within the current window
 _request_log: dict[str, deque] = defaultdict(deque)
@@ -95,15 +101,16 @@ async def recommendations_rate_limit(
     """
     Rate limit for the recommendations endpoint — applies to ALL callers.
 
-    Guests: 10 req/min (same as guest_rate_limit).
-    Authenticated: 30 req/min — prevents a single JWT from hammering the
-    expensive DB scan + ML scoring pipeline indefinitely.
+    Guests:        3 req/min — low because they have no persistent state.
+    Authenticated: 5 req/min — the frontend caches results in localStorage
+                   for 5 min, so legitimate users rarely exceed 1 req/min.
+                   The lower limit prevents pipeline abuse even with auth.
     """
     ip = _get_client_ip(request)
     now = time.monotonic()
 
     is_auth = bool(authorization and authorization.startswith("Bearer "))
-    limit = AUTH_LIMIT if is_auth else GUEST_LIMIT
+    limit = RECOMMENDATIONS_AUTH_LIMIT if is_auth else RECOMMENDATIONS_GUEST_LIMIT
     window = AUTH_WINDOW_SECONDS if is_auth else GUEST_WINDOW_SECONDS
     log = _auth_request_log[ip] if is_auth else _request_log[ip]
     window_start = now - window
@@ -114,7 +121,7 @@ async def recommendations_rate_limit(
     if len(log) >= limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Too many requests. Recommendations are limited to {limit} per minute.",
+            detail=f"Too many requests. Recommendations are limited to {limit} per minute. Please wait before refreshing.",
             headers={"Retry-After": str(window)},
         )
 

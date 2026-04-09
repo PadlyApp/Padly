@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, ActionIcon } from '@mantine/core';
 import { SkeletonListingDetail } from '../../components/Skeletons';
-import { IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { IconMapPin, IconChevronLeft, IconChevronRight, IconHeart, IconHeartFilled } from '@tabler/icons-react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
@@ -282,8 +282,13 @@ export default function ListingDetailPage() {
                   Try again
                 </Button>
               )}
-              <Button variant="light" color="teal" component={Link} href="/matches">
-                Back to Matches
+              <Button
+                variant="light"
+                color="teal"
+                component={Link}
+                href={recommendationSource === 'account' ? '/account?tab=interested' : '/matches'}
+              >
+                {recommendationSource === 'account' ? 'Back' : 'Back to Matches'}
               </Button>
             </Group>
           </Stack>
@@ -304,9 +309,12 @@ export default function ListingDetailPage() {
       <Navigation />
 
       <Container size="xl" style={{ padding: '4rem 2rem' }}>
-        <Link href="/matches" style={{ textDecoration: 'none' }}>
+        <Link
+          href={recommendationSource === 'account' ? '/account?tab=interested' : '/matches'}
+          style={{ textDecoration: 'none' }}
+        >
           <Button variant="subtle" color="gray" mb="xl">
-            ← Back to Recommendations
+            {recommendationSource === 'account' ? '← Back' : '← Back to Recommendations'}
           </Button>
         </Link>
 
@@ -503,12 +511,14 @@ export default function ListingDetailPage() {
                   fullWidth
                   size="lg"
                   radius="md"
-                  color="teal"
-                  variant={isInterested ? 'filled' : 'outline'}
+                  color={isInterested ? 'teal' : 'gray'}
+                  variant={isInterested ? 'filled' : 'default'}
                   loading={interestLoading}
+                  leftSection={isInterested ? <IconHeartFilled size={18} /> : <IconHeart size={18} />}
                   onClick={handleInterestedToggle}
+                  styles={isInterested ? undefined : { root: { borderColor: '#ced4da' } }}
                 >
-                  {isInterested ? 'Interested' : "I'm interested"}
+                  {isInterested ? 'Saved to interested' : "I'm interested"}
                 </Button>
               </Stack>
             </Stack>
