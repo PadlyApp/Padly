@@ -23,8 +23,8 @@ jobs:
     env:
       # CI-only placeholders so tests can import app.db without real secrets.
       SUPABASE_URL: https://example.supabase.co
-      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test
-      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.test
+      SUPABASE_ANON_KEY: ci-only-anon-placeholder-key
+      SUPABASE_SERVICE_KEY: ci-only.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiY2lfb25seSI6dHJ1ZX0.signature
       # Temporary quarantine: this test currently fails in-repo and should be re-enabled after fix.
       PYTEST_ADDOPTS: --ignore=tests/test_location_contract.py
     defaults:
@@ -51,6 +51,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
+        # Temporary soft-enforcement while existing lint debt is being cleaned up.
         continue-on-error: true
         run: ruff check app tests
 
@@ -58,9 +59,11 @@ jobs:
         run: pytest tests -v
 
       - name: Security scan (bandit)
+        # Temporary soft-enforcement to establish baseline findings before hard fail.
         continue-on-error: true
         run: bandit -r app -q
 
       - name: Dependency audit (pip-audit)
+        # Temporary soft-enforcement while known vulnerability backlog is addressed.
         continue-on-error: true
         run: pip-audit -r requirements.txt
