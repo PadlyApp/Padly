@@ -599,12 +599,11 @@ async def get_roommate_suggestions(
     out_limit = max(1, min(limit, MAX_RESULT_LIMIT))
     like_k = max(1, min(int(embedding_like_cap), MAX_EMBEDDING_LIKE_CAP))
 
-    _rec: Any = None
+    from app.services import ml_client as _mlc
+
     seeker_taste_vec: Optional[Any] = None
     if blend_embedding and mode_norm == SUGGESTION_MODE_ML:
-        from app.ai import recommender as _rec
-
-        seeker_taste_vec = _rec.mean_taste_item_embedding(
+        seeker_taste_vec = await _mlc.mean_taste_item_embedding(
             seeker_id, k=like_k, days=180, max_events=2000
         )
 
@@ -741,9 +740,9 @@ async def get_roommate_suggestions(
         )
         ls = lifestyle_similarity_user_user(seeker_prefs, row)
         emb_sim: Optional[float] = None
-        if blend_embedding and seeker_taste_vec is not None and _rec is not None:
-            cand_taste = _rec.mean_taste_item_embedding(cid, k=like_k, days=180, max_events=2000)
-            emb_sim = _rec.taste_similarity_from_mean_embeddings(seeker_taste_vec, cand_taste)
+        if blend_embedding and seeker_taste_vec is not None:
+            cand_taste = await _mlc.mean_taste_item_embedding(cid, k=like_k, days=180, max_events=2000)
+            emb_sim = _mlc.taste_similarity_from_mean_embeddings(seeker_taste_vec, cand_taste)
         ls_eff = blend_lifestyle_with_embedding(ls, emb_sim) if blend_embedding else ls
 
         if beh.get("cold_cold"):

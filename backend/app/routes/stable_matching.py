@@ -20,8 +20,8 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 import logging
-import os
 
+from app.config import settings
 from app.dependencies.supabase import get_admin_client
 from app.models import ListingResponse, RoommateGroupResponse
 from app.services.location_matching import cities_match, filter_listings_for_location
@@ -94,16 +94,8 @@ def _fetch_all_active_groups(supabase) -> List[Dict]:
     return groups
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _stable_writes_enabled() -> bool:
-    # Phase 3B default: stable matching is read-only legacy.
-    return _env_bool("PADLY_STABLE_GROUP_LISTING_WRITES_ENABLED", default=False)
+    return settings.padly_stable_group_listing_writes_enabled
 
 
 def _require_stable_writes_enabled() -> None:

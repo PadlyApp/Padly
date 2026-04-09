@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
-from app.ai.recommender import score_listings
+from app.services import ml_client
 from app.services.listing_payloads import hydrate_listing_image_collection
 from app.services.location_matching import filter_listings_for_location
 from app.dependencies.auth import require_user_token
@@ -199,7 +199,7 @@ async def get_recommendations(
         )
 
     try:
-        scored = score_listings(user, listings, top_n=len(listings))
+        scored = await ml_client.score_listings(user, listings, top_n=len(listings))
     except Exception as e:
         print(f"[recommendations] scoring error: {e}")
         raise HTTPException(status_code=500, detail="Recommendation scoring failed. Please try again.")

@@ -3,9 +3,10 @@ Authentication dependencies
 Handles JWT token extraction from request headers
 """
 
-import os
 from fastapi import Header, HTTPException
 from typing import Optional, Any
+
+from app.config import settings
 
 
 async def require_admin_key(
@@ -20,7 +21,7 @@ async def require_admin_key(
     Raises:
         HTTPException 401: if header is missing or incorrect
     """
-    expected = os.getenv("ADMIN_SECRET")
+    expected = settings.admin_secret
     if not expected:
         raise HTTPException(
             status_code=503,
