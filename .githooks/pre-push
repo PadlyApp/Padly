@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${PADLY_SKIP_PREPUSH_CHECKS:-0}" == "1" ]]; then
+  exit 0
+fi
+
+if [[ ! -e /dev/tty ]]; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+run_backend_tests() {
+  echo "→ Running backend tests..."
+  (
+    cd "$REPO_ROOT/backend"
+    SUPABASE_URL="${SUPABASE_URL:-https://example.supabase.co}" \
+    SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-ci-only-anon-placeholder-key}" \
+    SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.fake-signature-for-ci-only}" \
+    PYTEST_ADDOPTS="${PYTEST_ADDOPTS:---ignore=tests/test_location_contract.py}" \
+    python -m pytest tests -v
+  )
+}
+
+run_frontend_checks() {
+  echo "→ Running frontend checks (lint, typecheck, build)..."
+  (
+    cd "$REPO_ROOT/frontend"
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npm run lint
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npx tsc --noEmit
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npm run build
+  )
+}
+
+echo
+echo "Padly pre-push checks"
+echo "Run checks before push? [a]ll / [b]ackend / [f]rontend / [n]o"
+read -r -p "Choice (a/b/f/n): " choice < /dev/tty
+
+case "${choice,,}" in
+  a | all)
+    run_backend_tests
+    run_frontend_checks
+    ;;
+  b | backend)
+    run_backend_tests
+    ;;
+  f | frontend)
+    run_frontend_checks
+    ;;
+  n | no | "")
+    echo "Skipping local checks."
+    ;;
+  *)
+    echo "Invalid choice '$choice'. Push canceled."
+    exit 1
+    ;;
+esac
+
+echo "Pre-push checks complete. Continuing push..."
