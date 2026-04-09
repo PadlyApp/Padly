@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (API image — no TensorFlow).
+# TF lives only in the ml_service image; the API calls it over HTTP
+# via ML_SERVICE_URL.  When the env var is unset the in-process
+# fallback still works if tensorflow happens to be installed.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

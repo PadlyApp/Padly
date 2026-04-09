@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     cors_origins: str = ""
     admin_secret: str = ""
 
+    # ---- ML service ----
+    ml_service_url: str = ""
+
     # ---- Phase 3B serving controls ----
     padly_group_neural_ranking_enabled: bool = False
     padly_group_neural_kill_switch: bool = False

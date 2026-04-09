@@ -1,6 +1,7 @@
 // Updated auth service to communicate with FastAPI backend
 import {
   createAppError,
+  isNetworkError,
   normalizeAuthErrorMessage,
   parseApiErrorResponse,
 } from './errorHandling';
@@ -48,7 +49,7 @@ export class AuthService {
     } catch (error) {
       if (error?.name === 'AppError') throw error;
       throw createAppError(normalizeAuthErrorMessage(error, { flow: 'signup' }), {
-        isNetworkError: true,
+        isNetworkError: isNetworkError(error),
       });
     }
   }
@@ -79,7 +80,7 @@ export class AuthService {
     } catch (error) {
       if (error?.name === 'AppError') throw error;
       throw createAppError(normalizeAuthErrorMessage(error, { flow: 'signin' }), {
-        isNetworkError: true,
+        isNetworkError: isNetworkError(error),
       });
     }
   }

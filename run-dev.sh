@@ -77,6 +77,10 @@ BACKEND_PID=$!
 # Give backend a moment to start
 sleep 2
 
+# Next.js client code reads NEXT_PUBLIC_*; backend .env uses SUPABASE_* — bridge for local dev
+export NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-$SUPABASE_URL}"
+export NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-$SUPABASE_ANON_KEY}"
+
 # Start frontend in background
 echo -e "${BLUE}[FRONTEND]${NC} Starting Next.js dev server on http://localhost:3000..."
 cd "$PROJECT_ROOT/frontend"

@@ -1,0 +1,14 @@
+fastapi==0.118.0
+uvicorn==0.37.0
+pydantic==2.12.3
+numpy>=1.26.0
+tensorflow==2.20.0
+geonamescache==3.0.0
+python-dotenv==1.0.0
+pydantic-settings>=2.7.0
+supabase==2.21.1
+supabase-auth==2.22.0
+postgrest==2.22.0
+realtime==2.22.0
+storage3==2.22.0
+supabase-functions==2.22.0
