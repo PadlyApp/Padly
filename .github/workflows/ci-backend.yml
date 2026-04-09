@@ -57,7 +57,7 @@ jobs:
         run: ruff check app tests
 
       - name: Run tests
-        run: pytest tests -v
+        run: python -m pytest tests -v
 
       - name: Security scan (bandit)
         # Temporary soft-enforcement to establish baseline findings before hard fail.
