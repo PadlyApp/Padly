@@ -21,9 +21,11 @@ jobs:
   test-and-security:
     runs-on: ubuntu-latest
     env:
+      # CI-only placeholders so tests can import app.db without real secrets.
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test
       SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.test
+      # Temporary quarantine: this test currently fails in-repo and should be re-enabled after fix.
       PYTEST_ADDOPTS: --ignore=tests/test_location_contract.py
     defaults:
       run:
