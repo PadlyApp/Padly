@@ -58,3 +58,20 @@ Every interaction feeds back into the system. Swipe behavior refines recommendat
 - Interns relocating temporarily
 - New grads and early-career professionals moving to new cities
 - Anyone who needs both a home and compatible roommates
+
+## Optional Local Pre-Push Checks
+
+To prompt for local tests/check every time you run `git push`, enable the repository hook once:
+
+```bash
+cd <repo-root>
+./scripts/setup-git-hooks.sh
+```
+
+Then on push, choose:
+- `a` → backend tests + frontend lint/typecheck/build
+- `b` → backend tests only
+- `f` → frontend checks only
+- `n` → skip checks and continue push
+
+You can bypass hooks anytime with `git push --no-verify`.

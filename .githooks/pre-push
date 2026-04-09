@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${PADLY_SKIP_PREPUSH_CHECKS:-0}" == "1" ]]; then
+  exit 0
+fi
+
+if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+prepush_abort_hint() {
+  echo "  Fix the errors above, or bypass with: git push --no-verify"
+}
+
+run_backend_tests() {
+  echo "→ Backend: tests (pytest)..."
+  if ! (
+    cd "$REPO_ROOT/backend"
+    SUPABASE_URL="${SUPABASE_URL:-https://example.supabase.co}" \
+    SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-ci-only-anon-placeholder-key}" \
+    SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.fake-signature-for-ci-only}" \
+    PYTEST_ADDOPTS="${PYTEST_ADDOPTS:---ignore=tests/test_location_contract.py}" \
+    python -m pytest tests -v
+  ); then
+    echo ""
+    echo "✗ Backend tests failed — push aborted."
+    prepush_abort_hint
+    exit 1
+  fi
+  echo "  ✓ Backend tests passed"
+}
+
+run_frontend_checks() {
+  echo "→ Frontend: lint..."
+  if ! (
+    cd "$REPO_ROOT/frontend"
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npm run lint
+  ); then
+    echo ""
+    echo "✗ Frontend lint failed — push aborted."
+    prepush_abort_hint
+    exit 1
+  fi
+  echo "  ✓ Frontend lint passed"
+
+  echo "→ Frontend: typecheck..."
+  if ! (
+    cd "$REPO_ROOT/frontend"
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npx tsc --noEmit
+  ); then
+    echo ""
+    echo "✗ Frontend typecheck failed — push aborted."
+    prepush_abort_hint
+    exit 1
+  fi
+  echo "  ✓ Frontend typecheck passed"
+
+  echo "→ Frontend: build..."
+  if ! (
+    cd "$REPO_ROOT/frontend"
+    NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://example.supabase.co}" \
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-dummy-anon-key}" \
+    npm run build
+  ); then
+    echo ""
+    echo "✗ Frontend build failed — push aborted."
+    prepush_abort_hint
+    exit 1
+  fi
+  echo "  ✓ Frontend build passed"
+}
+
+echo
+echo "Padly pre-push checks"
+echo "Run checks before push? [a]ll / [b]ackend / [f]rontend / [n]o"
+if ! read -r -u 3 -p "Choice (a/b/f/n): " choice; then
+  echo "No interactive terminal detected. Skipping local checks."
+  exec 3>&-
+  exit 0
+fi
+
+# Bash 3.2 (macOS default) does not support ${var,,}; use tr for lowercase.
+choice_lc=$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')
+SKIP_PREPUSH=0
+case "$choice_lc" in
+  a | all)
+    run_backend_tests
+    run_frontend_checks
+    ;;
+  b | backend)
+    run_backend_tests
+    ;;
+  f | frontend)
+    run_frontend_checks
+    ;;
+  n | no | "")
+    echo "○ Skipping local checks."
+    SKIP_PREPUSH=1
+    ;;
+  *)
+    echo "Invalid choice '$choice'. Push canceled."
+    exit 1
+    ;;
+esac
+
+if [[ "$SKIP_PREPUSH" -eq 1 ]]; then
+  echo "→ Continuing push (no checks run)."
+else
+  echo ""
+  echo "✓ All pre-push checks passed — continuing push."
+fi
+exec 3>&-
