@@ -6,7 +6,7 @@ if [[ "${PADLY_SKIP_PREPUSH_CHECKS:-0}" == "1" ]]; then
   exit 0
 fi
 
-if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+if ! exec 3<>/dev/tty 2>/dev/null; then
   exit 0
 fi
 
@@ -43,8 +43,9 @@ run_frontend_checks() {
 echo
 echo "Padly pre-push checks"
 echo "Run checks before push? [a]ll / [b]ackend / [f]rontend / [n]o"
-if ! read -r -p "Choice (a/b/f/n): " choice < /dev/tty; then
+if ! read -r -u 3 -p "Choice (a/b/f/n): " choice; then
   echo "No interactive terminal detected. Skipping local checks."
+  exec 3>&-
   exit 0
 fi
 
@@ -69,3 +70,4 @@ case "${choice,,}" in
 esac
 
 echo "Pre-push checks complete. Continuing push..."
+exec 3>&-
