@@ -276,7 +276,7 @@ function InterestedListingCard({ listing, onRemove }) {
         <Group grow mt="sm">
           <Button
             component="a"
-            href={`/listings/${listing.id}`}
+            href={`/listings/${listing.id}?source=account`}
             color="teal"
             variant="light"
           >

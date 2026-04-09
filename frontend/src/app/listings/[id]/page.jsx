@@ -282,8 +282,13 @@ export default function ListingDetailPage() {
                   Try again
                 </Button>
               )}
-              <Button variant="light" color="teal" component={Link} href="/matches">
-                Back to Matches
+              <Button
+                variant="light"
+                color="teal"
+                component={Link}
+                href={recommendationSource === 'account' ? '/account?tab=interested' : '/matches'}
+              >
+                {recommendationSource === 'account' ? 'Back' : 'Back to Matches'}
               </Button>
             </Group>
           </Stack>
@@ -304,9 +309,12 @@ export default function ListingDetailPage() {
       <Navigation />
 
       <Container size="xl" style={{ padding: '4rem 2rem' }}>
-        <Link href="/matches" style={{ textDecoration: 'none' }}>
+        <Link
+          href={recommendationSource === 'account' ? '/account?tab=interested' : '/matches'}
+          style={{ textDecoration: 'none' }}
+        >
           <Button variant="subtle" color="gray" mb="xl">
-            ← Back to Recommendations
+            {recommendationSource === 'account' ? '← Back' : '← Back to Recommendations'}
           </Button>
         </Link>
 
