@@ -61,7 +61,7 @@ Every interaction feeds back into the system. Swipe behavior refines recommendat
 
 ## Optional Local Pre-Push Checks
 
-To prompt for local checks every time you run `git push`, enable the repository hook once:
+To prompt for local tests/check every time you run `git push`, enable the repository hook once:
 
 ```bash
 cd <repo-root>
