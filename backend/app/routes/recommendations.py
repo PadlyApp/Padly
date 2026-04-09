@@ -126,9 +126,6 @@ class RecommendationsResponse(BaseModel):
 
 # ── endpoint ───────────────────────────────────────────────────────────────
 
-GUEST_MAX_RESULTS = 20  # guests see a meaningful sample before hitting a signup prompt
-
-
 @router.post("/recommendations", response_model=RecommendationsResponse)
 async def get_recommendations(
     preferences: UserPreferences,
@@ -154,10 +151,6 @@ async def get_recommendations(
         "top_n": 20
     }
     """
-    is_guest = token is None
-    if is_guest:
-        preferences.top_n = min(preferences.top_n or GUEST_MAX_RESULTS, GUEST_MAX_RESULTS)
-
     try:
         from app.dependencies.supabase import get_admin_client
         supabase = get_admin_client()

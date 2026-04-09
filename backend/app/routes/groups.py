@@ -310,7 +310,7 @@ async def list_groups(
     if my_groups and token:
         # Get current user from token
         auth_user = resolve_auth_user(supabase, token)
-        if user_response:
+        if auth_user:
             auth_user_id = auth_user.id
             
             # Look up the user in the users table by auth_id
@@ -1397,7 +1397,6 @@ async def accept_join_request(
             "group_id": group_id,
             "user_id": user_id,
             "user_name": user_info.get('full_name'),
-            "user_email": user_info.get('email'),
             "status": "accepted"
         },
         "matching": matching_result
@@ -1478,7 +1477,6 @@ async def reject_join_request(
             "group_id": group_id,
             "user_id": user_id,
             "user_name": user_info.get('full_name'),
-            "user_email": user_info.get('email'),
             "status": "rejected"
         }
     }
@@ -2492,7 +2490,6 @@ async def get_compatible_users(
         # Add user to compatible list
         compatible_users.append({
             'id': user_id,
-            'email': user_data.get('email'),
             'full_name': user_data.get('full_name'),
             'profile_picture_url': user_data.get('profile_picture_url'),
             'company_name': user_data.get('company_name'),
