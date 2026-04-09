@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Container, Title, Text, Stack, Box, Button, Group, Badge, Grid, ActionIcon } from '@mantine/core';
 import { SkeletonListingDetail } from '../../components/Skeletons';
-import { IconMapPin, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { IconMapPin, IconChevronLeft, IconChevronRight, IconHeart, IconHeartFilled } from '@tabler/icons-react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigation } from '../../components/Navigation';
@@ -503,12 +503,14 @@ export default function ListingDetailPage() {
                   fullWidth
                   size="lg"
                   radius="md"
-                  color="teal"
-                  variant={isInterested ? 'filled' : 'outline'}
+                  color={isInterested ? 'teal' : 'gray'}
+                  variant={isInterested ? 'filled' : 'default'}
                   loading={interestLoading}
+                  leftSection={isInterested ? <IconHeartFilled size={18} /> : <IconHeart size={18} />}
                   onClick={handleInterestedToggle}
+                  styles={isInterested ? undefined : { root: { borderColor: '#ced4da' } }}
                 >
-                  {isInterested ? 'Interested' : "I'm interested"}
+                  {isInterested ? 'Saved to interested' : "I'm interested"}
                 </Button>
               </Stack>
             </Stack>
