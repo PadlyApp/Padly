@@ -24,6 +24,7 @@ jobs:
       # CI-only placeholders so tests can import app.db without real secrets.
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_ANON_KEY: ci-only-anon-placeholder-key
+      # Must stay JWT-shaped because app.db validates the decoded role claim at import time.
       SUPABASE_SERVICE_KEY: ci-only.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiY2lfb25seSI6dHJ1ZX0.signature
       # Temporary quarantine: this test currently fails in-repo and should be re-enabled after fix.
       PYTEST_ADDOPTS: --ignore=tests/test_location_contract.py
