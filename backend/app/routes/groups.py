@@ -545,7 +545,7 @@ async def get_pending_requests(group_id: str, token: str = Depends(require_user_
         # Calculate compatibility
         compatibility = calculate_user_group_compatibility(user_data, user_prefs, group)
         
-        requests.append({"user_id": user_id, "full_name": user_data.get("full_name"), "email": user_data.get("email"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "profile_picture_url": user_data.get("profile_picture_url"), "requested_at": str(member_data.get("joined_at")) if member_data.get("joined_at") else None, "user_preferences": {"budget_min": user_prefs.get("budget_min"), "budget_max": user_prefs.get("budget_max"), "target_city": user_prefs.get("target_city"), "move_in_date": str(user_prefs.get("move_in_date")) if user_prefs.get("move_in_date") else None, "lifestyle_preferences": user_prefs.get("lifestyle_preferences", {})}, "compatibility": compatibility})
+        requests.append({"user_id": user_id, "full_name": user_data.get("full_name"), "company_name": user_data.get("company_name"), "school_name": user_data.get("school_name"), "verification_status": user_data.get("verification_status"), "profile_picture_url": user_data.get("profile_picture_url"), "requested_at": str(member_data.get("joined_at")) if member_data.get("joined_at") else None, "user_preferences": {"budget_min": user_prefs.get("budget_min"), "budget_max": user_prefs.get("budget_max"), "target_city": user_prefs.get("target_city"), "move_in_date": str(user_prefs.get("move_in_date")) if user_prefs.get("move_in_date") else None, "lifestyle_preferences": user_prefs.get("lifestyle_preferences", {})}, "compatibility": compatibility})
     
     # Sort by compatibility score (highest first)
     requests.sort(key=lambda r: r["compatibility"]["score"], reverse=True)
@@ -598,7 +598,7 @@ async def get_group(
                 'joined_at': member.get('joined_at'),
                 'user_name': user_data.get('full_name')
             })
-        
+
         group['members'] = members
         group['member_count'] = len([m for m in members if m.get('status') == 'accepted'])
     
