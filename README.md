@@ -64,7 +64,7 @@ Every interaction feeds back into the system. Swipe behavior refines recommendat
 To prompt for local checks every time you run `git push`, enable the repository hook once:
 
 ```bash
-cd /home/runner/work/Padly/Padly
+cd <repo-root>
 ./scripts/setup-git-hooks.sh
 ```
 
