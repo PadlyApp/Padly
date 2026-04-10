@@ -26,8 +26,8 @@ AUTH_WINDOW_SECONDS = 60
 # Recommendations is an expensive DB scan + ML scoring pass; frontend caches
 # results in localStorage for 5 min so legitimate users rarely exceed 1 req/min.
 # Keeping this low prevents any single user from hammering the pipeline.
-RECOMMENDATIONS_AUTH_LIMIT = 10
-RECOMMENDATIONS_GUEST_LIMIT = 5
+RECOMMENDATIONS_AUTH_LIMIT = 20
+RECOMMENDATIONS_GUEST_LIMIT = 10
 
 # ip -> deque of monotonic timestamps within the current window
 _request_log: dict[str, deque] = defaultdict(deque)
@@ -121,7 +121,7 @@ async def recommendations_rate_limit(
     if len(log) >= limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Too many requests. Recommendations are limited to {limit} per minute. Please wait before refreshing.",
+            detail=f"Too many requests. Please wait before refreshing.",
             headers={"Retry-After": str(window)},
         )
 
