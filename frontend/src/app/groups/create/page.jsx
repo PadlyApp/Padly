@@ -1,6 +1,4 @@
-﻿'use client';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -27,6 +25,7 @@ import { IconArrowLeft, IconCheck } from '@tabler/icons-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
+import { apiFetch } from '../../../../lib/api';
 
 export default function CreateGroupPage() {
   const router = useRouter();
@@ -50,9 +49,7 @@ export default function CreateGroupPage() {
     const loadCities = async () => {
       try {
         const query = citySearch.trim();
-        const response = await fetch(
-          `${API_BASE}/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
-        );
+        const response = await apiFetch(`/options/cities-global?q=${encodeURIComponent(query)}&limit=200`);
         if (!response.ok) return;
         const result = await response.json();
         setCityOptions(result.data || []);
@@ -120,23 +117,24 @@ export default function CreateGroupPage() {
         return;
       }
 
-      const response = await fetch(`${API_BASE}/api/roommate-groups`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      const response = await apiFetch(
+        `/roommate-groups`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            group_name: groupName,
+            description: description || null,
+            target_city: targetCity,
+            budget_per_person_min: budgetMin,
+            budget_per_person_max: budgetMax,
+            target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
+            target_group_size: hasGroupSizeLimit ? groupSize : null,
+            status: 'active',
+          }),
         },
-        body: JSON.stringify({
-          group_name: groupName,
-          description: description || null,
-          target_city: targetCity,
-          budget_per_person_min: budgetMin,
-          budget_per_person_max: budgetMax,
-          target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
-          target_group_size: hasGroupSizeLimit ? groupSize : null,
-          status: 'active'
-        })
-      });
+        { token }
+      );
 
       const data = await response.json();
 

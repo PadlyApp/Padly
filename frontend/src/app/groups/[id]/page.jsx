@@ -1,7 +1,5 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { 
@@ -63,6 +61,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { Navigation } from '../../components/Navigation';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
+import { apiFetch } from '../../../../lib/api';
 
 export default function GroupDetailPage() {
   const router = useRouter();
@@ -100,11 +99,7 @@ export default function GroupDetailPage() {
     const fetchCurrentUser = async () => {
       if (!currentUser && authState?.accessToken) {
         try {
-          const response = await fetch(`${API_BASE}/api/auth/me`, {
-            headers: {
-              'Authorization': `Bearer ${authState.accessToken}`
-            }
-          });
+          const response = await apiFetch(`/auth/me`, {}, { token: authState.accessToken });
           const data = await response.json();
           if (response.ok && data.user) {
             // Merge auth info with profile data
@@ -135,12 +130,12 @@ export default function GroupDetailPage() {
     setLoading(true);
     try {
       const validToken = await getValidToken();
-      const headers = validToken ? { 'Authorization': `Bearer ${validToken}` } : {};
-      
+
       // Fetch group details with members
-      const groupResponse = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}?include_members=true`,
-        { headers }
+      const groupResponse = await apiFetch(
+        `/roommate-groups/${groupId}?include_members=true`,
+        {},
+        { token: validToken }
       );
       const groupData = await groupResponse.json();
 
@@ -152,9 +147,10 @@ export default function GroupDetailPage() {
       // Fetch group->listing feed (rule-based ranking).
       let listingsFeed = [];
       try {
-        const fallbackResponse = await fetch(
-          `${API_BASE}/api/roommate-groups/${groupId}/ranked-listings?limit=50`,
-          { headers }
+        const fallbackResponse = await apiFetch(
+          `/roommate-groups/${groupId}/ranked-listings?limit=50`,
+          {},
+          { token: validToken }
         );
         const fallbackData = await fallbackResponse.json();
         if (fallbackResponse.ok && fallbackData.status === 'success') {
@@ -181,9 +177,10 @@ export default function GroupDetailPage() {
     setLoadingLiked(true);
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/interactions/swipes/groups/${groupId}/liked?action=group_save`,
-        { headers: { Authorization: `Bearer ${validToken}` } }
+      const response = await apiFetch(
+        `/interactions/swipes/groups/${groupId}/liked?action=group_save`,
+        {},
+        { token: validToken }
       );
       const data = await response.json();
       if (response.ok && data.status === 'success') {
@@ -209,16 +206,14 @@ export default function GroupDetailPage() {
     setInviting(true);
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/invite`,
+      const response = await apiFetch(
+        `/roommate-groups/${groupId}/invite`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${validToken}`
-          },
-          body: JSON.stringify({ user_email: inviteEmail })
-        }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_email: inviteEmail }),
+        },
+        { token: validToken }
       );
 
       const data = await response.json();
@@ -255,12 +250,7 @@ export default function GroupDetailPage() {
       if (!validToken) {
         throw new Error('Please log in to view compatible users');
       }
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/compatible-users`,
-        {
-          headers: { 'Authorization': `Bearer ${validToken}` }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/compatible-users`, {}, { token: validToken });
       const data = await response.json();
 
       if (response.ok && data.status === 'success') {
@@ -284,16 +274,14 @@ export default function GroupDetailPage() {
     setInvitingUserId(userId);
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/invite`,
+      const response = await apiFetch(
+        `/roommate-groups/${groupId}/invite`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${validToken}`
-          },
-          body: JSON.stringify({ user_email: userEmail })
-        }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_email: userEmail }),
+        },
+        { token: validToken }
       );
 
       const data = await response.json();
@@ -338,12 +326,7 @@ export default function GroupDetailPage() {
       if (!validToken) {
         throw new Error('Please log in to view join requests');
       }
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/pending-requests`,
-        {
-          headers: { 'Authorization': `Bearer ${validToken}` }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/pending-requests`, {}, { token: validToken });
       const data = await response.json();
 
       if (response.ok && data.status === 'success') {
@@ -373,15 +356,7 @@ export default function GroupDetailPage() {
     setProcessingRequestId(userId);
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/accept-request/${userId}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${validToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/accept-request/${userId}`, { method: 'POST' }, { token: validToken });
 
       const data = await response.json();
 
@@ -413,15 +388,7 @@ export default function GroupDetailPage() {
     setProcessingRequestId(userId);
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/reject-request/${userId}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${validToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/reject-request/${userId}`, { method: 'POST' }, { token: validToken });
 
       const data = await response.json();
 
@@ -464,15 +431,7 @@ export default function GroupDetailPage() {
 
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/leave`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${validToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/leave`, { method: 'DELETE' }, { token: validToken });
 
       const data = await response.json();
 
@@ -501,15 +460,7 @@ export default function GroupDetailPage() {
 
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${validToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}`, { method: 'DELETE' }, { token: validToken });
 
       const data = await response.json();
 
@@ -538,15 +489,7 @@ export default function GroupDetailPage() {
 
     try {
       const validToken = await getValidToken();
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/members/${memberId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${validToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/members/${memberId}`, { method: 'DELETE' }, { token: validToken });
 
       const data = await response.json();
 

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Center, Loader, Text, Stack, Alert } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { supabase } from '../../../../lib/supabaseClient';
+import { apiFetch } from '../../../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const AUTH_STORAGE_KEY = 'padly_auth';
 const USER_STORAGE_KEY = 'padly_user';
 
@@ -53,9 +53,7 @@ export default function AuthCallbackPage() {
 
         // Fetch / upsert the user profile from FastAPI.
         // /me auto-creates public.users + solo group for brand-new Google users.
-        const meResponse = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${access_token}` },
-        });
+        const meResponse = await apiFetch(`/auth/me`, {}, { token: access_token });
 
         const meRaw = await meResponse.text();
         let meData;

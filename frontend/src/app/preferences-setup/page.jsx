@@ -31,8 +31,8 @@ import {
 } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { GENDER_IDENTITY_OPTIONS, normalizeGenderIdentity } from '../../../lib/genderIdentity';
+import { apiFetch } from '../../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
 
 function formatPrice(val) {
@@ -160,7 +160,7 @@ export default function PreferencesSetupPage() {
 
   // Load countries on mount
   useEffect(() => {
-    fetch(`${API_BASE}/api/options/countries`)
+    apiFetch(`/options/countries`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setCountryOptions(d.data || []))
       .catch(() => {});
@@ -175,7 +175,7 @@ export default function PreferencesSetupPage() {
     setStateSearch('');
     if (!targetCountry) return;
 
-    fetch(`${API_BASE}/api/options/states?country_code=${encodeURIComponent(targetCountry)}`)
+    apiFetch(`/options/states?country_code=${encodeURIComponent(targetCountry)}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setStateOptions(d.data || []))
       .catch(() => {});
@@ -190,8 +190,8 @@ export default function PreferencesSetupPage() {
   // Load city options
   useEffect(() => {
     if (!targetCountry || !targetState) return;
-    fetch(
-      `${API_BASE}/api/options/cities?country_code=${encodeURIComponent(targetCountry)}&state_code=${encodeURIComponent(targetState)}&q=${encodeURIComponent(citySearch)}&limit=250`
+    apiFetch(
+      `/options/cities?country_code=${encodeURIComponent(targetCountry)}&state_code=${encodeURIComponent(targetState)}&q=${encodeURIComponent(citySearch)}&limit=250`
     )
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setCityOptions(d.data || []))
@@ -208,8 +208,8 @@ export default function PreferencesSetupPage() {
     }
 
     setLoadingPrices(true);
-    fetch(
-      `${API_BASE}/api/listings/price-histogram?city=${encodeURIComponent(targetCity)}&status=active&bins=${NUM_HISTOGRAM_BINS}`
+    apiFetch(
+      `/listings/price-histogram?city=${encodeURIComponent(targetCity)}&status=active&bins=${NUM_HISTOGRAM_BINS}`
     )
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -273,9 +273,7 @@ export default function PreferencesSetupPage() {
       const token = await getValidToken();
       if (!token) throw new Error('Not authenticated');
 
-      const meRes = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const meRes = await apiFetch(`/auth/me`, {}, { token });
       const meData = await meRes.json();
       if (!meRes.ok) throw new Error(meData.detail || 'Failed to get user info');
       const userId = meData.user?.profile?.id;
@@ -306,11 +304,15 @@ export default function PreferencesSetupPage() {
       body.furnished_preference = furnishedPref;
       body.gender_policy = genderPolicy;
 
-      const res = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
+      const res = await apiFetch(
+        `/preferences/${userId}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        { token }
+      );
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to save preferences');

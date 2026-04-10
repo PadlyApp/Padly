@@ -1,6 +1,5 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const DISCOVER_FEEDBACK_SWIPE_THRESHOLD = 10;
 const DISCOVER_PROGRESS_TTL_MS = 30 * 60 * 1000;
 
@@ -31,6 +30,7 @@ import {
   createRecommendationClientSessionId,
   createRecommendationEventId,
 } from '../../../lib/recommendationFeedback';
+import { apiFetch } from '../../../lib/api';
 import { GROUPS_FEATURE_ENABLED } from '../../../lib/featureFlags';
 
 import { getLikedListings, saveLikedListing } from './likedListings';
@@ -163,9 +163,7 @@ function DiscoverContent() {
     queryFn: async () => {
       const token = await getValidToken();
       if (!token) return null;
-      const res = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`/preferences/${userId}`, {}, { token });
       if (!res.ok) return null;
       const d = await res.json();
       return d.data || d || null;
@@ -317,15 +315,16 @@ function DiscoverContent() {
     if (!authState?.accessToken || !feedbackSessionId) return null;
 
     try {
-      const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions/${feedbackSessionId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+      const response = await apiFetch(
+        `/interactions/recommendation-sessions/${feedbackSessionId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          keepalive,
         },
-        body: JSON.stringify(payload),
-        keepalive,
-      });
+        { token: authState.accessToken }
+      );
 
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to update discover recommendation session');
@@ -357,24 +356,25 @@ function DiscoverContent() {
     if (!authState?.accessToken || !feedbackSessionId) return null;
 
     try {
-      const response = await fetch(`${API_BASE}/api/interactions/recommendation-events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+      const response = await apiFetch(
+        `/interactions/recommendation-events`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recommendation_session_id: feedbackSessionId,
+            client_event_id: createRecommendationEventId(eventType),
+            surface: 'discover',
+            event_type: eventType,
+            listing_id: listingId,
+            position_in_feed: positionInFeed,
+            dwell_ms: dwellMs,
+            metadata,
+          }),
+          keepalive,
         },
-        body: JSON.stringify({
-          recommendation_session_id: feedbackSessionId,
-          client_event_id: createRecommendationEventId(eventType),
-          surface: 'discover',
-          event_type: eventType,
-          listing_id: listingId,
-          position_in_feed: positionInFeed,
-          dwell_ms: dwellMs,
-          metadata,
-        }),
-        keepalive,
-      });
+        { token: authState.accessToken }
+      );
 
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to persist discover recommendation event');
@@ -406,7 +406,7 @@ function DiscoverContent() {
         offset: 0,
       };
       activeFilterBodyRef.current = body;
-      const res = await fetch(`${API_BASE}/api/recommendations`, {
+      const res = await apiFetch(`/recommendations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -430,9 +430,7 @@ function DiscoverContent() {
     let hasCorePreferences = false;
     const swipedIds = new Set();
 
-    const prefRes = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const prefRes = await apiFetch(`/preferences/${userId}`, {}, { token });
     if (prefRes.ok) {
       const prefData = await prefRes.json();
       prefs = prefData.data || prefData || {};
@@ -444,9 +442,7 @@ function DiscoverContent() {
     }
 
     try {
-      const swipesRes = await fetch(`${API_BASE}/api/interactions/swipes/me?limit=500`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const swipesRes = await apiFetch(`/interactions/swipes/me?limit=500`, {}, { token });
       if (swipesRes.ok) {
         const swipesPayload = await swipesRes.json();
         for (const event of swipesPayload?.data || []) {
@@ -462,9 +458,7 @@ function DiscoverContent() {
     let behaviorSampleSize;
 
     try {
-      const behaviorRes = await fetch(`${API_BASE}/api/interactions/behavior/me?days=180`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const behaviorRes = await apiFetch(`/interactions/behavior/me?days=180`, {}, { token });
       if (behaviorRes.ok) {
         const behaviorPayload = await behaviorRes.json();
         const behavior = behaviorPayload?.data || {};
@@ -519,14 +513,15 @@ function DiscoverContent() {
     // Cache the filter body so swipe-context events can reference it.
     activeFilterBodyRef.current = body;
 
-    const res = await fetch(`${API_BASE}/api/recommendations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    const res = await apiFetch(
+      `/recommendations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+      { token }
+    );
 
     if (!res.ok) {
       const apiError = await parseApiErrorResponse(res, 'Failed to fetch recommendations');
@@ -546,16 +541,20 @@ function DiscoverContent() {
     );
 
     // Fire search query event — best-effort.
-    void fetch(`${API_BASE}/api/interactions/search-queries`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        session_id: getOrCreateSwipeSessionId(),
-        filter_snapshot: body,
-        results_returned: (data.recommendations || []).length,
-        offset,
-      }),
-    }).catch(() => {});
+    void apiFetch(
+      `/interactions/search-queries`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: getOrCreateSwipeSessionId(),
+          filter_snapshot: body,
+          results_returned: (data.recommendations || []).length,
+          offset,
+        }),
+      },
+      { token }
+    ).catch(() => {});
 
     return {
       listings: fresh,
@@ -724,14 +723,15 @@ function DiscoverContent() {
 
     const ensureRecommendationSession = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/interactions/recommendation-sessions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${authState.accessToken}`,
+        const response = await apiFetch(
+          `/interactions/recommendation-sessions`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildSessionPayload(listings, rankingContext)),
           },
-          body: JSON.stringify(buildSessionPayload(listings, rankingContext)),
-        });
+          { token: authState.accessToken }
+        );
 
         if (!response.ok && response.status !== 503) {
           console.warn('Failed to create discover recommendation session');
@@ -815,26 +815,27 @@ function DiscoverContent() {
 
       getToken().then((token) => {
         if (!token) return;
-        fetch(`${API_BASE}/api/interactions/recommendation-sessions/${sessionId}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+        apiFetch(
+          `/interactions/recommendation-sessions/${sessionId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mark_ended: true,
+              surface_dwell_ms: dwellMs,
+              likes_count: metrics.likesCount,
+              detail_opens_count: metrics.detailOpensCount,
+              recommendation_count_shown: recommendations.length,
+              top_listing_ids_shown: topListingIds,
+              algorithm_version: context?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
+              model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
+              experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'discover_ranker_v1' : null),
+              experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
+            }),
+            keepalive: true,
           },
-          body: JSON.stringify({
-            mark_ended: true,
-            surface_dwell_ms: dwellMs,
-            likes_count: metrics.likesCount,
-            detail_opens_count: metrics.detailOpensCount,
-            recommendation_count_shown: recommendations.length,
-            top_listing_ids_shown: topListingIds,
-            algorithm_version: context?.algorithm_version ?? DISCOVER_ALGORITHM_VERSION,
-            model_version: context?.model_version ?? (recommendations.some((listing) => listing?.ml_score != null) ? 'recommender-v1' : null),
-            experiment_name: context?.experiment_name ?? (recommendations.length > 0 ? 'discover_ranker_v1' : null),
-            experiment_variant: context?.experiment_variant ?? (recommendations.length > 0 ? (recommendations.some((listing) => listing?.ml_score != null) ? 'two_tower' : 'baseline') : null),
-          }),
-          keepalive: true,
-        }).catch(() => {});
+          { token }
+        ).catch(() => {});
       }).catch(() => {});
     };
   }, []);
@@ -867,27 +868,28 @@ function DiscoverContent() {
         : DISCOVER_ALGORITHM_VERSION;
 
     try {
-      const response = await fetch(`${API_BASE}/api/interactions/swipes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+      const response = await apiFetch(
+        `/interactions/swipes`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listing_id: listing.listing_id,
+            action,
+            surface: 'discover',
+            session_id: swipeSessionIdRef.current,
+            position_in_feed: position,
+            algorithm_version: algorithmVersion,
+            model_version: listing?.ml_score != null ? 'recommender-v1' : null,
+            city_filter: listing.city ?? null,
+            latency_ms:
+              startedAt != null && typeof performance !== 'undefined'
+                ? Math.max(0, Math.round(performance.now() - startedAt))
+                : undefined,
+          }),
         },
-        body: JSON.stringify({
-          listing_id: listing.listing_id,
-          action,
-          surface: 'discover',
-          session_id: swipeSessionIdRef.current,
-          position_in_feed: position,
-          algorithm_version: algorithmVersion,
-          model_version: listing?.ml_score != null ? 'recommender-v1' : null,
-          city_filter: listing.city ?? null,
-          latency_ms:
-            startedAt != null && typeof performance !== 'undefined'
-              ? Math.max(0, Math.round(performance.now() - startedAt))
-              : undefined,
-        }),
-      });
+        { token }
+      );
 
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to persist swipe interaction');
@@ -903,17 +905,21 @@ function DiscoverContent() {
       swipeSessionIdRef.current = getOrCreateSwipeSessionId();
     }
     try {
-      await fetch(`${API_BASE}/api/interactions/swipe-context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
-        body: JSON.stringify({
-          listing_id: listing.listing_id,
-          action,
-          session_id: swipeSessionIdRef.current,
-          active_filters_snapshot: activeFilterBodyRef.current || null,
-          device_context: collectDeviceContext(),
-        }),
-      });
+      await apiFetch(
+        `/interactions/swipe-context`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listing_id: listing.listing_id,
+            action,
+            session_id: swipeSessionIdRef.current,
+            active_filters_snapshot: activeFilterBodyRef.current || null,
+            device_context: collectDeviceContext(),
+          }),
+        },
+        { token: authState.accessToken }
+      );
     } catch {
       // Best-effort only.
     }
@@ -929,18 +935,22 @@ function DiscoverContent() {
         ? Math.max(0, Date.now() - cardViewStartRef.current)
         : null;
     try {
-      await fetch(`${API_BASE}/api/interactions/listing-views`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
-        body: JSON.stringify({
-          listing_id: listing.listing_id,
-          surface,
-          session_id: swipeSessionIdRef.current,
-          view_duration_ms: duration_ms,
-          expanded: cardExpandedRef.current,
-          photos_viewed_count: cardPhotoCountRef.current,
-        }),
-      });
+      await apiFetch(
+        `/interactions/listing-views`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listing_id: listing.listing_id,
+            surface,
+            session_id: swipeSessionIdRef.current,
+            view_duration_ms: duration_ms,
+            expanded: cardExpandedRef.current,
+            photos_viewed_count: cardPhotoCountRef.current,
+          }),
+        },
+        { token: authState.accessToken }
+      );
     } catch {
       // Best-effort only.
     }
@@ -960,7 +970,7 @@ function DiscoverContent() {
     try {
       let localPrefs = {};
       try { localPrefs = JSON.parse(sessionStorage.getItem('guest_preferences') || '{}'); } catch {}
-      void fetch(`${API_BASE}/api/interactions/guest-events`, {
+      void apiFetch(`/interactions/guest-events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1121,18 +1131,19 @@ function DiscoverContent() {
         experiment_variant: rankingContext?.experiment_variant ?? null,
       });
 
-      const response = await fetch(`${API_BASE}/api/interactions/recommendation-feedback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+      const response = await apiFetch(
+        `/interactions/recommendation-feedback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recommendation_session_id: feedbackSessionId,
+            feedback_label: feedbackLabel,
+            reason_label: reasonLabel,
+          }),
         },
-        body: JSON.stringify({
-          recommendation_session_id: feedbackSessionId,
-          feedback_label: feedbackLabel,
-          reason_label: reasonLabel,
-        }),
-      });
+        { token: authState.accessToken }
+      );
 
       if (!response.ok && response.status !== 503) {
         console.warn('Failed to submit discover recommendation feedback');

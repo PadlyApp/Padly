@@ -1,6 +1,4 @@
-﻿'use client';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+'use client';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -39,7 +37,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { InvitationsPanel } from '../components/InvitationsPanel';
-import { api } from '../../../lib/api';
+import { api, apiFetch } from '../../../lib/api';
 
 // --- People tab helpers (copied from roommates/page.jsx) ---
 
@@ -362,9 +360,10 @@ function GroupsPageContent() {
     if (!authState?.accessToken) return;
     try {
       const city = searchCity || 'San Francisco';
-      const response = await fetch(
-        `${API_BASE}/api/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
-        { headers: { 'Authorization': `Bearer ${authState.accessToken}` } }
+      const response = await apiFetch(
+        `/matches/groups?city=${encodeURIComponent(city)}&min_score=30&limit=50`,
+        {},
+        { token: authState.accessToken }
       );
       const data = await response.json();
       if (response.ok && data.status === 'success') {
@@ -380,14 +379,7 @@ function GroupsPageContent() {
 
     try {
       // Fetch user's pending join requests
-      const pendingResponse = await fetch(
-        `${API_BASE}/api/roommate-groups/my-pending-requests`,
-        {
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`
-          }
-        }
-      );
+      const pendingResponse = await apiFetch(`/roommate-groups/my-pending-requests`, {}, { token: authState.accessToken });
       const pendingData = await pendingResponse.json();
 
       if (pendingResponse.ok && pendingData.status === 'success') {
@@ -396,14 +388,7 @@ function GroupsPageContent() {
       }
 
       // Fetch user's accepted memberships
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups?my_groups=true`,
-        {
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups?my_groups=true`, {}, { token: authState.accessToken });
       const data = await response.json();
 
       if (data.status === 'success') {
@@ -431,25 +416,19 @@ function GroupsPageContent() {
   const fetchGroups = async () => {
     try {
       setLoading(true);
-      let url = `${API_BASE}/api/roommate-groups?status=${statusFilter}`;
+      let path = `/roommate-groups?status=${statusFilter}`;
 
       if (activeTab === 'my-groups' && user) {
-        url += '&my_groups=true';
+        path += '&my_groups=true';
       }
 
       if (searchCity) {
-        url += `&city=${encodeURIComponent(searchCity)}`;
+        path += `&city=${encodeURIComponent(searchCity)}`;
       }
 
-      // Get token from authState
-      const headers = {};
-      if (authState?.accessToken) {
-        headers['Authorization'] = `Bearer ${authState.accessToken}`;
-      }
+      console.log('Fetching groups:', { path, hasToken: !!authState?.accessToken, activeTab, user: user?.id });
 
-      console.log('Fetching groups:', { url, hasToken: !!authState?.accessToken, activeTab, user: user?.id });
-
-      const response = await fetch(url, { headers });
+      const response = await apiFetch(path, {}, { token: authState?.accessToken });
       const data = await response.json();
 
       console.log('Groups response:', { status: data.status, count: data.count, groupsLength: data.data?.length });
@@ -490,15 +469,7 @@ function GroupsPageContent() {
     setJoiningGroupId(groupId);
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/request-join`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`
-          }
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/request-join`, { method: 'POST' }, { token: authState.accessToken });
 
       const data = await response.json();
 

@@ -23,8 +23,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
 import { parseApiErrorResponse } from '../../../lib/errorHandling';
 import { GENDER_IDENTITY_OPTIONS, normalizeGenderIdentity } from '../../../lib/genderIdentity';
+import { apiFetch } from '../../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const NUM_HISTOGRAM_BINS = 30;
 const PREFS_SHADOW_TTL_MS = 60 * 1000;
 const PREFERENCE_PAYLOAD_KEYS = [
@@ -260,9 +260,7 @@ export function PreferencesForm() {
   const { data: savedPrefs, isLoading: prefsLoading } = useQuery({
     queryKey: ['preferences', userId],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-        headers: { Authorization: `Bearer ${authState.accessToken}`, 'Content-Type': 'application/json' },
-      });
+      const res = await apiFetch(`/preferences/${userId}`, {}, { token: authState.accessToken });
       if (!res.ok) throw new Error('Failed to load preferences');
       return (await res.json()).data || {};
     },
@@ -326,7 +324,7 @@ export function PreferencesForm() {
   // ── Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/options/countries`)
+    apiFetch(`/options/countries`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => d && setCountryOptions(d.data || []))
       .catch(() => {});
@@ -343,7 +341,7 @@ export function PreferencesForm() {
     const controller = new AbortController();
     setLoadingStates(true);
 
-    fetch(`${API_BASE}/api/options/states?country_code=${encodeURIComponent(country)}`, { signal: controller.signal })
+    apiFetch(`/options/states?country_code=${encodeURIComponent(country)}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
         if (!d) return;
@@ -378,8 +376,8 @@ export function PreferencesForm() {
     const controller = new AbortController();
     setLoadingCities(true);
 
-    fetch(
-      `${API_BASE}/api/options/cities?country_code=${encodeURIComponent(target_country)}&state_code=${encodeURIComponent(target_state_province)}&q=${encodeURIComponent(citySearch)}&limit=250`,
+    apiFetch(
+      `/options/cities?country_code=${encodeURIComponent(target_country)}&state_code=${encodeURIComponent(target_state_province)}&q=${encodeURIComponent(citySearch)}&limit=250`,
       { signal: controller.signal }
     )
       .then((r) => r.ok ? r.json() : null)
@@ -414,8 +412,8 @@ export function PreferencesForm() {
       return;
     }
     setLoadingPrices(true);
-    fetch(
-      `${API_BASE}/api/listings/price-histogram?city=${encodeURIComponent(city)}&status=active&bins=${NUM_HISTOGRAM_BINS}`
+    apiFetch(
+      `/listings/price-histogram?city=${encodeURIComponent(city)}&status=active&bins=${NUM_HISTOGRAM_BINS}`
     )
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -491,11 +489,15 @@ export function PreferencesForm() {
           : prefs.move_in_date,
       };
 
-      const response = await fetch(`${API_BASE}/api/preferences/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authState.accessToken}` },
-        body: JSON.stringify(payload),
-      });
+      const response = await apiFetch(
+        `/preferences/${userId}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        { token: authState.accessToken }
+      );
 
       if (!response.ok) {
         const parsedError = await parseApiErrorResponse(response, 'Failed to save preferences');
