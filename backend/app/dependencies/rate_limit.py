@@ -101,10 +101,12 @@ async def recommendations_rate_limit(
     """
     Rate limit for the recommendations endpoint — applies to ALL callers.
 
-    Guests:        3 req/min — low because they have no persistent state.
-    Authenticated: 5 req/min — the frontend caches results in localStorage
-                   for 5 min, so legitimate users rarely exceed 1 req/min.
-                   The lower limit prevents pipeline abuse even with auth.
+    Guests:        10 req/min — reasonable for unauthenticated browsing.
+    Authenticated: 20 req/min — covers normal multi-page browsing patterns
+                   (Discover has staleTime=0 so every mount fires a request;
+                   Matches caches for 5 min in localStorage so contributes
+                   far less). 20 is well above legitimate use while still
+                   blocking deliberate pipeline hammering.
     """
     ip = _get_client_ip(request)
     now = time.monotonic()
