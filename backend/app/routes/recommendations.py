@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from app.ai.recommender import score_listings
 from app.services.listing_payloads import hydrate_listing_image_collection
 from app.services.location_matching import filter_listings_for_location
-from app.dependencies.auth import require_user_token
+from app.dependencies.auth import get_user_token
 from app.dependencies.rate_limit import recommendations_rate_limit
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
@@ -130,7 +130,7 @@ class RecommendationsResponse(BaseModel):
 async def get_recommendations(
     preferences: UserPreferences,
     _: None = Depends(recommendations_rate_limit),
-    token: str = Depends(require_user_token),
+    token: Optional[str] = Depends(get_user_token),
 ):
     """
     Get ranked listing recommendations for a user.
