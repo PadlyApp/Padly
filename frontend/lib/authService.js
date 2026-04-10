@@ -4,14 +4,13 @@ import {
   normalizeAuthErrorMessage,
   parseApiErrorResponse,
 } from './errorHandling';
+import { apiUrl } from './api';
 import { supabase } from './supabaseClient';
 
 export class AuthService {
-  static API_BASE = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth`;
-
   static async signup(email, password, fullName) {
     try {
-      const response = await fetch(`${this.API_BASE}/signup`, {
+      const response = await fetch(apiUrl('/auth/signup'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -55,7 +54,7 @@ export class AuthService {
 
   static async signin(email, password) {
     try {
-      const response = await fetch(`${this.API_BASE}/signin`, {
+      const response = await fetch(apiUrl('/auth/signin'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -86,7 +85,7 @@ export class AuthService {
 
   static async signout(token) {
     try {
-      const response = await fetch(`${this.API_BASE}/signout`, {
+      const response = await fetch(apiUrl('/auth/signout'), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -110,7 +109,7 @@ export class AuthService {
 
   static async getCurrentUser(token) {
     try {
-      const response = await fetch(`${this.API_BASE}/me`, {
+      const response = await fetch(apiUrl('/auth/me'), {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -142,7 +141,7 @@ export class AuthService {
 
   static async refreshToken(refreshToken) {
     try {
-      const response = await fetch(`${this.API_BASE}/refresh`, {
+      const response = await fetch(apiUrl('/auth/refresh'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

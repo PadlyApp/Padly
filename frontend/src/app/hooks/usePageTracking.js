@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { apiFetch } from '../../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SESSION_KEY = 'padly_swipe_session_id';
 
 function getSessionId() {
@@ -54,15 +54,16 @@ export function usePageTracking(pageName, token, referrer = null) {
 
       // keepalive: true lets the fetch outlive the component unmount.
       // We use fetch (not sendBeacon) because sendBeacon can't carry Authorization headers.
-      fetch(`${API_BASE}/api/interactions/page-views`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+      apiFetch(
+        `/interactions/page-views`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
         },
-        body: payload,
-        keepalive: true,
-      }).catch(() => {
+        { token }
+      ).catch(() => {
         // Best-effort only — swallow silently.
       });
     };

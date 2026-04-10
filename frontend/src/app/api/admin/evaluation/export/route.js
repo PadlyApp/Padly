@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { apiUrl } from '../../../../../../lib/api';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +9,7 @@ export async function GET(request) {
     return NextResponse.json({ detail: 'Authorization required' }, { status: 401 });
   }
 
-  const upstreamUrl = new URL(`${API_BASE}/api/admin/evaluation/export/authenticated`);
+  const upstreamUrl = new URL(apiUrl('/admin/evaluation/export/authenticated'));
   const incomingParams = new URL(request.url).searchParams;
   incomingParams.forEach((value, key) => {
     upstreamUrl.searchParams.set(key, value);

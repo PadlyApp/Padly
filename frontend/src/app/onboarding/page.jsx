@@ -1,6 +1,4 @@
-﻿'use client';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -25,6 +23,7 @@ import { notifications } from '@mantine/notifications';
 import { IconUser, IconBriefcase, IconSchool, IconCheck, IconHome, IconSearch } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { usePadlyTour } from '../contexts/TourContext';
+import { apiFetch } from '../../../lib/api';
 
 export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -46,9 +45,9 @@ export default function OnboardingPage() {
     const loadOptions = async () => {
       try {
         const [companiesRes, schoolsRes, rolesRes] = await Promise.all([
-          fetch(`${API_BASE}/api/options/companies?limit=500`),
-          fetch(`${API_BASE}/api/options/schools?limit=500`),
-          fetch(`${API_BASE}/api/options/roles`),
+          apiFetch(`/options/companies?limit=500`),
+          apiFetch(`/options/schools?limit=500`),
+          apiFetch(`/options/roles`),
         ]);
 
         if (companiesRes.ok) {
@@ -97,14 +96,7 @@ export default function OnboardingPage() {
       console.log('Got valid token');
 
       // Get the user profile ID from the users table (not auth_id)
-      const userResponse = await fetch(
-        `${API_BASE}/api/auth/me`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
+      const userResponse = await apiFetch(`/auth/me`, {}, { token });
       
       const userData = await userResponse.json();
       console.log('User data from /me:', userData);
@@ -133,16 +125,14 @@ export default function OnboardingPage() {
       console.log('Sending update data:', updateData);
 
       // Update user profile
-      const response = await fetch(
-        `${API_BASE}/api/users/${userId}`,
+      const response = await apiFetch(
+        `/users/${userId}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(updateData)
-        }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData),
+        },
+        { token }
       );
 
       const data = await response.json();

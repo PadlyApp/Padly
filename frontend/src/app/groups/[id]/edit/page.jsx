@@ -1,7 +1,5 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { 
@@ -26,6 +24,7 @@ import { IconArrowLeft, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { Navigation } from '../../../components/Navigation';
 import { ProtectedRoute } from '../../../components/ProtectedRoute';
+import { apiFetch } from '../../../../../lib/api';
 
 export default function EditGroupPage() {
   const router = useRouter();
@@ -54,9 +53,7 @@ export default function EditGroupPage() {
     const loadCities = async () => {
       try {
         const query = citySearch.trim();
-        const response = await fetch(
-          `${API_BASE}/api/options/cities-global?q=${encodeURIComponent(query)}&limit=200`
-        );
+        const response = await apiFetch(`/options/cities-global?q=${encodeURIComponent(query)}&limit=200`);
         if (!response.ok) return;
         const result = await response.json();
         setCityOptions(result.data || []);
@@ -73,14 +70,7 @@ export default function EditGroupPage() {
       if (!groupId) return;
       
       try {
-        const headers = {};
-        if (authState?.accessToken) {
-          headers['Authorization'] = `Bearer ${authState.accessToken}`;
-        }
-        
-        const response = await fetch(`${API_BASE}/api/roommate-groups/${groupId}`, {
-          headers
-        });
+        const response = await apiFetch(`/roommate-groups/${groupId}`, {}, { token: authState?.accessToken });
         
         const data = await response.json();
         
@@ -168,22 +158,23 @@ export default function EditGroupPage() {
         return;
       }
 
-      const response = await fetch(`${API_BASE}/api/roommate-groups/${groupId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      const response = await apiFetch(
+        `/roommate-groups/${groupId}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            group_name: groupName,
+            description: description || null,
+            target_city: targetCity,
+            budget_per_person_min: budgetMin,
+            budget_per_person_max: budgetMax,
+            target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
+            target_group_size: isSolo ? groupSize : (hasGroupSizeLimit ? groupSize : null),
+          }),
         },
-        body: JSON.stringify({
-          group_name: groupName,
-          description: description || null,
-          target_city: targetCity,
-          budget_per_person_min: budgetMin,
-          budget_per_person_max: budgetMax,
-          target_move_in_date: moveInDate ? moveInDate.toISOString().split('T')[0] : null,
-          target_group_size: isSolo ? groupSize : (hasGroupSizeLimit ? groupSize : null)
-        })
-      });
+        { token }
+      );
 
       const data = await response.json();
 

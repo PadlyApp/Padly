@@ -10,15 +10,13 @@ import { Navigation } from '../../components/Navigation';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
-import { api } from '../../../../lib/api';
+import { api, apiFetch } from '../../../../lib/api';
 import { getErrorMessage } from '../../../../lib/errorHandling';
 import { formatAmenityLabel, getActiveAmenityKeys } from '../../../../lib/formatters';
 import { usePageTracking } from '../../hooks/usePageTracking';
 import { createRecommendationEventId } from '../../../../lib/recommendationFeedback';
 import { notifications } from '@mantine/notifications';
 import Link from 'next/link';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 /** Format a raw enum/slug value like "entire_place" → "Entire Place". */
 function formatEnum(val) {
@@ -89,45 +87,47 @@ export default function ListingDetailPage() {
     return () => {
       const dwellMs = Math.max(0, Date.now() - viewStartRef.current);
 
-      fetch(`${API_BASE}/api/interactions/listing-views`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+      apiFetch(
+        `/interactions/listing-views`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            listing_id: listingId,
+            surface: 'listing_detail',
+            session_id: genericSessionId,
+            view_duration_ms: dwellMs,
+            expanded: false,
+            photos_viewed_count: 0,
+          }),
+          keepalive: true,
         },
-        body: JSON.stringify({
-          listing_id: listingId,
-          surface: 'listing_detail',
-          session_id: genericSessionId,
-          view_duration_ms: dwellMs,
-          expanded: false,
-          photos_viewed_count: 0,
-        }),
-        keepalive: true,
-      }).catch(() => {});
+        { token: authState.accessToken }
+      ).catch(() => {});
 
       if (!shouldTrackPassiveDwell) return;
 
-      fetch(`${API_BASE}/api/interactions/recommendation-events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authState.accessToken}`,
+      apiFetch(
+        `/interactions/recommendation-events`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recommendation_session_id: recommendationSessionId,
+            client_event_id: createRecommendationEventId('detail-view'),
+            surface: 'matches',
+            event_type: 'detail_view',
+            listing_id: listingId,
+            position_in_feed: positionInFeed,
+            dwell_ms: dwellMs,
+            metadata: {
+              source: 'listing_detail_page',
+            },
+          }),
+          keepalive: true,
         },
-        body: JSON.stringify({
-          recommendation_session_id: recommendationSessionId,
-          client_event_id: createRecommendationEventId('detail-view'),
-          surface: 'matches',
-          event_type: 'detail_view',
-          listing_id: listingId,
-          position_in_feed: positionInFeed,
-          dwell_ms: dwellMs,
-          metadata: {
-            source: 'listing_detail_page',
-          },
-        }),
-        keepalive: true,
-      }).catch(() => {});
+        { token: authState.accessToken }
+      ).catch(() => {});
     };
   }, [authState?.accessToken, listingId, positionInFeed, recommendationSessionId, recommendationSource]);
 
@@ -212,24 +212,25 @@ export default function ListingDetailPage() {
       }
 
       if (recommendationSessionId && recommendationSurface) {
-        fetch(`${API_BASE}/api/interactions/recommendation-events`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+        apiFetch(
+          `/interactions/recommendation-events`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recommendation_session_id: recommendationSessionId,
+              client_event_id: createRecommendationEventId(nextInterested ? 'save' : 'unsave'),
+              surface: recommendationSurface,
+              event_type: nextInterested ? 'save' : 'unsave',
+              listing_id: listingId,
+              position_in_feed: positionInFeed,
+              metadata: {
+                source: 'listing_detail_interest_toggle',
+              },
+            }),
           },
-          body: JSON.stringify({
-            recommendation_session_id: recommendationSessionId,
-            client_event_id: createRecommendationEventId(nextInterested ? 'save' : 'unsave'),
-            surface: recommendationSurface,
-            event_type: nextInterested ? 'save' : 'unsave',
-            listing_id: listingId,
-            position_in_feed: positionInFeed,
-            metadata: {
-              source: 'listing_detail_interest_toggle',
-            },
-          }),
-        }).catch(() => {});
+          { token }
+        ).catch(() => {});
       }
 
       await queryClient.invalidateQueries({ queryKey: ['interested-listings'] });

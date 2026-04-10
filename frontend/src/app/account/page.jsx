@@ -1,7 +1,5 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
@@ -47,7 +45,7 @@ import { PreferencesForm } from '../components/PreferencesForm';
 import { ImageWithFallback } from '../components/ImageWithFallback';
 import { SkeletonAccountProfile, SkeletonListingCard } from '../components/Skeletons';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../../../lib/api';
+import { api, apiFetch } from '../../../lib/api';
 
 const INTERESTED_LISTING_FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080';
 
@@ -396,9 +394,7 @@ function ProfilePanel() {
     queryKey: ['me'],
     queryFn: async () => {
       const token = await getValidToken();
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`/auth/me`, {}, { token });
       return res.json();
     },
     enabled: !!authState?.accessToken,
@@ -436,9 +432,9 @@ function ProfilePanel() {
     queryKey: ['profile-options'],
     queryFn: async () => {
       const [c, s, r] = await Promise.all([
-        fetch(`${API_BASE}/api/options/companies?limit=500`).then((res) => res.json()),
-        fetch(`${API_BASE}/api/options/schools?limit=500`).then((res) => res.json()),
-        fetch(`${API_BASE}/api/options/roles`).then((res) => res.json()),
+        apiFetch(`/options/companies?limit=500`).then((res) => res.json()),
+        apiFetch(`/options/schools?limit=500`).then((res) => res.json()),
+        apiFetch(`/options/roles`).then((res) => res.json()),
       ]);
       return {
         companies: c.data || [],
@@ -484,14 +480,15 @@ function ProfilePanel() {
         role_title: userData.role_title || null,
       };
 
-      const response = await fetch(`${API_BASE}/api/users/${userData.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+      const response = await apiFetch(
+        `/users/${userData.id}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateData),
         },
-        body: JSON.stringify(updateData),
-      });
+        { token }
+      );
 
       const data = await response.json();
 

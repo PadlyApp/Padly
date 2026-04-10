@@ -1,7 +1,5 @@
 'use client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -28,6 +26,7 @@ import {
   IconCurrencyDollar,
   IconCalendar,
 } from '@tabler/icons-react';
+import { apiFetch } from '../../../lib/api';
 
 export function InvitationsPanel({ user, authState, onBrowseGroups }) {
   const router = useRouter();
@@ -45,15 +44,7 @@ export function InvitationsPanel({ user, authState, onBrowseGroups }) {
     try {
       setLoading(true);
 
-      const headers = {};
-      if (authState?.accessToken) {
-        headers['Authorization'] = `Bearer ${authState.accessToken}`;
-      }
-
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups?my_groups=true`,
-        { headers }
-      );
+      const response = await apiFetch(`/roommate-groups?my_groups=true`, {}, { token: authState?.accessToken });
 
       const data = await response.json();
 
@@ -62,9 +53,10 @@ export function InvitationsPanel({ user, authState, onBrowseGroups }) {
         const pendingInvites = [];
 
         for (const group of allGroups) {
-          const memberResponse = await fetch(
-            `${API_BASE}/api/roommate-groups/${group.id}/members`,
-            { headers }
+          const memberResponse = await apiFetch(
+            `/roommate-groups/${group.id}/members`,
+            {},
+            { token: authState?.accessToken }
           );
           const memberData = await memberResponse.json();
 
@@ -96,15 +88,7 @@ export function InvitationsPanel({ user, authState, onBrowseGroups }) {
   const handleAccept = async (groupId) => {
     setProcessingId(groupId);
     try {
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/join`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`,
-          },
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/join`, { method: 'POST' }, { token: authState.accessToken });
 
       const data = await response.json();
 
@@ -134,15 +118,7 @@ export function InvitationsPanel({ user, authState, onBrowseGroups }) {
   const handleReject = async (groupId) => {
     setProcessingId(groupId);
     try {
-      const response = await fetch(
-        `${API_BASE}/api/roommate-groups/${groupId}/reject`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authState.accessToken}`,
-          },
-        }
-      );
+      const response = await apiFetch(`/roommate-groups/${groupId}/reject`, { method: 'POST' }, { token: authState.accessToken });
 
       const data = await response.json();
 
