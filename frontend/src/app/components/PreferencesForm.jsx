@@ -545,6 +545,16 @@ export function PreferencesForm() {
       queryClient.invalidateQueries({ queryKey: ['discover-feed', userId], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['matches-feed', userId], refetchType: 'all' });
 
+      // Signal to the Matches page that preferences changed so it can offer a
+      // "Reload Matches" button without forcing an immediate re-fetch.
+      if (typeof window !== 'undefined' && userId) {
+        try {
+          localStorage.setItem(`padly_matches_stale_at_${userId}`, String(Date.now()));
+        } catch {
+          // Ignore storage errors.
+        }
+      }
+
       if (locationChanged && typeof window !== 'undefined') {
         try {
           sessionStorage.removeItem(`padly_discover_progress:${userId}`);

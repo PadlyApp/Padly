@@ -12,7 +12,7 @@ import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react
 import { useQuery } from '@tanstack/react-query';
 import { Container, Title, Text, Grid, Card, Badge, Button, Stack, Box, ThemeIcon, Group } from '@mantine/core';
 import { SkeletonListingCard } from '../components/Skeletons';
-import { IconSparkles, IconMapPin } from '@tabler/icons-react';
+import { IconSparkles, IconMapPin, IconRefresh } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { Navigation } from '../components/Navigation';
 import { ProtectedRoute } from '../components/ProtectedRoute';
@@ -103,6 +103,8 @@ function MatchesPageContent() {
   const [feedbackAcknowledged, setFeedbackAcknowledged] = useState(false);
   // Countdown seconds remaining before the user can manually retry after an error.
   const [retrySecondsLeft, setRetrySecondsLeft] = useState(0);
+  // True when preferences or discover likes have changed since the last fetch.
+  const [hasStaleChanges, setHasStaleChanges] = useState(false);
   // Tracks the last feedData object seen so we only sync on a genuine new result
   const prevFeedDataRef = useRef(null);
 
@@ -428,6 +430,51 @@ function MatchesPageContent() {
     refetchFeed();
   }, [refetchFeed]);
 
+  // Returns true when preferences or discover likes have changed since the
+  // last successful recommendations fetch for the current user + location.
+  const checkStaleChanges = useCallback(() => {
+    if (typeof window === 'undefined' || !userId || preferenceLocationKey === '||') return false;
+    try {
+      const staleAt = Number(localStorage.getItem(`padly_matches_stale_at_${userId}`) ?? 0);
+      if (!staleAt) return false;
+      const cacheRaw = localStorage.getItem(`padly_rec_${userId}_${preferenceLocationKey}`);
+      const lastFetchTs = cacheRaw ? (JSON.parse(cacheRaw)?.ts ?? 0) : 0;
+      return staleAt > lastFetchTs;
+    } catch {
+      return false;
+    }
+  }, [userId, preferenceLocationKey]);
+
+  // Check for stale changes on mount and whenever the user returns to the tab.
+  useEffect(() => {
+    setHasStaleChanges(checkStaleChanges());
+  }, [checkStaleChanges]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        setHasStaleChanges(checkStaleChanges());
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [checkStaleChanges]);
+
+  const handleReloadMatches = useCallback(() => {
+    // Clear the stale signal and the localStorage cache so fetchMatchesFeed
+    // hits the API instead of returning the cached result.
+    if (typeof window !== 'undefined' && userId) {
+      try {
+        localStorage.removeItem(`padly_matches_stale_at_${userId}`);
+        localStorage.removeItem(`padly_rec_${userId}_${preferenceLocationKey}`);
+      } catch {
+        // Ignore storage errors.
+      }
+    }
+    setHasStaleChanges(false);
+    refetchFeed();
+  }, [preferenceLocationKey, refetchFeed, userId]);
+
   useEffect(() => {
     latestTokenRef.current = getValidToken;
   }, [getValidToken]);
@@ -693,6 +740,17 @@ function MatchesPageContent() {
             <Text size="sm" c="teal.7">
               Thanks. Your feedback was saved for recommendation evaluation.
             </Text>
+          )}
+          {hasStaleChanges && !loading && (
+            <Button
+              variant="light"
+              color="teal"
+              size="sm"
+              leftSection={<IconRefresh size={15} />}
+              onClick={handleReloadMatches}
+            >
+              Your preferences or likes have changed — Reload Matches
+            </Button>
           )}
           {!loading && !error && listings.length > 0 && (
             <Text size="sm" c="dimmed">

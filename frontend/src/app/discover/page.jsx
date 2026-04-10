@@ -1053,6 +1053,15 @@ function DiscoverContent() {
     setSwipesInCycle(sessionMetricsRef.current.swipesCount);
     if (action === 'like') {
       sessionMetricsRef.current.likesCount += 1;
+      // Signal to the Matches page that behaviour has changed so it can offer
+      // a "Reload Matches" button the next time the user visits.
+      if (userId && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`padly_matches_stale_at_${userId}`, String(Date.now()));
+        } catch {
+          // Ignore storage errors.
+        }
+      }
     }
 
     setCurrentIndex((prev) => prev + 1);
