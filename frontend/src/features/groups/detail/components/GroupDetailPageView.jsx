@@ -55,7 +55,7 @@ import {
   IconHeart,
   IconBookmark,
 } from '@tabler/icons-react';
-import { Navigation } from '../../../app/components/Navigation';
+import { Navigation } from '../../../../app/components/Navigation';
 
 export function GroupDetailPageView(props) {
   const {
