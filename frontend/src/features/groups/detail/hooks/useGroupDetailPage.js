@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { notifications } from '@mantine/notifications';
 import { IconCheck } from '@tabler/icons-react';
-import { useAuth } from '../../../app/contexts/AuthContext';
-import { apiFetch } from '../../../../lib/api';
+import { useAuth } from '../../../../app/contexts/AuthContext';
+import { apiFetch } from '../../../../../lib/api';
 
 export function useGroupDetailPage() {
   const router = useRouter();
