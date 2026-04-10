@@ -135,16 +135,6 @@ export function GroupDetailPageView(props) {
     (m.user_email === activeUser.email || m.user_id === activeUser.id) && m.status === 'accepted'
   );
   
-  // Debug logging
-  console.log('User check:', { 
-    fullUser: activeUser,
-    userEmail: activeUser?.email, 
-    userId: activeUser?.id,
-    members: members.map(m => ({ email: m.user_email, id: m.user_id, status: m.status })),
-    isMember,
-    isCreator 
-  });
-  
   // Only count accepted members for display
   const acceptedMembers = members.filter(m => m.status === 'accepted');
   const acceptedMemberCount = acceptedMembers.length;

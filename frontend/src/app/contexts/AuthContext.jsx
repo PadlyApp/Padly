@@ -53,8 +53,6 @@ export function AuthProvider({ children }) {
                 await loadCurrentUser(parsedAuth.accessToken);
               }
             } else {
-              // No stored user, fetch from API
-              console.log('No stored user found, fetching from API...');
               await loadCurrentUser(parsedAuth.accessToken);
             }
           } else {

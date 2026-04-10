@@ -61,7 +61,6 @@ export default function CreateGroupPage() {
   }, [citySearch]);
 
   const handleSubmit = async (e) => {
-    console.log("we submitting baby")
     e.preventDefault();
 
     if (!user || !authState?.accessToken) {

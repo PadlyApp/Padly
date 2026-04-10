@@ -86,20 +86,17 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (values) => {
     setIsLoading(true);
-    console.log('Submitting onboarding form with values:', values);
 
     try {
       const token = await getValidToken();
       if (!token) {
         throw new Error('Please log in to complete your profile');
       }
-      console.log('Got valid token');
 
       // Get the user profile ID from the users table (not auth_id)
       const userResponse = await apiFetch(`/auth/me`, {}, { token });
       
       const userData = await userResponse.json();
-      console.log('User data from /me:', userData);
       
       if (!userResponse.ok) {
         throw new Error(userData.detail || 'Failed to get user info');
@@ -107,7 +104,6 @@ export default function OnboardingPage() {
 
       // Use the profile id from users table, not the auth id
       const userId = userData.user?.profile?.id;
-      console.log('User profile ID:', userId);
       
       if (!userId) {
         throw new Error('User profile ID not found. Please try logging out and back in.');
@@ -121,8 +117,6 @@ export default function OnboardingPage() {
       if (values.company_name && values.company_name.trim()) updateData.company_name = values.company_name.trim();
       if (values.school_name && values.school_name.trim()) updateData.school_name = values.school_name.trim();
       if (values.role_title && values.role_title.trim()) updateData.role_title = values.role_title.trim();
-      
-      console.log('Sending update data:', updateData);
 
       // Update user profile
       const response = await apiFetch(
@@ -136,7 +130,6 @@ export default function OnboardingPage() {
       );
 
       const data = await response.json();
-      console.log('Update response:', data);
 
       if (response.ok && data.status === 'success') {
         notifications.show({

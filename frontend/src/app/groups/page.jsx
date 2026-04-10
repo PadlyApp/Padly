@@ -400,12 +400,6 @@ function GroupsPageContent() {
         const nonSoloGroups = allGroups.filter(g => g.is_solo !== true);
         const memberGroupIds = new Set(nonSoloGroups.map(g => g.id));
 
-        console.log('User memberships:', {
-          allGroups: allGroups.map(g => ({ id: g.id, name: g.group_name, is_solo: g.is_solo })),
-          nonSoloGroups: nonSoloGroups.map(g => ({ id: g.id, name: g.group_name })),
-          userInAnyGroup: allGroups.length > 0
-        });
-
         setUserGroupIds(memberGroupIds);
       }
     } catch (error) {
@@ -426,12 +420,8 @@ function GroupsPageContent() {
         path += `&city=${encodeURIComponent(searchCity)}`;
       }
 
-      console.log('Fetching groups:', { path, hasToken: !!authState?.accessToken, activeTab, user: user?.id });
-
       const response = await apiFetch(path, {}, { token: authState?.accessToken });
       const data = await response.json();
-
-      console.log('Groups response:', { status: data.status, count: data.count, groupsLength: data.data?.length });
 
       if (data.status === 'success') {
         // For "All Groups" tab, filter out solo groups (they're personal)
